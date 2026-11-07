@@ -121,22 +121,6 @@ build.bat
 & "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /target:winexe /platform:x64 /optimize+ /out:"Argon_UltraLowLatency_v3.8.exe" /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll /r:System.Management.dll "src\ArgonLatencyStudio.cs"
 ```
 
----
-
-## 🚀 Pushing to Your GitHub Repository
-
-```bash
-cd c:\Users\mirac\Downloads\Argon-Latency-Studio
-git init
-git add .
-git commit -m "Initial commit: Argon Low Latency & TCP Optimizer Studio v3.8"
-git branch -M main
-git remote add origin https://github.com/<YOUR_USERNAME>/<YOUR_REPOSITORY_NAME>.git
-git push -u origin main
-```
-
----
-
 ## ⚠️ Safety & System Protection
 * **No Overclocking / Voltage Alterations:** All modifications are 100% within Windows API and driver specification limits.
 * **Zero System Bloating:** No background services or scheduled tasks are installed. Closing the application leaves only the user-selected registry settings active.
