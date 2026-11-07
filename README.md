@@ -5,9 +5,15 @@
 [![Sıfır-Bağımlılık](https://img.shields.io/badge/Ba%C4%9F%C4%B1ml%C4%B1l%C4%B1k-S%C4%B1f%C4%B1r%20(Saf%20Win32%20%26%20WinForms)-success)](#-derleme--kaynaktan-%C3%A7al%C4%B1%C5%9Ft%C4%B1rma)
 [![Lisans: MIT](https://img.shields.io/badge/Lisans-MIT-yellow.svg)](LICENSE)
 
-**Argon Latency Studio**, rekabetçi espor oyunları (CS2, Valorant, Apex Legends, Fortnite, League of Legends vb.) ve WebRTC / eşler arası (P2P) fizik motoruna sahip oyunlar (HaxBall vb.) için özel olarak tasarlanmış, **kademeli donanım duyarlı** gecikme düşürme ve kapsamlı bir **TCP Optimizer** yazılımıdır.
+**Argon Latency Studio**, rekabetçi espor oyunları  ve WebRTC / eşler arası (P2P) fizik motoruna sahip oyunlar (HaxBall vb.) için özel olarak tasarlanmış, **kademeli donanım duyarlı** gecikme düşürme ve kapsamlı bir **TCP Optimizer** yazılımıdır.
 
 Herhangi bir harici kütüphane veya paket olmadan (**sıfır bağımlılık**), doğrudan Windows Çekirdek ve Sistem API'leri (`ntdll.dll`, `powrprof.dll`, `user32.dll`, `kernel32.dll`, `dnsapi.dll`) ile saf C# dilinde geliştirilmiştir.
+Tüm ayarları açayım, bilgisayarım uçsun her şey 5000 fps olsun diye hayal kurmayın. Programın önceliği, düşük gecikme ve en stabil sistem tepkimesini yakalamaktır. 
+
+Doğru kullanım senaryosu: 
+
+Programı açtın -> İşine yarayan ayarları seçtin(Bazı ayarlar restart/oturum kapatma gerektirir. Yaptıysan->) -> Oyuna girdin -> Oynadın ve bitti -> Programa döndün -> Makine Varsayılanlarına Döndür ile oturumu sonlandırdın.
+
 
 ---
 
@@ -127,6 +133,8 @@ build.bat
 * **Hız Aşırtma / Voltaj Değişikliği Yok:** Yapılan tüm işlemler resmi Microsoft Windows API ve donanım üreticisi sürücü spesifikasyonları dahilindedir.
 * **Sıfır Sistem Şişmesi:** Sisteme herhangi bir arka plan servisi veya zamanlanmış görev kurulmaz. Uygulama kapatıldığında yalnızca seçtiğiniz kayıt defteri ayarları aktif kalır.
 * **%100 Geri Alınabilirlik:** İstediğiniz an **"Tümünü İlk Haline Döndür"** butonuna basarak tüm sistemi orijinal fabrika ayarlarına döndürebilirsiniz.
+* **Dışarıdan bir istek alma-gönderme yoktur. Güncelleme olursa buradan manual olarak güncellenecektir**
+* **Bazı antivirüs programları "!ML" (Machine learning) ve dwm.exe gibi kernel bileşenlerine müdehale edilebildiği için nadir de olsa bazı sistemlerde False Positive verebilir.**
 
 ---
 
