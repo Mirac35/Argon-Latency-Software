@@ -1,0 +1,17 @@
+# Visual Studio / .NET build artifacts
+bin/
+obj/
+*.exe
+*.pdb
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+.idea/
+.vscode/
+
+# User runtime state & logs
+*.log
+user_saved_profile.txt
+original_baseline_backup.txt
