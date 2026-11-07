@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -5773,10 +5773,23 @@ namespace ArgonLatencyStudio
             trayMenu.Items.Add(mnuExit);
             UpdateExitMenuText();
 
+            Icon appIcon = null;
+            try
+            {
+                string localIco = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "app.ico");
+                if (File.Exists(localIco))
+                    appIcon = new Icon(localIco);
+                else
+                    appIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+            }
+            catch { }
+            if (appIcon == null) appIcon = SystemIcons.Shield;
+            try { this.Icon = appIcon; } catch { }
+
             trayIcon = new NotifyIcon
             {
                 Text = "Argon Low Latency Studio v4.0",
-                Icon = SystemIcons.Shield,
+                Icon = appIcon,
                 ContextMenuStrip = trayMenu,
                 Visible = true
             };

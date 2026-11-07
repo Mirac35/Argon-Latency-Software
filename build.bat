@@ -13,10 +13,13 @@ if not exist "bin\Release" mkdir "bin\Release"
 if exist "lib\*.dll" (
     copy /Y "lib\*.dll" "bin\Release\" >nul
 )
+if exist "app.ico" (
+    copy /Y "app.ico" "bin\Release\" >nul
+)
 
 echo.
 echo Compiling src\ArgonLatencyStudio.cs to bin\Release\ArgonLatencyStudio.exe...
-%CSC% /target:winexe /optimize+ /platform:x64 /r:"lib\LibreHardwareMonitorLib.dll" /out:"bin\Release\ArgonLatencyStudio.exe" "src\ArgonLatencyStudio.cs"
+%CSC% /target:winexe /optimize+ /platform:x64 /win32icon:"app.ico" /r:"lib\LibreHardwareMonitorLib.dll" /out:"bin\Release\ArgonLatencyStudio.exe" "src\ArgonLatencyStudio.cs"
 
 if %ERRORLEVEL% NEQ 0 (
     echo.
