@@ -15,3 +15,4 @@ obj/
 *.log
 user_saved_profile.txt
 original_baseline_backup.txt
+*.zip

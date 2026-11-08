@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -44,7 +44,16 @@ namespace ArgonLatencyStudio
             };
             bool elevated = false;
             try { elevated = new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator); } catch { }
-            if (!elevated && Array.IndexOf(args, "--no-elevate") < 0)
+            bool isRenderMode = false;
+            for (int a = 0; a < args.Length; a++)
+            {
+                if (string.Equals(args[a], "--render-ui", StringComparison.OrdinalIgnoreCase))
+                {
+                    isRenderMode = true;
+                    break;
+                }
+            }
+            if (!elevated && Array.IndexOf(args, "--no-elevate") < 0 && !isRenderMode)
             {
                 try
                 {
@@ -64,6 +73,61 @@ namespace ArgonLatencyStudio
             try { SetProcessDPIAware(); } catch { }
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
+
+            if (isRenderMode)
+            {
+                string renderPath = null;
+                int renderTab = -1;
+                string renderLang = null;
+                for (int i = 0; i < args.Length; i++)
+                {
+                    if (string.Equals(args[i], "--render-ui", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+                    {
+                        renderPath = args[i + 1];
+                    }
+                    else if (string.Equals(args[i], "--tab", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+                    {
+                        int.TryParse(args[i + 1], out renderTab);
+                    }
+                    else if (string.Equals(args[i], "--lang", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+                    {
+                        renderLang = args[i + 1];
+                    }
+                }
+
+                if (!string.IsNullOrEmpty(renderPath))
+                {
+                    try
+                    {
+                        using (MainForm rForm = new MainForm(args))
+                        {
+                            if (!string.IsNullOrEmpty(renderLang))
+                            {
+                                rForm.ApplyLanguage(renderLang);
+                            }
+                            if (renderTab >= 0)
+                            {
+                                rForm.SwitchActiveTab(renderTab);
+                            }
+                            rForm.Size = new Size(1380, 890); // Native Default Medium Resolution
+                            rForm.Show();
+                            Application.DoEvents();
+                            using (Bitmap bmp = new Bitmap(rForm.Width, rForm.Height))
+                            {
+                                rForm.DrawToBitmap(bmp, new Rectangle(0, 0, rForm.Width, rForm.Height));
+                                bmp.Save(renderPath, System.Drawing.Imaging.ImageFormat.Png);
+                                File.WriteAllText("render_debug.log", "RENDER_OK: " + renderPath + " size=" + rForm.Size);
+                            }
+                            rForm.Hide();
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        File.WriteAllText("render_debug.log", "RENDER_ERROR: " + ex.ToString());
+                    }
+                    return;
+                }
+            }
 
             MainForm form = new MainForm(args);
             Application.ApplicationExit += (s, e) =>
@@ -184,6 +248,12 @@ namespace ArgonLatencyStudio
 
         [DllImport("dnsapi.dll", EntryPoint = "DnsFlushResolverCache")]
         public static extern int DnsFlushResolverCache();
+
+        [DllImport("winmm.dll", EntryPoint = "mciSendStringA", CharSet = CharSet.Ansi)]
+        public static extern int mciSendString(string command, StringBuilder buffer, int bufferSize, IntPtr hwndCallback);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern bool LockWorkStation();
 
         [DllImport("user32.dll")]
         public static extern IntPtr GetForegroundWindow();
@@ -517,6 +587,86 @@ namespace ArgonLatencyStudio
         public string LiveOsRawSummary = "";
         public bool RequiresCautionConfirmation = false;
         public string CautionWarningText = "";
+
+        // Automatic Boot-Time Truth & Zero-Bug Reboot Resolution
+        public bool BootTimeActiveInOs = false;
+        public int BootTimeVariationInOs = -1;
+        public string BootTimeRawValue = "";
+
+        /// <summary>
+        /// Bu ayarın Windows çekirdeğinde devreye girmesi için yeniden başlatma gerekip gerekmediğini
+        /// boot anındaki gerçek sistem durumu ile kıyaslayarak kesin olarak hesaplar.
+        /// (1 -> 3 -> 1 gibi geçişlerde veya sistem bu değerle açılmışsa asla sahte restart uyarısı vermez!)
+        /// </summary>
+        public bool IsRebootPending
+        {
+            get
+            {
+                if (!NeedsReboot) return false;
+
+                bool currentActive = IsEnabled;
+                int currentVar = SelectedVariationIndex;
+
+                bool bootActive = BootTimeActiveInOs;
+                int bootVar = BootTimeVariationInOs;
+
+                // 1. Canlı OS Doğrulaması (Live OS Truth):
+                // Eğer ayar programda açıksa ve Windows Kayıt Defterinde/Kernel'de
+                // bu ayar zaten seçili varyasyonla birebir doğrulanmışsa:
+                if (currentActive && IsVerifiedInOs && (DetectedVariationInOs < 0 || DetectedVariationInOs == currentVar))
+                {
+                    // Ancak kullanıcı bu oturumda ayarı açılış modundan farklı bir moda elle çektiyse restart gerekir:
+                    if (bootActive && bootVar >= 0 && bootVar != currentVar)
+                        return true;
+
+                    return false;
+                }
+
+                // 2. Her iki durumda da pasifse restart kesinlikle gerekmez:
+                if (!currentActive && !bootActive && !IsDetectedActiveInOs)
+                    return false;
+
+                // 3. Her ikisinde de aktifse modların eşleşip eşleşmediğini kontrol et:
+                if (currentActive && bootActive)
+                {
+                    if (bootVar >= 0 && bootVar == currentVar)
+                        return false;
+                    if (bootVar < 0 && IsVerifiedInOs)
+                        return false;
+                    return true;
+                }
+
+                // 4. Biri aktif diğeri pasif -> bu oturumda durum değişti, kernel için restart gerekir
+                return true;
+            }
+        }
+
+        public bool IsNetReloadPending
+        {
+            get
+            {
+                if (!NeedsNetReload) return false;
+                if (!IsEnabled) return false;
+                if (IsVerifiedInOs && (DetectedVariationInOs < 0 || DetectedVariationInOs == SelectedVariationIndex) && NetReloadSatisfied)
+                    return false;
+                return !NetReloadSatisfied;
+            }
+        }
+    }
+
+    public static class Loc
+    {
+        public static string CurrentLanguage = "TR"; // "TR" or "EN"
+
+        public static bool IsEnglish
+        {
+            get { return string.Equals(CurrentLanguage, "EN", StringComparison.OrdinalIgnoreCase); }
+        }
+
+        public static string T(string tr, string en)
+        {
+            return IsEnglish ? en : tr;
+        }
     }
 
     public class ArgonAppSettings
@@ -535,6 +685,9 @@ namespace ArgonLatencyStudio
         public bool RevertOnExit = false;
         public string ActiveProfileName = "Varsayılan (Son Oturum)";
         public string LastSelectedProfileName { get { return ActiveProfileName; } set { ActiveProfileName = value; } }
+        public string WindowResolutionPreset = "MEDIUM"; // "COMPACT" (1280x820), "MEDIUM" (1380x890), "LARGE" (1560x960), "EXTRA_LARGE" (1720x1020)
+        public bool LockFixedResolution = true;
+        public string AppLanguage = "TR"; // "TR" or "EN"
 
         public void Save(string path)
         {
@@ -548,12 +701,15 @@ namespace ArgonLatencyStudio
                     "ShowGpuMemHotspotSensor|" + ShowGpuMemHotspotSensor,
                     "TelemetryPollIntervalMs|" + TelemetryPollIntervalMs,
                     "FixedWindowLayout|" + FixedWindowLayout,
+                    "WindowResolutionPreset|" + (WindowResolutionPreset ?? "MEDIUM"),
+                    "LockFixedResolution|" + LockFixedResolution,
                     "RichCustomTooltips|" + RichCustomTooltips,
                     "CompactCardMode|" + CompactCardMode,
                     "AutoLiveTruthSync|" + AutoLiveTruthSync,
                     "ConfirmCriticalTweaks|" + ConfirmCriticalTweaks,
                     "RevertOnExit|" + RevertOnExit,
-                    "ActiveProfileName|" + (ActiveProfileName ?? "Varsayılan (Son Oturum)")
+                    "ActiveProfileName|" + (ActiveProfileName ?? "Varsayılan (Son Oturum)"),
+                    "AppLanguage|" + (AppLanguage ?? "TR")
                 };
                 StateVault.WriteAllLinesAtomic(path, lines.ToArray());
             }
@@ -580,12 +736,15 @@ namespace ArgonLatencyStudio
                     else if (k == "ShowGpuMemHotspotSensor" && bool.TryParse(v, out b)) s.ShowGpuMemHotspotSensor = b;
                     else if (k == "TelemetryPollIntervalMs" && int.TryParse(v, out n)) s.TelemetryPollIntervalMs = Math.Max(500, Math.Min(5000, n));
                     else if (k == "FixedWindowLayout" && bool.TryParse(v, out b)) s.FixedWindowLayout = b;
+                    else if (k == "WindowResolutionPreset" && !string.IsNullOrEmpty(v)) s.WindowResolutionPreset = v;
+                    else if (k == "LockFixedResolution" && bool.TryParse(v, out b)) s.LockFixedResolution = b;
                     else if (k == "RichCustomTooltips" && bool.TryParse(v, out b)) s.RichCustomTooltips = b;
                     else if (k == "CompactCardMode" && bool.TryParse(v, out b)) s.CompactCardMode = b;
                     else if (k == "AutoLiveTruthSync" && bool.TryParse(v, out b)) s.AutoLiveTruthSync = b;
                     else if (k == "ConfirmCriticalTweaks" && bool.TryParse(v, out b)) s.ConfirmCriticalTweaks = b;
                     else if (k == "RevertOnExit" && bool.TryParse(v, out b)) s.RevertOnExit = b;
                     else if (k == "ActiveProfileName" && !string.IsNullOrEmpty(v)) s.ActiveProfileName = v;
+                    else if (k == "AppLanguage" && !string.IsNullOrEmpty(v)) s.AppLanguage = v.Trim().ToUpperInvariant();
                 }
             }
             catch { }
@@ -651,6 +810,440 @@ namespace ArgonLatencyStudio
             catch { return null; }
         }
     }
+
+    #region Otomasyon & QoL Data Models and Helper Systems
+
+    public class CustomAlarmItem
+    {
+        public string Id = Guid.NewGuid().ToString("N");
+        public string Title = "Yeni Alarm";
+        public string Description = "Rutin Kontrol";
+        public bool IsEnabled = true;
+        public string AlarmType = "PERIODIC"; // "CRYPTO_4H", "CRYPTO_DAILY", "CRYPTO_WEEKLY", "PERIODIC", "SPECIFIC_TIME"
+        public int PeriodMinutes = 240;
+        public string SpecificTimeHHmm = "03:00";
+        public DateTime NextTrigger = DateTime.Now.AddHours(4);
+        public DateTime LastTriggered = DateTime.MinValue;
+    }
+
+    public class GameLaunchNoteItem
+    {
+        public string Id = Guid.NewGuid().ToString("N");
+        public string ProcessName = "cs2";
+        public string GameTitle = "Counter-Strike 2";
+        public string NoteText = "Isınmadan rekabetçiye girme!\nSens: 1.15 | 800 DPI";
+        public bool IsEnabled = true;
+        public bool PeriodicInGame = false;
+        public int PeriodicIntervalMinutes = 45;
+        public DateTime LastNotified = DateTime.MinValue;
+        public bool WasRunningLastCheck = false;
+    }
+
+    public class QoLAutomationConfig
+    {
+        // Güç & Kapatma Zamanlayıcısı
+        public bool PowerTimerActive = false;
+        public string PowerTimerMode = "COUNTDOWN"; // "COUNTDOWN" or "SPECIFIC_TIME"
+        public int PowerTimerHours = 1;
+        public int PowerTimerMinutes = 30;
+        public string PowerTimerSpecificTime = "23:00";
+        public string PowerTimerAction = "SHUTDOWN"; // "SHUTDOWN", "RESTART", "SLEEP", "LOCK"
+        public DateTime PowerTimerTarget = DateTime.MinValue;
+        public bool PowerTimerPostponeIfNetBusy = true;
+        public int PowerTimerNetThresholdKBps = 500;
+        public bool PowerTimerPostponeIfCpuBusy = true;
+        public int PowerTimerCpuThresholdPercent = 25;
+        public bool PowerTimer5MinWarn = true;
+        public bool PowerTimerWarnGiven = false;
+
+        // Alarmlar & Ses
+        public string AlarmCustomSoundPath = "";
+        public int AlarmMaxPlayDurationSec = 15; // 5, 10, 15, 30, 60
+        public bool HealthRemindersEnabled = false; // Opt-in; default false
+        public int HealthReminderIntervalMin = 60;
+        public DateTime LastHealthReminderTime = DateTime.MinValue;
+
+        // Akıllı RAM & Standby List Otomasyonu
+        public bool AutoRamCleanActive = false;
+        public int RamFreeThresholdPercent = 15; // e.g. %15 free RAM remaining
+        public bool RamCleanProtectForegroundGame = true;
+
+        public List<CustomAlarmItem> Alarms = new List<CustomAlarmItem>();
+        public List<GameLaunchNoteItem> GameNotes = new List<GameLaunchNoteItem>();
+
+        public void SaveToFile(string path)
+        {
+            try
+            {
+                List<string> lines = new List<string>
+                {
+                    "ARGON_QOL_CONFIG|10",
+                    "PowerTimerActive|" + PowerTimerActive,
+                    "PowerTimerMode|" + (PowerTimerMode ?? "COUNTDOWN"),
+                    "PowerTimerHours|" + PowerTimerHours,
+                    "PowerTimerMinutes|" + PowerTimerMinutes,
+                    "PowerTimerSpecificTime|" + (PowerTimerSpecificTime ?? "23:00"),
+                    "PowerTimerAction|" + (PowerTimerAction ?? "SHUTDOWN"),
+                    "PowerTimerPostponeIfNetBusy|" + PowerTimerPostponeIfNetBusy,
+                    "PowerTimerNetThresholdKBps|" + PowerTimerNetThresholdKBps,
+                    "PowerTimerPostponeIfCpuBusy|" + PowerTimerPostponeIfCpuBusy,
+                    "PowerTimerCpuThresholdPercent|" + PowerTimerCpuThresholdPercent,
+                    "PowerTimer5MinWarn|" + PowerTimer5MinWarn,
+                    "AlarmCustomSoundPath|" + (AlarmCustomSoundPath ?? ""),
+                    "AlarmMaxPlayDurationSec|" + AlarmMaxPlayDurationSec,
+                    "HealthRemindersEnabled|" + HealthRemindersEnabled,
+                    "HealthReminderIntervalMin|" + HealthReminderIntervalMin,
+                    "AutoRamCleanActive|" + AutoRamCleanActive,
+                    "RamFreeThresholdPercent|" + RamFreeThresholdPercent,
+                    "RamCleanProtectForegroundGame|" + RamCleanProtectForegroundGame
+                };
+
+                foreach (var a in Alarms)
+                {
+                    lines.Add(string.Format("ALARM|{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}",
+                        a.Id,
+                        (a.Title ?? "").Replace('|', ' '),
+                        (a.Description ?? "").Replace('|', ' '),
+                        a.IsEnabled,
+                        a.AlarmType ?? "PERIODIC",
+                        a.PeriodMinutes,
+                        a.SpecificTimeHHmm ?? "03:00",
+                        a.NextTrigger.ToString("yyyy-MM-dd HH:mm:ss")));
+                }
+
+                foreach (var g in GameNotes)
+                {
+                    string safeNote = (g.NoteText ?? "").Replace("\r\n", "\\n").Replace("\n", "\\n").Replace('|', ' ');
+                    lines.Add(string.Format("GAMENOTE|{0}|{1}|{2}|{3}|{4}|{5}|{6}",
+                        g.Id,
+                        (g.ProcessName ?? "").Replace('|', ' '),
+                        (g.GameTitle ?? "").Replace('|', ' '),
+                        safeNote,
+                        g.IsEnabled,
+                        g.PeriodicInGame,
+                        g.PeriodicIntervalMinutes));
+                }
+
+                StateVault.WriteAllLinesAtomic(path, lines.ToArray());
+            }
+            catch { }
+        }
+
+        public static QoLAutomationConfig LoadFromFile(string path)
+        {
+            QoLAutomationConfig cfg = new QoLAutomationConfig();
+            try
+            {
+                if (!File.Exists(path))
+                {
+                    // Varsayılan Kripto 4H ve Günlük Alarm Şablonlarını Hazır Ekle
+                    cfg.Alarms.Add(new CustomAlarmItem
+                    {
+                        Id = "crypto_4h_default",
+                        Title = "BTC 4H Mum Kapanışı (03, 07, 11, 15, 19, 23)",
+                        Description = "4 Saatlik grafikleri ve açık emirleri incele",
+                        IsEnabled = true,
+                        AlarmType = "CRYPTO_4H",
+                        PeriodMinutes = 240,
+                        SpecificTimeHHmm = "03:00",
+                        NextTrigger = CryptoAlarmHelpers.GetNextCrypto4HCandleTime()
+                    });
+                    cfg.Alarms.Add(new CustomAlarmItem
+                    {
+                        Id = "crypto_daily_default",
+                        Title = "Kripto Günlük Kapanış (03:00 UTC+3)",
+                        Description = "Günlük mum kapanışı ve fonlama oranlarını kontrol et",
+                        IsEnabled = true,
+                        AlarmType = "CRYPTO_DAILY",
+                        PeriodMinutes = 1440,
+                        SpecificTimeHHmm = "03:00",
+                        NextTrigger = CryptoAlarmHelpers.GetNextCryptoDailyCloseTime()
+                    });
+                    cfg.SaveToFile(path);
+                    return cfg;
+                }
+
+                foreach (string line in File.ReadAllLines(path, Encoding.UTF8))
+                {
+                    if (string.IsNullOrWhiteSpace(line)) continue;
+                    string[] parts = line.Split('|');
+                    if (parts.Length < 2) continue;
+                    string key = parts[0].Trim();
+
+                    bool bVal; int nVal;
+                    if (key == "PowerTimerActive" && bool.TryParse(parts[1], out bVal)) cfg.PowerTimerActive = bVal;
+                    else if (key == "PowerTimerMode") cfg.PowerTimerMode = parts[1].Trim();
+                    else if (key == "PowerTimerHours" && int.TryParse(parts[1], out nVal)) cfg.PowerTimerHours = nVal;
+                    else if (key == "PowerTimerMinutes" && int.TryParse(parts[1], out nVal)) cfg.PowerTimerMinutes = nVal;
+                    else if (key == "PowerTimerSpecificTime") cfg.PowerTimerSpecificTime = parts[1].Trim();
+                    else if (key == "PowerTimerAction") cfg.PowerTimerAction = parts[1].Trim();
+                    else if (key == "PowerTimerPostponeIfNetBusy" && bool.TryParse(parts[1], out bVal)) cfg.PowerTimerPostponeIfNetBusy = bVal;
+                    else if (key == "PowerTimerNetThresholdKBps" && int.TryParse(parts[1], out nVal)) cfg.PowerTimerNetThresholdKBps = nVal;
+                    else if (key == "PowerTimerPostponeIfCpuBusy" && bool.TryParse(parts[1], out bVal)) cfg.PowerTimerPostponeIfCpuBusy = bVal;
+                    else if (key == "PowerTimerCpuThresholdPercent" && int.TryParse(parts[1], out nVal)) cfg.PowerTimerCpuThresholdPercent = nVal;
+                    else if (key == "PowerTimer5MinWarn" && bool.TryParse(parts[1], out bVal)) cfg.PowerTimer5MinWarn = bVal;
+                    else if (key == "AlarmCustomSoundPath") cfg.AlarmCustomSoundPath = parts[1].Trim();
+                    else if (key == "AlarmMaxPlayDurationSec" && int.TryParse(parts[1], out nVal)) cfg.AlarmMaxPlayDurationSec = nVal;
+                    else if (key == "HealthRemindersEnabled" && bool.TryParse(parts[1], out bVal)) cfg.HealthRemindersEnabled = bVal;
+                    else if (key == "HealthReminderIntervalMin" && int.TryParse(parts[1], out nVal)) cfg.HealthReminderIntervalMin = nVal;
+                    else if (key == "AutoRamCleanActive" && bool.TryParse(parts[1], out bVal)) cfg.AutoRamCleanActive = bVal;
+                    else if (key == "RamFreeThresholdPercent" && int.TryParse(parts[1], out nVal)) cfg.RamFreeThresholdPercent = nVal;
+                    else if (key == "RamCleanProtectForegroundGame" && bool.TryParse(parts[1], out bVal)) cfg.RamCleanProtectForegroundGame = bVal;
+                    else if (key == "ALARM" && parts.Length >= 8)
+                    {
+                        CustomAlarmItem itm = new CustomAlarmItem();
+                        itm.Id = parts[1].Trim();
+                        itm.Title = parts[2].Trim();
+                        itm.Description = parts[3].Trim();
+                        bool.TryParse(parts[4], out itm.IsEnabled);
+                        itm.AlarmType = parts[5].Trim();
+                        int.TryParse(parts[6], out itm.PeriodMinutes);
+                        itm.SpecificTimeHHmm = parts[7].Trim();
+                        if (parts.Length >= 9) DateTime.TryParse(parts[8], out itm.NextTrigger);
+                        cfg.Alarms.Add(itm);
+                    }
+                    else if (key == "GAMENOTE" && parts.Length >= 7)
+                    {
+                        GameLaunchNoteItem gn = new GameLaunchNoteItem();
+                        gn.Id = parts[1].Trim();
+                        gn.ProcessName = parts[2].Trim();
+                        gn.GameTitle = parts[3].Trim();
+                        gn.NoteText = parts[4].Trim().Replace("\\n", "\r\n");
+                        bool.TryParse(parts[5], out gn.IsEnabled);
+                        bool.TryParse(parts[6], out gn.PeriodicInGame);
+                        if (parts.Length >= 8) int.TryParse(parts[7], out gn.PeriodicIntervalMinutes);
+                        cfg.GameNotes.Add(gn);
+                    }
+                }
+            }
+            catch { }
+            return cfg;
+        }
+    }
+
+    public static class CryptoAlarmHelpers
+    {
+        public static DateTime GetNextCrypto4HCandleTime()
+        {
+            DateTime now = DateTime.Now;
+            int[] hours = new int[] { 3, 7, 11, 15, 19, 23 };
+            foreach (int h in hours)
+            {
+                DateTime cand = new DateTime(now.Year, now.Month, now.Day, h, 0, 0);
+                if (cand > now) return cand;
+            }
+            DateTime t = now.AddDays(1);
+            return new DateTime(t.Year, t.Month, t.Day, 3, 0, 0);
+        }
+
+        public static DateTime GetNextCryptoDailyCloseTime()
+        {
+            DateTime now = DateTime.Now;
+            DateTime cand = new DateTime(now.Year, now.Month, now.Day, 3, 0, 0);
+            if (cand > now) return cand;
+            DateTime t = now.AddDays(1);
+            return new DateTime(t.Year, t.Month, t.Day, 3, 0, 0);
+        }
+
+        public static DateTime GetNextCryptoWeeklyCloseTime()
+        {
+            DateTime now = DateTime.Now;
+            DateTime cand = new DateTime(now.Year, now.Month, now.Day, 3, 0, 0);
+            while (cand <= now || cand.DayOfWeek != DayOfWeek.Monday)
+            {
+                cand = cand.AddDays(1);
+            }
+            return cand;
+        }
+    }
+
+    public static class AudioAlertPlayer
+    {
+        private static System.Threading.Timer cutoffTimer;
+        private static readonly object playLock = new object();
+
+        public static void PlayAlert(string soundFilePath, int maxDurationSeconds)
+        {
+            lock (playLock)
+            {
+                StopAlert();
+
+                bool playedCustom = false;
+                if (!string.IsNullOrEmpty(soundFilePath) && File.Exists(soundFilePath))
+                {
+                    try
+                    {
+                        NativeMethods.mciSendString("close argon_alert_audio", null, 0, IntPtr.Zero);
+                        string openCmd = string.Format("open \"{0}\" type mpegvideo alias argon_alert_audio", soundFilePath);
+                        int resOpen = NativeMethods.mciSendString(openCmd, null, 0, IntPtr.Zero);
+                        if (resOpen == 0)
+                        {
+                            NativeMethods.mciSendString("play argon_alert_audio from 0", null, 0, IntPtr.Zero);
+                            playedCustom = true;
+                        }
+                    }
+                    catch { }
+                }
+
+                if (!playedCustom)
+                {
+                    try
+                    {
+                        System.Media.SystemSounds.Exclamation.Play();
+                    }
+                    catch { }
+                }
+
+                int safeDurationSec = Math.Max(3, Math.Min(60, maxDurationSeconds));
+                cutoffTimer = new System.Threading.Timer(delegate
+                {
+                    StopAlert();
+                }, null, safeDurationSec * 1000, Timeout.Infinite);
+            }
+        }
+
+        public static void StopAlert()
+        {
+            try
+            {
+                if (cutoffTimer != null)
+                {
+                    cutoffTimer.Dispose();
+                    cutoffTimer = null;
+                }
+                NativeMethods.mciSendString("stop argon_alert_audio", null, 0, IntPtr.Zero);
+                NativeMethods.mciSendString("close argon_alert_audio", null, 0, IntPtr.Zero);
+            }
+            catch { }
+        }
+    }
+
+    public class QoLToastForm : Form
+    {
+        private System.Windows.Forms.Timer autoCloseTimer;
+        private System.Windows.Forms.Timer pulseTimer;
+        private int pulseCount = 0;
+        private Action onActionClick;
+        private Color accentColor;
+
+        public QoLToastForm(string title, string message, string actionButtonText, Action action, Color accent, int autoCloseSeconds, bool pulseEvery3Sec)
+        {
+            this.FormBorderStyle = FormBorderStyle.None;
+            this.StartPosition = FormStartPosition.Manual;
+            this.ShowInTaskbar = false;
+            this.TopMost = true;
+            this.Size = new Size(380, 105);
+            this.BackColor = Color.FromArgb(20, 26, 38);
+            this.accentColor = accent;
+            this.onActionClick = action;
+
+            Rectangle workArea = Screen.PrimaryScreen.WorkingArea;
+            this.Location = new Point(workArea.Right - this.Width - 20, workArea.Bottom - this.Height - 20);
+
+            this.Paint += (s, e) =>
+            {
+                using (Pen borderPen = new Pen(Color.FromArgb(45, 55, 75), 1))
+                {
+                    e.Graphics.DrawRectangle(borderPen, 0, 0, this.Width - 1, this.Height - 1);
+                }
+                using (SolidBrush accentBrush = new SolidBrush(this.accentColor))
+                {
+                    e.Graphics.FillRectangle(accentBrush, 0, 0, 6, this.Height);
+                }
+            };
+
+            Label lblTitle = new Label
+            {
+                Text = title,
+                Font = new Font("Segoe UI", 9.2f, FontStyle.Bold),
+                ForeColor = accent,
+                Location = new Point(16, 10),
+                AutoSize = true
+            };
+            this.Controls.Add(lblTitle);
+
+            Label lblMsg = new Label
+            {
+                Text = message,
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(226, 232, 240),
+                Location = new Point(16, 34),
+                Size = new Size(346, 36),
+                AutoEllipsis = true
+            };
+            this.Controls.Add(lblMsg);
+
+            Button btnClose = new Button
+            {
+                Text = "✕",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(148, 163, 184),
+                FlatStyle = FlatStyle.Flat,
+                Size = new Size(24, 22),
+                Location = new Point(this.Width - 28, 6),
+                Cursor = Cursors.Hand
+            };
+            btnClose.FlatAppearance.BorderSize = 0;
+            btnClose.Click += (s, e) => this.Close();
+            this.Controls.Add(btnClose);
+
+            if (!string.IsNullOrEmpty(actionButtonText))
+            {
+                Button btnAction = new Button
+                {
+                    Text = actionButtonText,
+                    Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
+                    ForeColor = Color.White,
+                    BackColor = Color.FromArgb(220, 38, 38),
+                    FlatStyle = FlatStyle.Flat,
+                    Size = new Size(125, 24),
+                    Location = new Point(this.Width - 140, 72),
+                    Cursor = Cursors.Hand
+                };
+                btnAction.FlatAppearance.BorderSize = 0;
+                btnAction.Click += (s, e) =>
+                {
+                    if (onActionClick != null) onActionClick();
+                    this.Close();
+                };
+                this.Controls.Add(btnAction);
+            }
+
+            if (autoCloseSeconds > 0)
+            {
+                autoCloseTimer = new System.Windows.Forms.Timer { Interval = autoCloseSeconds * 1000 };
+                autoCloseTimer.Tick += (s, e) =>
+                {
+                    autoCloseTimer.Stop();
+                    this.Close();
+                };
+                autoCloseTimer.Start();
+            }
+
+            if (pulseEvery3Sec)
+            {
+                pulseTimer = new System.Windows.Forms.Timer { Interval = 3000 };
+                pulseTimer.Tick += (s, e) =>
+                {
+                    pulseCount++;
+                    this.BackColor = (pulseCount % 2 == 1) ? Color.FromArgb(46, 26, 60) : Color.FromArgb(20, 26, 38);
+                    this.Invalidate();
+                    if (pulseCount >= 5) // 5 x 3s = 15 saniye alarm darbe döngüsü
+                    {
+                        pulseTimer.Stop();
+                    }
+                };
+                pulseTimer.Start();
+            }
+        }
+
+        protected override bool ShowWithoutActivation
+        {
+            get { return true; }
+        }
+    }
+
+    #endregion
 
     public class LibreHardwareSensorEngine : IDisposable
     {
@@ -1519,7 +2112,141 @@ namespace ArgonLatencyStudio
 
     #endregion
 
-    #region Progressive MultiVariationTweakCard (Compact + Expandable + Tooltip)
+    #region Professional Vector Icon Engine & Compact Utility Row Architecture (NetAdapter / QuickCPU Style)
+
+    public static class TechnicalIconRenderer
+    {
+        public static void DrawTweakVectorIcon(Graphics g, Rectangle bounds, TweakDefinition tweak)
+        {
+            if (tweak == null) return;
+            DrawTweakVectorIcon(
+                g,
+                bounds,
+                tweak.Id ?? "",
+                tweak.Category ?? "",
+                tweak.HardwareTag ?? "",
+                tweak.BadgeColor,
+                tweak.IsEnabled);
+        }
+
+        public static void DrawTweakVectorIcon(Graphics g, Rectangle bounds, string id, string cat, string hw, Color primary, bool isEnabled = true)
+        {
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+
+            if (hw == "INTEL_CPU" || hw == "INTEL_GPU") primary = Color.FromArgb(56, 189, 248);
+            else if (hw == "AMD_CPU") primary = Color.FromArgb(249, 115, 22);
+            else if (hw == "AMD_GPU") primary = Color.FromArgb(239, 68, 68);
+            else if (hw == "NVIDIA_GPU") primary = Color.FromArgb(34, 197, 94);
+
+            Rectangle box = new Rectangle(bounds.X + 1, bounds.Y + 1, bounds.Width - 2, bounds.Height - 2);
+            using (SolidBrush bgBr = new SolidBrush(Color.FromArgb(isEnabled ? 48 : 26, primary)))
+            using (Pen borderPen = new Pen(Color.FromArgb(isEnabled ? 210 : 110, primary), 1.2f))
+            {
+                g.FillRectangle(bgBr, box);
+                g.DrawRectangle(borderPen, box);
+            }
+
+            using (Pen p = new Pen(primary, 1.5f))
+            using (SolidBrush b = new SolidBrush(primary))
+            using (Font f = new Font("Segoe UI", 6.2f, FontStyle.Bold))
+            {
+                int cx = bounds.X + bounds.Width / 2;
+                int cy = bounds.Y + bounds.Height / 2;
+
+                if (hw == "INTEL_CPU" || hw == "AMD_CPU" || id == "LAT_CSTATES" || id == "LAT_COREPARK" || id == "EXP_SMT_ISOLATION")
+                {
+                    // CPU Die + Pins
+                    Rectangle die = new Rectangle(cx - 5, cy - 5, 10, 10);
+                    g.DrawRectangle(p, die);
+                    for (int i = -3; i <= 3; i += 3)
+                    {
+                        g.DrawLine(p, cx + i, cy - 8, cx + i, cy - 5);
+                        g.DrawLine(p, cx + i, cy + 5, cx + i, cy + 8);
+                        g.DrawLine(p, cx - 8, cy + i, cx - 5, cy + i);
+                        g.DrawLine(p, cx + 5, cy + i, cx + 8, cy + i);
+                    }
+                    g.FillRectangle(b, cx - 2, cy - 2, 5, 5);
+                }
+                else if (hw == "NVIDIA_GPU" || hw == "AMD_GPU" || hw == "INTEL_GPU" || id == "FPS_HAGS" || id == "FPS_MMCSS_GAMES" || id == "FPS_FSO_FLIP" || id == "WU_MPO_CONTROL")
+                {
+                    // GPU / Display Card with Fan
+                    Rectangle card = new Rectangle(cx - 7, cy - 5, 14, 9);
+                    g.DrawRectangle(p, card);
+                    g.DrawEllipse(p, cx - 3, cy - 3, 6, 6);
+                    g.DrawLine(p, cx - 5, cy + 6, cx + 3, cy + 6); // PCIe gold fingers
+                }
+                else if (id == "NET_DNS_SWITCH" || id == "NET_HOSTPRIO" || id == "WU_IPV4_TEREDO")
+                {
+                    // DNS Globe
+                    Rectangle globe = new Rectangle(cx - 6, cy - 6, 12, 12);
+                    g.DrawEllipse(p, globe);
+                    g.DrawEllipse(p, cx - 3, cy - 6, 6, 12);
+                    g.DrawLine(p, cx - 6, cy, cx + 6, cy);
+                }
+                else if (cat == "NETWORK" || id == "EXP_TCP_CONGESTION" || id == "EXP_ECN_HEURISTICS" || id == "WU_DELIVERY_OPT")
+                {
+                    // RJ45 Network Port / Packet Switch
+                    Rectangle port = new Rectangle(cx - 6, cy - 5, 12, 9);
+                    g.DrawRectangle(p, port);
+                    g.DrawLine(p, cx - 3, cy - 5, cx - 3, cy - 2);
+                    g.DrawLine(p, cx, cy - 5, cx, cy - 2);
+                    g.DrawLine(p, cx + 3, cy - 5, cx + 3, cy - 2);
+                    g.DrawLine(p, cx, cy + 4, cx, cy + 7);
+                    g.DrawLine(p, cx - 5, cy + 7, cx + 5, cy + 7);
+                }
+                else if (id == "LAT_TIMER" || id == "EXP_SERIALIZE_TIMER" || id == "EXP_SYNTHETIC_PULSE")
+                {
+                    // High-Precision Oscilloscope / Timer Pulse
+                    Rectangle clk = new Rectangle(cx - 6, cy - 6, 12, 12);
+                    g.DrawEllipse(p, clk);
+                    g.DrawLine(p, cx, cy, cx, cy - 4);
+                    g.DrawLine(p, cx, cy, cx + 3, cy + 2);
+                }
+                else if (id == "LAT_MOUSE_SPI" || id == "LAT_HID_QUEUE" || id == "LAT_FILTERKEYS" || id == "EXP_FOREGROUND_HOOKS")
+                {
+                    // Precision Input / Mouse Body
+                    Rectangle m = new Rectangle(cx - 4, cy - 6, 8, 12);
+                    g.DrawRectangle(p, m);
+                    g.DrawLine(p, cx - 4, cy - 1, cx + 4, cy - 1);
+                    g.DrawLine(p, cx, cy - 6, cx, cy - 1);
+                }
+                else if (id == "LAT_USB_PCIE" || id == "LAT_USB_XHCI" || id == "FPS_NVME_IRQ8")
+                {
+                    // Bus / Trident / NVMe Lane
+                    g.DrawLine(p, cx - 5, cy, cx + 6, cy);
+                    g.DrawLine(p, cx - 2, cy, cx + 1, cy - 4);
+                    g.DrawLine(p, cx, cy, cx + 3, cy + 4);
+                    g.FillEllipse(b, cx - 7, cy - 2, 4, 4);
+                    g.FillRectangle(b, cx + 4, cy - 2, 3, 4);
+                }
+                else if (id == "FPS_MEMORY_ENGINE" || id == "EXP_SVCHOST_SPLIT")
+                {
+                    // RAM DIMM Module
+                    Rectangle ram = new Rectangle(cx - 7, cy - 4, 14, 7);
+                    g.DrawRectangle(p, ram);
+                    g.FillRectangle(b, cx - 5, cy - 2, 2, 3);
+                    g.FillRectangle(b, cx - 1, cy - 2, 2, 3);
+                    g.FillRectangle(b, cx + 3, cy - 2, 2, 3);
+                    g.DrawLine(p, cx - 5, cy + 5, cx + 5, cy + 5);
+                }
+                else
+                {
+                    // Shield / Kernel Lock
+                    Point[] shield = new Point[]
+                    {
+                        new Point(cx, cy - 6),
+                        new Point(cx + 6, cy - 3),
+                        new Point(cx + 5, cy + 3),
+                        new Point(cx, cy + 7),
+                        new Point(cx - 5, cy + 3),
+                        new Point(cx - 6, cy - 3)
+                    };
+                    g.DrawPolygon(p, shield);
+                }
+            }
+        }
+    }
 
     public class MultiVariationTweakCard : Panel
     {
@@ -1528,20 +2255,16 @@ namespace ArgonLatencyStudio
         private Action<TweakDefinition, TweakVariation> onHoverInspect;
         private ToolTip sharedToolTip;
 
-        private bool isExpanded = false;
-        private const int COMPACT_HEIGHT = 108;
-        private const int EXPANDED_HEIGHT = 166;
+        private const int ROW_HEIGHT = 36;
 
+        private CheckBox chkEnable;
+        private Panel pnlIconBox;
         private Label lblTitle;
-        private Label lblBadge;
-        private Label lblScopeBadge;
-        private Label lblLiveState;
-        private Label lblShortSub;
-        private Button btnExpandToggle;
-        private Panel pnlToggleSwitch;
-        private Panel pnlDetailsDrawer;
-        private Label lblDeepWhy;
-        private List<Button> variationButtons = new List<Button>();
+        private ComboBox cmbVariations;
+        private Label lblLiveStateBadge;
+        private Button btnInfoInspect;
+        private bool syncingRowControls = false;
+        private bool isMouseHovered = false;
 
         public MultiVariationTweakCard(
             TweakDefinition tweak,
@@ -1556,27 +2279,26 @@ namespace ArgonLatencyStudio
 
             this.SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
             this.DoubleBuffered = true;
-            this.Height = COMPACT_HEIGHT;
-            this.Width = 920;
-            this.BackColor = Color.FromArgb(21, 25, 36);
-            this.Margin = new Padding(0, 0, 0, 8);
+            this.Height = ROW_HEIGHT;
+            this.Width = 740;
+            this.BackColor = Color.FromArgb(18, 22, 31);
+            this.Margin = new Padding(0, 0, 0, 2);
 
-            BuildProgressiveCard();
+            BuildCompactUtilityRow();
             this.Resize += (s, e) =>
             {
                 LayoutCardControls();
-                this.Invalidate(true);
+                this.Invalidate(false);
             };
             RefreshVisualState();
         }
 
-        private void BuildProgressiveCard()
+        private void BuildCompactUtilityRow()
         {
             string rawTitle = Tweak.Title ?? "";
             if (rawTitle.Contains("RESTART")) Tweak.NeedsReboot = true;
             if (rawTitle.Contains("AĞ") && rawTitle.Contains("YENİLEME")) Tweak.NeedsNetReload = true;
 
-            // Strip any bracket tags like [⚡ ANLIK...], [🔄 ...], [🟠 ...] from the visible title
             StringBuilder cleanSb = new StringBuilder();
             bool inBracket = false;
             for (int c = 0; c < rawTitle.Length; c++)
@@ -1588,471 +2310,349 @@ namespace ArgonLatencyStudio
             string cleanTitle = cleanSb.ToString().Replace("  ", " ").Trim();
             Tweak.Title = cleanTitle;
 
-            // Row 1 Left: Category Badge + Optional Reboot/Reload Pill (ONLY shown when needed!)
-            lblBadge = new Label
-            {
-                Text = Tweak.BadgeText,
-                Font = new Font("Segoe UI", 7.2f, FontStyle.Bold),
-                ForeColor = Color.Black,
-                BackColor = Tweak.BadgeColor,
-                AutoSize = true,
-                Padding = new Padding(5, 2, 5, 2),
-                Location = new Point(14, 8)
-            };
-            this.Controls.Add(lblBadge);
-
-            lblScopeBadge = new Label
+            // 1. Direct CheckBox (NetAdapter Repair style)
+            chkEnable = new CheckBox
             {
                 Text = "",
-                Font = new Font("Segoe UI", 7.2f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(251, 191, 36),
-                BackColor = Color.FromArgb(52, 34, 14),
-                AutoSize = true,
-                Padding = new Padding(5, 2, 5, 2),
-                Location = new Point(lblBadge.Right + 6, 8),
-                Visible = false
-            };
-            this.Controls.Add(lblScopeBadge);
-
-            // Row 1 Right: Live State + [Ne İşe Yarar ▾] + Toggle Switch
-            lblLiveState = new Label
-            {
-                Text = Tweak.CapturedOriginalSummary,
-                Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(148, 163, 184),
                 AutoSize = false,
-                AutoEllipsis = true,
-                TextAlign = ContentAlignment.MiddleRight,
-                Size = new Size(310, 19)
+                Size = new Size(18, 18),
+                Location = new Point(10, 9),
+                Cursor = Cursors.Hand,
+                Checked = Tweak.IsEnabled
             };
-            this.Controls.Add(lblLiveState);
-
-            btnExpandToggle = new Button
+            chkEnable.CheckedChanged += (s, e) =>
             {
-                Text = "Amacı ▾",
-                Font = new Font("Segoe UI", 7.5f, FontStyle.Bold),
-                FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(30, 37, 52),
-                ForeColor = Color.FromArgb(148, 163, 184),
-                AutoSize = true,
-                Height = 24,
-                Padding = new Padding(4, 0, 4, 0),
+                if (syncingRowControls) return;
+                ToggleRowEnabledState(chkEnable.Checked);
+            };
+            this.Controls.Add(chkEnable);
+
+            // 2. Vector Hardware/System Icon (22x22)
+            pnlIconBox = new Panel
+            {
+                Size = new Size(22, 22),
+                Location = new Point(32, 7),
+                BackColor = Color.Transparent,
                 Cursor = Cursors.Hand
             };
-            btnExpandToggle.FlatAppearance.BorderSize = 1;
-            btnExpandToggle.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
-            btnExpandToggle.Click += (s, e) => ToggleExpandDrawer();
-            sharedToolTip.SetToolTip(btnExpandToggle, "Bu ayarın hangi durumlarda ve ne amaçla kullanıldığını göster/gizle");
-            this.Controls.Add(btnExpandToggle);
+            pnlIconBox.Paint += (s, e) => TechnicalIconRenderer.DrawTweakVectorIcon(e.Graphics, new Rectangle(0, 0, 22, 22), Tweak);
+            pnlIconBox.Click += (s, e) => ToggleRowEnabledState(!Tweak.IsEnabled);
+            this.Controls.Add(pnlIconBox);
 
-            pnlToggleSwitch = new Panel
-            {
-                Size = new Size(98, 28),
-                Cursor = Cursors.Hand,
-                BackColor = Color.Transparent
-            };
-            pnlToggleSwitch.Paint += OnPaintToggleSwitch;
-            pnlToggleSwitch.Click += (s, e) =>
-            {
-                bool wasEnabled = Tweak.IsEnabled;
-                Tweak.IsEnabled = !wasEnabled;
-                if (Tweak.IsEnabled)
-                {
-                    Tweak.PendingRebootAfterDisable = false;
-                    if (Tweak.NeedsReboot) Tweak.RebootSatisfied = false;
-                    if (Tweak.NeedsNetReload) Tweak.NetReloadSatisfied = false;
-                }
-                else
-                {
-                    if (wasEnabled && Tweak.NeedsReboot && Tweak.RebootSatisfied)
-                        Tweak.PendingRebootAfterDisable = true;
-                    else
-                        Tweak.PendingRebootAfterDisable = false;
-                    Tweak.RebootSatisfied = false;
-                    Tweak.NetReloadSatisfied = false;
-                }
-                if (onStateChanged != null)
-                    onStateChanged(Tweak, Tweak.IsEnabled, Tweak.SelectedVariationIndex);
-                RefreshVisualState();
-            };
-            this.Controls.Add(pnlToggleSwitch);
-
-            // Row 2: Clean Bold Title (Y = 31)
+            // 3. Clean Technical Title
             lblTitle = new Label
             {
                 Text = cleanTitle,
-                Font = new Font("Segoe UI", 9.8f, FontStyle.Bold),
-                ForeColor = Color.White,
-                AutoSize = true,
-                Location = new Point(14, 31)
+                Font = new Font("Segoe UI", 8.6f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(226, 232, 240),
+                AutoSize = false,
+                AutoEllipsis = true,
+                UseMnemonic = false,
+                TextAlign = ContentAlignment.MiddleLeft,
+                Location = new Point(60, 4),
+                Size = new Size(310, 28),
+                Cursor = Cursors.Hand
             };
+            lblTitle.Click += (s, e) => ToggleRowEnabledState(!Tweak.IsEnabled);
             this.Controls.Add(lblTitle);
 
-            // Row 3: Full-Width 1-Line Subtitle (Y = 52)
-            lblShortSub = new Label
+            // 4. Compact Mode / Variation Selector ComboBox
+            cmbVariations = new ComboBox
             {
-                Text = Tweak.SummaryDescription,
-                Font = new Font("Segoe UI", 8.2f, FontStyle.Regular),
-                ForeColor = Color.FromArgb(156, 172, 194),
-                AutoEllipsis = true,
-                Location = new Point(14, 52),
-                Size = new Size(this.Width - 28, 19)
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Regular),
+                BackColor = Color.FromArgb(13, 16, 23),
+                ForeColor = Color.FromArgb(203, 213, 225),
+                FlatStyle = FlatStyle.Flat,
+                Size = new Size(215, 22),
+                DropDownWidth = 380,
+                Cursor = Cursors.Hand
             };
-            this.Controls.Add(lblShortSub);
-
-            // Row 4: Variation Pills Row (Y = 74)
-            int varX = 14;
             for (int i = 0; i < Tweak.Variations.Count; i++)
             {
-                int idx = i;
-                TweakVariation v = Tweak.Variations[i];
-                Button btnVar = new Button
-                {
-                    Text = string.Format("Mod {0}: {1}", i + 1, v.ShortLabel),
-                    Font = new Font("Segoe UI", 8f, FontStyle.Bold),
-                    FlatStyle = FlatStyle.Flat,
-                    AutoSize = true,
-                    Height = 26,
-                    Location = new Point(varX, 74),
-                    Cursor = Cursors.Hand,
-                    Padding = new Padding(5, 0, 5, 0)
-                };
-                btnVar.FlatAppearance.BorderSize = 1;
-                btnVar.Click += (s, e) =>
-                {
-                    bool changed = (!Tweak.IsEnabled || Tweak.SelectedVariationIndex != idx);
-                    Tweak.SelectedVariationIndex = idx;
-                    Tweak.IsEnabled = true;
-                    Tweak.PendingRebootAfterDisable = false;
-                    if (changed && Tweak.NeedsReboot) Tweak.RebootSatisfied = false;
-                    if (changed && Tweak.NeedsNetReload) Tweak.NetReloadSatisfied = false;
-                    if (onStateChanged != null)
-                        onStateChanged(Tweak, true, idx);
-                    RefreshVisualState();
-                    if (onHoverInspect != null)
-                        onHoverInspect(Tweak, v);
-                };
-
-                string varTip = string.Format(
-                    "⚡ Mod {0}: {1}\n" +
-                    "──────────────────────────────────────────\n" +
-                    "🎯 Ne Zaman Kullanılır: {2}\n" +
-                    "💡 Makine Varsayılanı: {3}",
-                    i + 1, v.DetailedTitle, v.TechnicalReason, Tweak.CapturedOriginalSummary);
-
-                sharedToolTip.SetToolTip(btnVar, varTip);
-                btnVar.MouseEnter += (s, e) =>
-                {
-                    if (onHoverInspect != null) onHoverInspect(Tweak, v);
-                };
-
-                this.Controls.Add(btnVar);
-                variationButtons.Add(btnVar);
-                varX += btnVar.PreferredSize.Width + 8;
+                var v = Tweak.Variations[i];
+                cmbVariations.Items.Add(string.Format("Mod {0}: {1}", i + 1, v.ShortLabel));
             }
-
-            // Row 5: Expandable Practical Purpose Drawer (Y = 105, Hidden by default)
-            pnlDetailsDrawer = new Panel
+            if (cmbVariations.Items.Count > 0)
             {
-                Location = new Point(14, 105),
-                Size = new Size(this.Width - 28, 53),
-                BackColor = Color.FromArgb(14, 18, 27),
-                Visible = false
-            };
-            this.Controls.Add(pnlDetailsDrawer);
-
-            lblDeepWhy = new Label
+                syncingRowControls = true;
+                cmbVariations.SelectedIndex = Math.Max(0, Math.Min(Tweak.SelectedVariationIndex, cmbVariations.Items.Count - 1));
+                syncingRowControls = false;
+            }
+            cmbVariations.SelectedIndexChanged += (s, e) =>
             {
-                Text = "💡 Ne Zaman & Neden Kullanılır: " + Tweak.DeepTechnicalWhy,
-                Font = new Font("Segoe UI", 8.2f, FontStyle.Regular),
-                ForeColor = Color.FromArgb(185, 200, 222),
-                Location = new Point(8, 6),
-                Size = new Size(pnlDetailsDrawer.Width - 16, 42)
+                if (syncingRowControls || cmbVariations.SelectedIndex < 0) return;
+                int idx = cmbVariations.SelectedIndex;
+                Tweak.SelectedVariationIndex = idx;
+                Tweak.IsEnabled = true;
+                if (onStateChanged != null)
+                    onStateChanged(Tweak, true, idx);
+                RefreshVisualState();
+                if (onHoverInspect != null && idx < Tweak.Variations.Count)
+                    onHoverInspect(Tweak, Tweak.Variations[idx]);
             };
-            pnlDetailsDrawer.Controls.Add(lblDeepWhy);
+            this.Controls.Add(cmbVariations);
+
+            // 5. Live OS Truth Status Pill
+            lblLiveStateBadge = new Label
+            {
+                Text = "Varsayılan",
+                Font = new Font("Consolas", 7.6f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(148, 163, 184),
+                BackColor = Color.FromArgb(24, 30, 42),
+                AutoSize = false,
+                AutoEllipsis = true,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Size = new Size(148, 22),
+                Cursor = Cursors.Hand
+            };
+            lblLiveStateBadge.Click += (s, e) => ShowTechnicalSpecDialog();
+            this.Controls.Add(lblLiveStateBadge);
+
+            // 6. Quick Technical Spec Inspect Button [?]
+            btnInfoInspect = new Button
+            {
+                Text = "?",
+                Font = new Font("Consolas", 8.0f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(26, 33, 48),
+                ForeColor = Color.FromArgb(148, 163, 184),
+                Size = new Size(22, 22),
+                Cursor = Cursors.Hand
+            };
+            btnInfoInspect.FlatAppearance.BorderSize = 1;
+            btnInfoInspect.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnInfoInspect.Click += (s, e) => ShowTechnicalSpecDialog();
+            this.Controls.Add(btnInfoInspect);
 
             string cardTip = BuildCardTooltip();
             sharedToolTip.SetToolTip(this, cardTip);
             sharedToolTip.SetToolTip(lblTitle, cardTip);
-            sharedToolTip.SetToolTip(lblShortSub, cardTip);
+            sharedToolTip.SetToolTip(pnlIconBox, cardTip);
+            sharedToolTip.SetToolTip(cmbVariations, cardTip);
+            sharedToolTip.SetToolTip(lblLiveStateBadge, cardTip);
+            sharedToolTip.SetToolTip(btnInfoInspect, "Teknik parametreleri, kayıt defteri hedefini ve canlı OS durumunu görüntüle");
 
-            EventHandler hoverHandler = (s, e) =>
+            EventHandler hoverEnter = (s, e) =>
             {
+                isMouseHovered = true;
+                this.Invalidate(false);
                 if (onHoverInspect != null && Tweak.Variations.Count > 0)
                 {
                     int safeIdx = Math.Max(0, Math.Min(Tweak.SelectedVariationIndex, Tweak.Variations.Count - 1));
                     onHoverInspect(Tweak, Tweak.Variations[safeIdx]);
                 }
             };
-            this.MouseEnter += hoverHandler;
-            lblTitle.MouseEnter += hoverHandler;
-            lblShortSub.MouseEnter += hoverHandler;
+            EventHandler hoverLeave = (s, e) =>
+            {
+                isMouseHovered = false;
+                this.Invalidate(false);
+            };
+
+            this.MouseEnter += hoverEnter;
+            this.MouseLeave += hoverLeave;
+            lblTitle.MouseEnter += hoverEnter;
+            lblTitle.MouseLeave += hoverLeave;
+            pnlIconBox.MouseEnter += hoverEnter;
+            cmbVariations.MouseEnter += hoverEnter;
+            lblLiveStateBadge.MouseEnter += hoverEnter;
 
             LayoutCardControls();
+        }
+
+        private void ToggleRowEnabledState(bool wantEnable)
+        {
+            bool wasEnabled = Tweak.IsEnabled;
+            if (wasEnabled == wantEnable) return;
+
+            Tweak.IsEnabled = wantEnable;
+            if (onStateChanged != null)
+                onStateChanged(Tweak, Tweak.IsEnabled, Tweak.SelectedVariationIndex);
+            RefreshVisualState();
+        }
+
+        private void ShowTechnicalSpecDialog()
+        {
+            if (onHoverInspect != null && Tweak.Variations.Count > 0)
+            {
+                int safeIdx = Math.Max(0, Math.Min(Tweak.SelectedVariationIndex, Tweak.Variations.Count - 1));
+                onHoverInspect(Tweak, Tweak.Variations[safeIdx]);
+            }
+            MessageBox.Show(BuildCardTooltip(), "Argon Teknik Denetim — " + Tweak.Title, MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
         private void LayoutCardControls()
         {
-            int w = Math.Max(600, this.ClientSize.Width);
-            if (lblBadge != null && lblScopeBadge != null)
-            {
-                lblScopeBadge.Location = new Point(lblBadge.Right + 6, 8);
-            }
-            if (pnlToggleSwitch != null)
-            {
-                pnlToggleSwitch.Location = new Point(w - pnlToggleSwitch.Width - 12, 5);
-            }
-            if (btnExpandToggle != null && pnlToggleSwitch != null)
-            {
-                int expW = Math.Max(68, btnExpandToggle.PreferredSize.Width);
-                btnExpandToggle.Size = new Size(expW, 24);
-                btnExpandToggle.Location = new Point(pnlToggleSwitch.Left - expW - 8, 7);
-            }
-            if (lblLiveState != null && btnExpandToggle != null && lblBadge != null)
-            {
-                int leftLimit = (lblScopeBadge != null && lblScopeBadge.Visible) ? (lblScopeBadge.Right + 10) : (lblBadge.Right + 10);
-                int rightLimit = btnExpandToggle.Left - 8;
-                int availW = Math.Max(120, rightLimit - leftLimit);
-                lblLiveState.Size = new Size(availW, 19);
-                lblLiveState.Location = new Point(leftLimit, 9);
-            }
-            if (lblShortSub != null)
-            {
-                lblShortSub.Width = Math.Max(200, w - 28);
-            }
-            if (pnlDetailsDrawer != null)
-            {
-                pnlDetailsDrawer.Width = Math.Max(200, w - 28);
-                if (lblDeepWhy != null)
-                    lblDeepWhy.Width = Math.Max(180, pnlDetailsDrawer.ClientSize.Width - 16);
-            }
-        }
+            int w = Math.Max(520, this.ClientSize.Width);
+            int rightX = w - 6;
 
-        private void ToggleExpandDrawer()
-        {
-            isExpanded = !isExpanded;
-            pnlDetailsDrawer.Visible = isExpanded;
-            this.Height = isExpanded ? EXPANDED_HEIGHT : COMPACT_HEIGHT;
-            btnExpandToggle.Text = isExpanded ? "Gizle ▴" : "Amacı ▾";
-            btnExpandToggle.ForeColor = isExpanded ? Color.FromArgb(56, 189, 248) : Color.FromArgb(148, 163, 184);
-            LayoutCardControls();
-            this.Invalidate(true);
+            if (btnInfoInspect != null)
+            {
+                rightX -= btnInfoInspect.Width;
+                btnInfoInspect.Location = new Point(rightX, 7);
+                rightX -= 5;
+            }
+
+            if (lblLiveStateBadge != null)
+            {
+                int badgeW = w >= 800 ? 168 : (w >= 700 ? 152 : 132);
+                rightX -= badgeW;
+                lblLiveStateBadge.Size = new Size(badgeW, 22);
+                lblLiveStateBadge.Location = new Point(rightX, 7);
+                rightX -= 6;
+            }
+
+            if (cmbVariations != null)
+            {
+                int comboW = w >= 800 ? 250 : (w >= 700 ? 220 : 185);
+                rightX -= comboW;
+                cmbVariations.Size = new Size(comboW, 22);
+                cmbVariations.Location = new Point(rightX, 7);
+                rightX -= 8;
+            }
+
+            if (lblTitle != null)
+            {
+                int titleLeft = 58;
+                int titleW = Math.Max(160, rightX - titleLeft);
+                lblTitle.Location = new Point(titleLeft, 4);
+                lblTitle.Size = new Size(titleW, 28);
+            }
         }
 
         private string BuildCardTooltip()
         {
             StringBuilder sb = new StringBuilder();
-            sb.AppendLine("⚡ " + Tweak.Title);
-            sb.AppendLine("🎯 Kullanım Amacı: " + Tweak.DeepTechnicalWhy);
-            sb.AppendLine("🔧 Hedef Konum / API: " + (Tweak.TargetPathOrApi ?? "Sistem Çekirdeği"));
-            sb.AppendLine("🔍 Canlı Sistem Durumu: " + (string.IsNullOrEmpty(Tweak.LiveOsRawSummary) ? (Tweak.IsVerifiedInOs ? ("Doğrulandı (" + Tweak.VerifiedSystemValue + ")") : ("Varsayılan (" + Tweak.CapturedOriginalSummary + ")")) : Tweak.LiveOsRawSummary));
+            sb.AppendLine("[" + Tweak.BadgeText + "] " + Tweak.Title);
+            sb.AppendLine("──────────────────────────────────────────────────");
+            sb.AppendLine("• Teknik Özet   : " + Tweak.SummaryDescription);
+            sb.AppendLine("• Mimari Neden  : " + Tweak.DeepTechnicalWhy);
+            sb.AppendLine("• Sistem Hedefi : " + (Tweak.TargetPathOrApi ?? "Kernel / Win32 API"));
+            sb.AppendLine("• Fabrika Değeri: " + Tweak.CapturedOriginalSummary);
+            sb.AppendLine("• Canlı OS      : " + (string.IsNullOrEmpty(Tweak.LiveOsRawSummary) ? (Tweak.IsVerifiedInOs ? ("Doğrulandı (" + Tweak.VerifiedSystemValue + ")") : "Varsayılanda") : Tweak.LiveOsRawSummary));
             if (Tweak.RequiresCautionConfirmation && !string.IsNullOrEmpty(Tweak.CautionWarningText))
-                sb.AppendLine("⚠️ DİKKAT: " + Tweak.CautionWarningText);
+                sb.AppendLine("• Uyarı Notu    : " + Tweak.CautionWarningText);
             sb.AppendLine();
+            sb.AppendLine("Varyasyon Parametreleri:");
             for (int i = 0; i < Tweak.Variations.Count; i++)
             {
                 var v = Tweak.Variations[i];
-                sb.AppendLine(string.Format("• Mod {0} ({1}): {2} [{3}]", i + 1, v.ShortLabel, v.TechnicalReason, v.ExactParameters));
+                sb.AppendLine(string.Format("  [{0}] {1} -> {2}", i + 1, v.ShortLabel, v.ExactParameters));
             }
             return sb.ToString();
-        }
-
-        private void OnPaintToggleSwitch(object sender, PaintEventArgs e)
-        {
-            Graphics g = e.Graphics;
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-
-            Rectangle rect = new Rectangle(2, 2, pnlToggleSwitch.Width - 5, pnlToggleSwitch.Height - 5);
-            Color bg = Tweak.IsEnabled ? Color.FromArgb(16, 185, 129) : Color.FromArgb(40, 48, 66);
-            Color border = Tweak.IsEnabled ? Color.FromArgb(52, 211, 153) : Color.FromArgb(71, 85, 105);
-
-            using (GraphicsPath path = CreateRoundedRect(rect, 11))
-            using (SolidBrush br = new SolidBrush(bg))
-            using (Pen pen = new Pen(border, 1.5f))
-            {
-                g.FillPath(br, path);
-                g.DrawPath(pen, path);
-            }
-
-            int knobSize = rect.Height - 6;
-            int knobX = Tweak.IsEnabled ? (rect.Right - knobSize - 4) : (rect.Left + 4);
-            Rectangle knobRect = new Rectangle(knobX, rect.Top + 3, knobSize, knobSize);
-            using (SolidBrush knobBr = new SolidBrush(Tweak.IsEnabled ? Color.FromArgb(10, 15, 22) : Color.FromArgb(203, 213, 225)))
-            {
-                g.FillEllipse(knobBr, knobRect);
-            }
-
-            string txt = Tweak.IsEnabled ? "AÇIK" : "KAPALI";
-            using (Font f = new Font("Segoe UI", 7.8f, FontStyle.Bold))
-            using (SolidBrush txtBr = new SolidBrush(Tweak.IsEnabled ? Color.FromArgb(10, 15, 22) : Color.FromArgb(203, 213, 225)))
-            {
-                int textX = Tweak.IsEnabled ? (rect.Left + 10) : (rect.Left + knobSize + 8);
-                g.DrawString(txt, f, txtBr, new PointF(textX, rect.Top + 3));
-            }
         }
 
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
-            Color borderColor = Tweak.IsEnabled ? Tweak.BadgeColor : Color.FromArgb(35, 42, 60);
-            int borderWidth = Tweak.IsEnabled ? 2 : 1;
-            using (Pen p = new Pen(borderColor, borderWidth))
+            Color borderColor = Tweak.IsEnabled
+                ? Color.FromArgb(140, Tweak.BadgeColor)
+                : (isMouseHovered ? Color.FromArgb(65, 80, 110) : Color.FromArgb(30, 37, 52));
+
+            using (Pen p = new Pen(borderColor, 1))
             {
                 e.Graphics.DrawRectangle(p, 0, 0, this.Width - 1, this.Height - 1);
             }
-            if (Tweak.IsEnabled)
+
+            using (SolidBrush accentBr = new SolidBrush(Tweak.IsEnabled ? Tweak.BadgeColor : Color.FromArgb(45, 55, 76)))
             {
-                using (SolidBrush accentBr = new SolidBrush(Tweak.BadgeColor))
-                {
-                    e.Graphics.FillRectangle(accentBr, 0, 0, 4, this.Height);
-                }
+                e.Graphics.FillRectangle(accentBr, 0, 0, Tweak.IsEnabled ? 4 : 2, this.Height);
             }
         }
 
         public void RefreshVisualState()
         {
-            if (lblScopeBadge != null)
+            syncingRowControls = true;
+            try
             {
-                if (!Tweak.IsEnabled)
+                if (chkEnable != null && chkEnable.Checked != Tweak.IsEnabled)
+                    chkEnable.Checked = Tweak.IsEnabled;
+
+                if (cmbVariations != null && Tweak.SelectedVariationIndex >= 0 && Tweak.SelectedVariationIndex < cmbVariations.Items.Count)
                 {
-                    if (Tweak.IsDetectedActiveInOs)
-                    {
-                        lblScopeBadge.Visible = true;
-                        lblScopeBadge.Text = "🟢 Sistemde Aktif (Dışarıdan/Önceden)";
-                        lblScopeBadge.ForeColor = Color.FromArgb(56, 189, 248);
-                        lblScopeBadge.BackColor = Color.FromArgb(14, 38, 58);
-                    }
-                    else if (Tweak.PendingRebootAfterDisable)
-                    {
-                        lblScopeBadge.Visible = true;
-                        lblScopeBadge.Text = "🟠 Kapatıldı (Restart İster)";
-                        lblScopeBadge.ForeColor = Color.FromArgb(251, 191, 36);
-                        lblScopeBadge.BackColor = Color.FromArgb(55, 34, 12);
-                    }
-                    else if (Tweak.RequiresCautionConfirmation)
-                    {
-                        lblScopeBadge.Visible = true;
-                        lblScopeBadge.Text = "⚠️ Kritik Ayar (Onaylı)";
-                        lblScopeBadge.ForeColor = Color.FromArgb(253, 186, 116);
-                        lblScopeBadge.BackColor = Color.FromArgb(58, 28, 12);
-                    }
-                    else
-                    {
-                        lblScopeBadge.Visible = false;
-                    }
+                    if (cmbVariations.SelectedIndex != Tweak.SelectedVariationIndex)
+                        cmbVariations.SelectedIndex = Tweak.SelectedVariationIndex;
                 }
-                else
+            }
+            finally
+            {
+                syncingRowControls = false;
+            }
+
+            this.BackColor = Tweak.IsEnabled
+                ? Color.FromArgb(17, 29, 39)
+                : (isMouseHovered ? Color.FromArgb(23, 29, 42) : Color.FromArgb(17, 21, 30));
+
+            if (lblTitle != null)
+            {
+                lblTitle.ForeColor = Tweak.IsEnabled ? Color.White : Color.FromArgb(212, 220, 232);
+            }
+
+            if (cmbVariations != null)
+            {
+                cmbVariations.BackColor = Tweak.IsEnabled ? Color.FromArgb(14, 24, 34) : Color.FromArgb(13, 16, 23);
+                cmbVariations.ForeColor = Tweak.IsEnabled ? Color.FromArgb(56, 189, 248) : Color.FromArgb(175, 188, 208);
+            }
+
+            if (lblLiveStateBadge != null)
+            {
+                if (Tweak.IsEnabled)
                 {
-                    if (Tweak.NeedsReboot && !Tweak.RebootSatisfied)
+                    if (Tweak.IsRebootPending)
                     {
-                        lblScopeBadge.Visible = true;
-                        lblScopeBadge.Text = Tweak.IsVerifiedInOs ? "🟠 Restart Gerekli (Kaydedildi)" : "🟠 Restart Gerekli";
-                        lblScopeBadge.ForeColor = Color.FromArgb(251, 191, 36);
-                        lblScopeBadge.BackColor = Color.FromArgb(55, 34, 12);
+                        int safeIdx = Math.Max(0, Math.Min(Tweak.SelectedVariationIndex, Tweak.Variations.Count - 1));
+                        string modTag = Tweak.Variations.Count > 1 ? string.Format(Loc.T("Mod {0} (Restart)", "Mode {0} (Restart)"), safeIdx + 1) : Loc.T("Restart Bekliyor", "Restart Pending");
+                        lblLiveStateBadge.Text = "⚠️ " + modTag;
+                        lblLiveStateBadge.ForeColor = Color.FromArgb(251, 191, 36);
+                        lblLiveStateBadge.BackColor = Color.FromArgb(52, 34, 14);
                     }
-                    else if (Tweak.NeedsNetReload && !Tweak.NetReloadSatisfied)
+                    else if (Tweak.IsNetReloadPending)
                     {
-                        lblScopeBadge.Visible = true;
-                        lblScopeBadge.Text = "🔄 Ağ Yenileme İster";
-                        lblScopeBadge.ForeColor = Color.FromArgb(56, 189, 248);
-                        lblScopeBadge.BackColor = Color.FromArgb(16, 36, 56);
+                        lblLiveStateBadge.Text = Loc.T("⚡ Ağ Yenileme", "⚡ Net Reload");
+                        lblLiveStateBadge.ForeColor = Color.FromArgb(56, 189, 248);
+                        lblLiveStateBadge.BackColor = Color.FromArgb(15, 36, 56);
                     }
                     else if (Tweak.IsVerifiedInOs)
                     {
-                        lblScopeBadge.Visible = true;
-                        if (Tweak.NeedsReboot && Tweak.RebootSatisfied)
-                            lblScopeBadge.Text = "✓ Doğrulandı (Restart Aktif)";
-                        else if (Tweak.NeedsNetReload && Tweak.NetReloadSatisfied)
-                            lblScopeBadge.Text = "✓ Doğrulandı (Ağ Aktif)";
-                        else
-                            lblScopeBadge.Text = "✓ Sistemde Doğrulandı";
-                        lblScopeBadge.ForeColor = Color.FromArgb(52, 211, 153);
-                        lblScopeBadge.BackColor = Color.FromArgb(14, 42, 34);
+                        string vText = !string.IsNullOrEmpty(Tweak.VerifiedSystemValue) ? Tweak.VerifiedSystemValue : Loc.T("UYGULANDI", "APPLIED");
+                        lblLiveStateBadge.Text = "✓ " + vText;
+                        lblLiveStateBadge.ForeColor = Color.FromArgb(52, 211, 153);
+                        lblLiveStateBadge.BackColor = Color.FromArgb(13, 40, 32);
                     }
                     else
                     {
-                        lblScopeBadge.Visible = true;
-                        lblScopeBadge.Text = "⚠️ Doğrulanamadı (Yetki/Kilit)";
-                        lblScopeBadge.ForeColor = Color.FromArgb(248, 113, 113);
-                        lblScopeBadge.BackColor = Color.FromArgb(58, 20, 24);
+                        lblLiveStateBadge.Text = Loc.T("✓ UYGULANDI", "✓ APPLIED");
+                        lblLiveStateBadge.ForeColor = Color.FromArgb(52, 211, 153);
+                        lblLiveStateBadge.BackColor = Color.FromArgb(13, 40, 32);
+                    }
+                }
+                else
+                {
+                    if (Tweak.IsRebootPending)
+                    {
+                        lblLiveStateBadge.Text = Loc.T("⚠️ Pasif (Restart)", "⚠️ Disabled (Restart)");
+                        lblLiveStateBadge.ForeColor = Color.FromArgb(251, 191, 36);
+                        lblLiveStateBadge.BackColor = Color.FromArgb(52, 34, 14);
+                    }
+                    else if (Tweak.IsDetectedActiveInOs)
+                    {
+                        string dText = !string.IsNullOrEmpty(Tweak.VerifiedSystemValue) ? Tweak.VerifiedSystemValue : Loc.T("SİSTEMDE AKTİF", "ACTIVE IN OS");
+                        lblLiveStateBadge.Text = "● " + dText;
+                        lblLiveStateBadge.ForeColor = Color.FromArgb(56, 189, 248);
+                        lblLiveStateBadge.BackColor = Color.FromArgb(14, 34, 52);
+                    }
+                    else
+                    {
+                        string defTxt = string.IsNullOrEmpty(Tweak.CapturedOriginalSummary) ? Loc.T("Varsayılan", "Default") : Tweak.CapturedOriginalSummary;
+                        lblLiveStateBadge.Text = defTxt;
+                        lblLiveStateBadge.ForeColor = Color.FromArgb(125, 140, 165);
+                        lblLiveStateBadge.BackColor = Color.FromArgb(22, 27, 38);
                     }
                 }
             }
 
-            LayoutCardControls();
-
-            this.BackColor = Tweak.IsEnabled ? Color.FromArgb(18, 29, 41) : Color.FromArgb(21, 25, 36);
-
-            if (Tweak.IsEnabled && Tweak.SelectedVariationIndex >= 0 && Tweak.SelectedVariationIndex < Tweak.Variations.Count)
-            {
-                var activeVar = Tweak.Variations[Tweak.SelectedVariationIndex];
-                if (!string.IsNullOrEmpty(Tweak.VerifiedSystemValue))
-                {
-                    lblLiveState.Text = string.Format("✓ OS: {0} | Mod {1}", Tweak.VerifiedSystemValue, Tweak.SelectedVariationIndex + 1);
-                }
-                else
-                {
-                    lblLiveState.Text = string.Format("Aktif: Mod {0} ({1})", Tweak.SelectedVariationIndex + 1, activeVar.ShortLabel);
-                }
-                lblLiveState.ForeColor = Tweak.IsVerifiedInOs ? Color.FromArgb(52, 211, 153) : Color.FromArgb(251, 191, 36);
-            }
-            else
-            {
-                if (Tweak.IsDetectedActiveInOs && !string.IsNullOrEmpty(Tweak.VerifiedSystemValue))
-                {
-                    lblLiveState.Text = "OS Algılandı: " + Tweak.VerifiedSystemValue;
-                    lblLiveState.ForeColor = Color.FromArgb(56, 189, 248);
-                }
-                else
-                {
-                    lblLiveState.Text = "Varsayılan: " + Tweak.CapturedOriginalSummary;
-                    lblLiveState.ForeColor = Color.FromArgb(125, 140, 165);
-                }
-            }
-
-            for (int i = 0; i < variationButtons.Count; i++)
-            {
-                bool isSelected = (i == Tweak.SelectedVariationIndex);
-                if (Tweak.IsEnabled && isSelected)
-                {
-                    variationButtons[i].BackColor = Tweak.BadgeColor;
-                    variationButtons[i].ForeColor = Color.Black;
-                    variationButtons[i].FlatAppearance.BorderColor = Color.White;
-                }
-                else if (isSelected)
-                {
-                    variationButtons[i].BackColor = Color.FromArgb(36, 44, 62);
-                    variationButtons[i].ForeColor = Color.White;
-                    variationButtons[i].FlatAppearance.BorderColor = Tweak.BadgeColor;
-                }
-                else
-                {
-                    variationButtons[i].BackColor = Color.FromArgb(27, 33, 47);
-                    variationButtons[i].ForeColor = Color.FromArgb(160, 174, 196);
-                    variationButtons[i].FlatAppearance.BorderColor = Color.FromArgb(45, 55, 76);
-                }
-            }
-
-            pnlToggleSwitch.Invalidate();
-            this.Invalidate(true);
-        }
-
-        private static GraphicsPath CreateRoundedRect(Rectangle bounds, int radius)
-        {
-            int diameter = radius * 2;
-            Size size = new Size(diameter, diameter);
-            Rectangle arc = new Rectangle(bounds.Location, size);
-            GraphicsPath path = new GraphicsPath();
-            if (radius == 0) { path.AddRectangle(bounds); return path; }
-            path.AddArc(arc, 180, 90);
-            arc.X = bounds.Right - diameter;
-            path.AddArc(arc, 270, 90);
-            arc.Y = bounds.Bottom - diameter;
-            path.AddArc(arc, 0, 90);
-            arc.X = bounds.Left;
-            path.AddArc(arc, 90, 90);
-            path.CloseFigure();
-            return path;
+            if (pnlIconBox != null) pnlIconBox.Invalidate();
+            this.Invalidate(false);
         }
     }
 
@@ -2154,6 +2754,7 @@ namespace ArgonLatencyStudio
         private ToolTip mainToolTip;
         private Panel pnlTopHeader;
         private Panel pnlNavBar;
+        private Panel pnlRightSidebar;
         private Panel pnlInspectorFooter;
         private Label lblInspectorTitle;
         private Label lblInspectorPath;
@@ -2165,6 +2766,25 @@ namespace ArgonLatencyStudio
         private Label lblTopCpuSensor;
         private Label lblTopGpuSensor;
         private TextBox txtGlobalSearch;
+        private Label lblSearchIcon;
+        private Label lblLiveSystemStatusPill;
+
+        // Right Sidebar (NetAdapter Repair-style Live Network, Hardware Telemetry & OS Audit Console)
+        private TextBox txtNetHostAdmin;
+        private TextBox txtNetAdapter;
+        private TextBox txtNetLocalIp;
+        private TextBox txtNetGateway;
+        private TextBox txtNetDns;
+        private TextBox txtNetMac;
+        private TextBox txtNetPingLive;
+        private TextBox txtHwCpuName;
+        private TextBox txtHwCpuTelemetry;
+        private TextBox txtHwGpuName;
+        private TextBox txtHwGpuTelemetry;
+        private TextBox txtHwRamUsage;
+        private TextBox txtHwTimerActive;
+        private TextBox txtLiveConsoleLog;
+        private Label lblNetTrafficStats;
 
         // Progressive Dashboard & Hardware Matrix Controls
         private ComboBox cmbCpuSelector;
@@ -2174,6 +2794,32 @@ namespace ArgonLatencyStudio
         private Button btnTier3;
         private Label lblMatrixSummary;
         private FlowLayoutPanel flowHardwareSpecificCards;
+        private Button btnLangToggle;
+        private Label lblProfCaption;
+        private Button btnQuickSaveProf;
+        private Button btnSmartTuneTop;
+        private Button btnResetAllTop;
+        private Button btnMinimizeTray;
+        private Button btnElevate;
+        private Label lblMatTitle;
+        private Label lblCpuPick;
+        private Label lblGpuPick;
+        private Label lblTierPick;
+        private Button btnSmartApply;
+        private Button btnAutoDetectReset;
+        private Button btnQuickRam;
+        private Label grpNetAdapter;
+        private Button btnSidePingIp;
+        private Button btnSidePingDns;
+        private Button btnSideFlush;
+        private Button btnSideRefreshNet;
+        private Label lblHwHdr;
+        private Label lblSideEventLogHeader;
+        private ComboBox cmbSetLanguage;
+        private Dictionary<TextBox, Label> sidebarRowLabels = new Dictionary<TextBox, Label>();
+        private List<Label> tweakColHeadersCol1 = new List<Label>();
+        private List<Label> tweakColHeadersCol2 = new List<Label>();
+        private List<Label> tweakColHeadersCol3 = new List<Label>();
 
         private List<Button> navButtons = new List<Button>();
         private int currentActiveTabIndex = 0;
@@ -2186,12 +2832,43 @@ namespace ArgonLatencyStudio
         private FlowLayoutPanel flowWinUtilCards;
         private FlowLayoutPanel viewExperimental;
         private Panel viewProcesses;
+        private Panel viewAutomationQoL;
         private Panel viewBenchmark;
         private Panel viewSnapshotAudit;
         private Panel viewSettings;
         private Panel viewGlobalSearch;
         private FlowLayoutPanel flowGlobalSearchCards;
         private Label lblGlobalSearchHeader;
+
+        // Otomasyon & QoL Modülü
+        private QoLAutomationConfig qolConfig = new QoLAutomationConfig();
+        private string qolConfigPath;
+        private Label lblPowerTimerStatus;
+        private Button btnStartPowerTimer;
+        private Button btnCancelPowerTimer;
+        private NumericUpDown numPowerHours;
+        private NumericUpDown numPowerMins;
+        private TextBox txtPowerSpecificTime;
+        private RadioButton rbPowerCountdown;
+        private RadioButton rbPowerSpecific;
+        private ComboBox cmbPowerAction;
+        private ListView lvAlarms;
+        private ListView lvGameNotes;
+        private Label lblQoLRamStatus;
+        private CheckBox chkAutoRamEnable;
+        private RadioButton rbRam10;
+        private RadioButton rbRam15;
+        private RadioButton rbRam20;
+        private RadioButton rbRam30;
+        private RadioButton rbRamCustom;
+        private NumericUpDown numRamCustom;
+        private Label lblSystemTempStatus;
+        private Label lblShaderCacheStatus;
+        private Button btnCleanTempNow;
+        private Button btnCleanShaderNow;
+        private double liveDownloadSpeedKBps = 0;
+        private long lastTrafficBytesRecv = 0;
+        private DateTime lastTrafficSampleTime = DateTime.MinValue;
 
         private ListView lvProcesses;
         private TextBox txtProcFilter;
@@ -2253,6 +2930,8 @@ namespace ArgonLatencyStudio
             userProfilePath = Path.Combine(profileDir, "user_saved_profile.txt");
             appSettingsPath = Path.Combine(profileDir, "argon_app_settings.txt");
             appSettings = ArgonAppSettings.Load(appSettingsPath);
+            qolConfigPath = Path.Combine(profileDir, "argon_automation_qol.txt");
+            qolConfig = QoLAutomationConfig.LoadFromFile(qolConfigPath);
             customProfilesDir = Path.Combine(profileDir, "CustomProfiles");
             if (!Directory.Exists(customProfilesDir)) Directory.CreateDirectory(customProfilesDir);
             LoadCustomProfilesList();
@@ -2270,6 +2949,19 @@ namespace ArgonLatencyStudio
 
             startHiddenInTray = (args != null && Array.IndexOf(args, "--tray") >= 0);
             RegisterAllTweaksCatalog();
+            // Baseline boot probe: record initial boot state of OS so variation toggling never produces false restart requests
+            foreach (var t in allTweaks)
+            {
+                VerifySingleTweakInLiveOs(t);
+                t.BootTimeActiveInOs = t.IsDetectedActiveInOs;
+                t.BootTimeVariationInOs = t.DetectedVariationInOs;
+                t.BootTimeRawValue = t.VerifiedSystemValue;
+                if (t.IsDetectedActiveInOs)
+                {
+                    t.RebootSatisfied = true;
+                    t.NetReloadSatisfied = true;
+                }
+            }
             InitializeStudioUI();
             ApplyWindowLayoutPolicy();
             bool baselineLostWithProfile = vault.BaselineRecapturedFresh && File.Exists(userProfilePath);
@@ -2277,7 +2969,12 @@ namespace ArgonLatencyStudio
             ProbeAllTweaksLiveOsTruthAndOptionallySync(appSettings.AutoLiveTruthSync);
             if (preservedProfileTweakLines.Count > 0 && lblInspectorTitle != null)
                 lblInspectorTitle.Text = string.Format("⚠️ Yönetici yetkisi yok: {0} kayıtlı ayar uygulanmadı (profilde korunuyor). 'Yönetici Olarak Aç' ile devam edin.", preservedProfileTweakLines.Count);
-            this.Shown += (snd2, evt2) => SyncAutoStartCheckboxFromSystem();
+            this.Shown += (snd2, evt2) =>
+            {
+                SyncAutoStartCheckboxFromSystem();
+                UpdateRebootAndReloadBannerVisibility();
+                LayoutNavBarButtons();
+            };
             if (baselineLostWithProfile)
             {
                 this.Shown += (snd, evt) => MessageBox.Show(
@@ -3509,8 +4206,9 @@ namespace ArgonLatencyStudio
                     timerLockActive = true;
                     try
                     {
-                        HoldTimerPeriod();
                         uint cur;
+                        NativeMethods.NtSetTimerResolution(0, false, out cur);
+                        HoldTimerPeriod();
                         NativeMethods.NtSetTimerResolution(5000, true, out cur);
                     }
                     catch { }
@@ -3528,8 +4226,9 @@ namespace ArgonLatencyStudio
                     timerLockActive = true;
                     try
                     {
-                        HoldTimerPeriod();
                         uint cur;
+                        NativeMethods.NtSetTimerResolution(0, false, out cur);
+                        HoldTimerPeriod();
                         NativeMethods.NtSetTimerResolution(10000, true, out cur);
                     }
                     catch { }
@@ -3548,8 +4247,9 @@ namespace ArgonLatencyStudio
                     timerLockActive = true;
                     try
                     {
-                        HoldTimerPeriod();
                         uint cur;
+                        NativeMethods.NtSetTimerResolution(0, false, out cur);
+                        HoldTimerPeriod();
                         NativeMethods.NtSetTimerResolution(5040, true, out cur);
                     }
                     catch { }
@@ -5263,29 +5963,51 @@ namespace ArgonLatencyStudio
         private Label lblRebootBannerText;
         private Button btnSoftReloadNow;
         private Button btnRebootPcBanner;
+        private Button btnDismissBanner;
+        private bool bannerDismissedBySession = false;
+
+        public Size GetPresetResolutionSize(string preset)
+        {
+            if (preset == "COMPACT") return new Size(1280, 820);
+            if (preset == "LARGE") return new Size(1560, 960);
+            if (preset == "EXTRA_LARGE") return new Size(1720, 1020);
+            return new Size(1380, 890); // Default MEDIUM (Orta Boy)
+        }
 
         private void ApplyWindowLayoutPolicy()
         {
             try
             {
-                if (appSettings != null && appSettings.FixedWindowLayout)
+                string preset = (appSettings != null && !string.IsNullOrEmpty(appSettings.WindowResolutionPreset))
+                    ? appSettings.WindowResolutionPreset
+                    : "MEDIUM";
+
+                Size targetSize = GetPresetResolutionSize(preset);
+                bool lockFixed = (appSettings == null || appSettings.LockFixedResolution);
+
+                if (lockFixed)
                 {
-                    this.MinimumSize = new Size(0, 0);
-                    this.MaximumSize = new Size(0, 0);
-                    if (this.WindowState == FormWindowState.Maximized)
-                        this.WindowState = FormWindowState.Normal;
                     this.FormBorderStyle = FormBorderStyle.FixedSingle;
                     this.MaximizeBox = false;
-                    this.Size = new Size(1240, 880);
+                    this.MinimumSize = targetSize;
+                    this.MaximumSize = targetSize;
+                    this.Size = targetSize;
                 }
                 else
                 {
                     this.FormBorderStyle = FormBorderStyle.Sizable;
                     this.MaximizeBox = true;
-                    this.MinimumSize = new Size(1220, 840);
+                    this.MinimumSize = new Size(1280, 800);
                     this.MaximumSize = new Size(0, 0);
-                    if (this.Width < 1220 || this.Height < 840)
-                        this.Size = new Size(1240, 880);
+                    this.Size = targetSize;
+                }
+
+                // If window bounds exceed active display working area, fit gracefully
+                Rectangle workArea = Screen.FromControl(this).WorkingArea;
+                if (this.Width > workArea.Width || this.Height > workArea.Height)
+                {
+                    this.Size = new Size(Math.Min(this.Width, workArea.Width - 10), Math.Min(this.Height, workArea.Height - 20));
+                    this.CenterToScreen();
                 }
             }
             catch { }
@@ -5293,8 +6015,8 @@ namespace ArgonLatencyStudio
 
         private void InitializeStudioUI()
         {
-            this.Text = "⚡ ARGON LOW LATENCY & TCP OPTIMIZER STUDIO v4.0 (2026 Live OS Truth & Hardware Telemetry Edition)" + (isAdmin ? " [YÖNETİCİ]" : " [STANDART]");
-            this.Size = new Size(1240, 880);
+            this.Text = "ARGON LATENCY STUDIO v4.0 — Windows Low Latency, Kernel Timer & TCP/IP Engineering Utility" + (isAdmin ? " [ADMINISTRATOR]" : " [STANDARD]");
+            this.Size = new Size(1380, 890);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.BackColor = Color.FromArgb(13, 16, 23);
             this.ForeColor = Color.White;
@@ -5309,33 +6031,85 @@ namespace ArgonLatencyStudio
             }
             catch { }
 
-            // 1. Top Header Bar (Fixed 104px Professional Telemetry & Profile Bar)
+            Icon appIcon = null;
+            try
+            {
+                string localIco = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "app.ico");
+                if (File.Exists(localIco))
+                    appIcon = new Icon(localIco);
+                else
+                    appIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+            }
+            catch { }
+            if (appIcon == null) appIcon = SystemIcons.Shield;
+            try { this.Icon = appIcon; } catch { }
+
+            // 1. Executive Utility Header Bar (42px Height - Clean, Non-intrusive)
             pnlTopHeader = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 104,
-                BackColor = Color.FromArgb(17, 21, 31)
+                Height = 42,
+                BackColor = Color.FromArgb(16, 20, 29)
+            };
+            pnlTopHeader.Paint += (s, e) =>
+            {
+                using (Pen borderPen = new Pen(Color.FromArgb(34, 43, 62), 1))
+                {
+                    e.Graphics.DrawLine(borderPen, 0, pnlTopHeader.Height - 1, pnlTopHeader.Width, pnlTopHeader.Height - 1);
+                }
             };
             this.Controls.Add(pnlTopHeader);
 
+            Panel pnlBrandEmblem = new Panel
+            {
+                Size = new Size(28, 28),
+                Location = new Point(10, 7),
+                BackColor = Color.FromArgb(20, 27, 40)
+            };
+            pnlBrandEmblem.Paint += (s, e) =>
+            {
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                using (Pen p = new Pen(Color.FromArgb(16, 185, 129), 1.4f))
+                {
+                    e.Graphics.DrawRectangle(p, 1, 1, pnlBrandEmblem.Width - 3, pnlBrandEmblem.Height - 3);
+                }
+                if (appIcon != null)
+                {
+                    try { e.Graphics.DrawIcon(appIcon, new Rectangle(4, 4, 20, 20)); return; } catch { }
+                }
+                TechnicalIconRenderer.DrawTweakVectorIcon(e.Graphics, new Rectangle(4, 4, 20, 20), "LAT_TIMER", "LATENCY", "ALL", Color.FromArgb(16, 185, 129));
+            };
+            pnlTopHeader.Controls.Add(pnlBrandEmblem);
+
             Label lblBrand = new Label
             {
-                Text = "⚡ ARGON LATENCY STUDIO v4.0",
-                Font = new Font("Segoe UI", 11.5f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(16, 185, 129),
+                Text = "ARGON STUDIO",
+                Font = new Font("Segoe UI", 10.5f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(52, 211, 153),
                 AutoSize = true,
-                Location = new Point(16, 7)
+                Location = new Point(44, 10)
             };
             pnlTopHeader.Controls.Add(lblBrand);
 
-            // Top Profile Selector Dropdown + Quick Save / Delete / OS Truth Sync
-            Label lblProfCaption = new Label
+            Label lblVersionPill = new Label
             {
-                Text = "💾 Profil:",
-                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                Text = "v4.0 PRO",
+                Font = new Font("Segoe UI", 7.2f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(56, 189, 248),
+                BackColor = Color.FromArgb(20, 32, 50),
+                AutoSize = true,
+                Location = new Point(164, 13),
+                Padding = new Padding(3, 1, 3, 1)
+            };
+            pnlTopHeader.Controls.Add(lblVersionPill);
+
+            lblProfCaption = new Label
+            {
+                Text = Loc.T("PROFİL:", "PROFILE:"),
+                Font = new Font("Segoe UI", 7.6f, FontStyle.Bold),
                 ForeColor = Color.FromArgb(148, 163, 184),
                 AutoSize = true,
-                Location = new Point(282, 10)
+                Location = new Point(236, 13)
             };
             pnlTopHeader.Controls.Add(lblProfCaption);
 
@@ -5343,121 +6117,132 @@ namespace ArgonLatencyStudio
             {
                 DropDownStyle = ComboBoxStyle.DropDownList,
                 Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
-                BackColor = Color.FromArgb(13, 16, 23),
+                BackColor = Color.FromArgb(12, 15, 22),
                 ForeColor = Color.FromArgb(56, 189, 248),
-                Location = new Point(340, 6),
-                Size = new Size(225, 24)
+                Location = new Point(292, 9),
+                Size = new Size(185, 24)
             };
             cmbProfileSelector.SelectedIndexChanged += (s, e) => OnTopProfileDropdownSelected();
             mainToolTip.SetToolTip(cmbProfileSelector, "Hazır sistem profilleri veya kendi isimlendirip kaydettiğiniz özel profiller arasında anında geçiş yapın.");
             pnlTopHeader.Controls.Add(cmbProfileSelector);
 
-            Button btnQuickSaveProf = new Button
+            btnQuickSaveProf = new Button
             {
-                Text = "➕ Kaydet",
+                Text = Loc.T("+ Kaydet", "+ Save"),
                 Font = new Font("Segoe UI", 7.6f, FontStyle.Bold),
                 FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(30, 64, 175),
+                BackColor = Color.FromArgb(30, 58, 138),
                 ForeColor = Color.White,
-                Size = new Size(74, 24),
-                Location = new Point(570, 6),
+                Size = new Size(62, 24),
+                Location = new Point(482, 9),
                 Cursor = Cursors.Hand
             };
-            btnQuickSaveProf.FlatAppearance.BorderSize = 0;
+            btnQuickSaveProf.FlatAppearance.BorderSize = 1;
+            btnQuickSaveProf.FlatAppearance.BorderColor = Color.FromArgb(59, 130, 246);
             btnQuickSaveProf.Click += (s, e) => PromptAndSaveCustomNamedProfile();
             mainToolTip.SetToolTip(btnQuickSaveProf, "Şu an açık olan tüm ayarlarınızı kendi vereceğiniz bir isimle özel profil olarak kaydeder.");
             pnlTopHeader.Controls.Add(btnQuickSaveProf);
 
-            Button btnQuickSyncTruth = new Button
+            lblLiveSystemStatusPill = new Label
             {
-                Text = "🔄 Gerçek Durumu Algıla",
-                Font = new Font("Segoe UI", 7.6f, FontStyle.Bold),
-                FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(15, 118, 110),
-                ForeColor = Color.White,
-                Size = new Size(152, 24),
-                Location = new Point(648, 6),
-                Cursor = Cursors.Hand
-            };
-            btnQuickSyncTruth.FlatAppearance.BorderSize = 0;
-            btnQuickSyncTruth.Click += (s, e) => ProbeAllTweaksLiveOsTruthAndOptionallySync(true);
-            mainToolTip.SetToolTip(btnQuickSyncTruth, "Bayraklardan bağımsız olarak Windows Kayıt Defteri, Güç Planı ve Kernel'i canlı tarar; sistemde gerçekten aktif olan ayarları arayüz anahtarlarıyla birebir eşitler.");
-            pnlTopHeader.Controls.Add(btnQuickSyncTruth);
-
-            Label lblDetected = new Label
-            {
-                Text = string.Format("🤖 Donanım: {0} ({1}C/{2}T)  |  {3}  |  {4}",
-                    detectedHw.CpuName, detectedHw.PhysicalCores, detectedHw.LogicalThreads, detectedHw.GpuName, detectedHw.NicName),
+                Text = "● Sistem: " + allTweaks.Count + " Ayar Taranıyor",
                 Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(56, 189, 248),
+                ForeColor = Color.FromArgb(52, 211, 153),
                 AutoSize = true,
-                Location = new Point(18, 32)
-            };
-            pnlTopHeader.Controls.Add(lblDetected);
-
-            lblTopTimer = CreateHeaderBadge("⏱ Timer: 15.625 ms", Color.FromArgb(52, 211, 153), 18, 53);
-            lblTopPing = CreateHeaderBadge("🌐 Ping: Ölçülüyor...", Color.FromArgb(56, 189, 248), 185, 53);
-            lblTopRam = CreateHeaderBadge("🧠 RAM: Ölçülüyor...", Color.FromArgb(251, 191, 36), 340, 53);
-            lblTopActiveCount = CreateHeaderBadge("🛡️ Aktif: 0 / " + allTweaks.Count, Color.FromArgb(168, 85, 247), 515, 53);
-            lblTopCpuSensor = CreateHeaderBadge("🔥 CPU: Sensör Okunuyor...", Color.FromArgb(251, 146, 60), 650, 53);
-            lblTopGpuSensor = CreateHeaderBadge("🎮 GPU: Sensör Okunuyor...", Color.FromArgb(52, 211, 153), 825, 53);
-
-            mainToolTip.SetToolTip(lblTopCpuSensor, "LibreHardwareMonitor Canlı İşlemci (CPU) Sıcaklığı ve Yükü.\nProgram Ayarları sekmesinden açıp kapatabilirsiniz.");
-            mainToolTip.SetToolTip(lblTopGpuSensor, "LibreHardwareMonitor Canlı Ekran Kartı (GPU Core / Memory / Hotspot) Sıcaklığı ve Yükü.\nProgram Ayarları sekmesinden açıp kapatabilirsiniz.");
-
-            Button btnResetAllTop = new Button
-            {
-                Text = "🔄 Makine Varsayılanlarına Döndür",
-                Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
-                FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(185, 28, 28),
-                ForeColor = Color.White,
-                Size = new Size(212, 26),
+                Location = new Point(552, 12),
                 Cursor = Cursors.Hand
             };
-            btnResetAllTop.FlatAppearance.BorderSize = 0;
-            btnResetAllTop.Click += (s, e) => RevertAllActiveTweaksToOriginal();
-            mainToolTip.SetToolTip(btnResetAllTop, "Program ilk açıldığında bilgisayarınızdan öğrendiği gerçek fabrika/varsayılan değerleri birebir geri yükler ve canlı OS denetimiyle sıfırlandığını doğrular.");
-            pnlTopHeader.Controls.Add(btnResetAllTop);
-
-            Button btnVerifyTop = new Button
+            lblLiveSystemStatusPill.Click += (s, e) =>
             {
-                Text = "🔍 Canlı OS Doğrula",
+                int pendingReboot = 0;
+                foreach (var t in allTweaks) if (t.IsRebootPending) pendingReboot++;
+                if (pendingReboot > 0)
+                    PromptAndRestartComputerNow();
+                else
+                    SwitchActiveTab(9);
+            };
+            mainToolTip.SetToolTip(lblLiveSystemStatusPill, "Canlı sistem durumunu incelemek veya bekleyen Windows restart ayarlarını devreye almak için tıklayın.");
+            pnlTopHeader.Controls.Add(lblLiveSystemStatusPill);
+
+            // Hidden legacy labels kept for 100% caller compatibility
+            lblTopTimer = CreateHeaderBadge("Timer: 15.625 ms", Color.FromArgb(52, 211, 153), 0, 0);
+            lblTopPing = CreateHeaderBadge("Ping: --", Color.FromArgb(56, 189, 248), 0, 0);
+            lblTopRam = CreateHeaderBadge("RAM: --", Color.FromArgb(251, 191, 36), 0, 0);
+            lblTopActiveCount = CreateHeaderBadge("Aktif: 0 / " + allTweaks.Count, Color.FromArgb(168, 85, 247), 0, 0);
+            lblTopCpuSensor = CreateHeaderBadge("CPU: --", Color.FromArgb(251, 146, 60), 0, 0);
+            lblTopGpuSensor = CreateHeaderBadge("GPU: --", Color.FromArgb(52, 211, 153), 0, 0);
+            lblTopTimer.Visible = false;
+            lblTopPing.Visible = false;
+            lblTopRam.Visible = false;
+            lblTopActiveCount.Visible = false;
+            lblTopCpuSensor.Visible = false;
+            lblTopGpuSensor.Visible = false;
+
+            chkRevertOnExit = new CheckBox
+            {
+                Text = Loc.T("Çıkışta sıfırla", "Revert on exit"),
+                Font = new Font("Segoe UI", 7.6f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(203, 213, 225),
+                BackColor = Color.FromArgb(16, 20, 29),
+                AutoSize = true,
+                Cursor = Cursors.Hand
+            };
+            chkRevertOnExit.CheckedChanged += (s, e) => SetRevertOnExit(chkRevertOnExit.Checked);
+            mainToolTip.SetToolTip(chkRevertOnExit, "Açıkken: program kapanınca tüm ayarlar fabrika varsayılanına döner.");
+            pnlTopHeader.Controls.Add(chkRevertOnExit);
+
+            chkAutoStart = new CheckBox
+            {
+                Text = Loc.T("Windows ile başlat", "Start with Windows"),
+                Font = new Font("Segoe UI", 7.6f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(203, 213, 225),
+                BackColor = Color.FromArgb(16, 20, 29),
+                AutoSize = true,
+                Cursor = Cursors.Hand
+            };
+            chkAutoStart.CheckedChanged += (s, e) => OnAutoStartToggled();
+            mainToolTip.SetToolTip(chkAutoStart, "Oturum açılınca Argon yönetici yetkisiyle tepside sessizce başlar.");
+            pnlTopHeader.Controls.Add(chkAutoStart);
+
+            btnSmartTuneTop = new Button
+            {
+                Text = Loc.T("⚡ Akıllı Profil", "⚡ Smart Profile"),
                 Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.FromArgb(16, 185, 129),
                 ForeColor = Color.Black,
-                Size = new Size(140, 26),
+                Size = new Size(115, 24),
                 Cursor = Cursors.Hand
             };
-            btnVerifyTop.FlatAppearance.BorderSize = 0;
-            btnVerifyTop.Click += (s, e) => VerifyAllTweaksLive(true);
-            mainToolTip.SetToolTip(btnVerifyTop, "Tüm ayarların Windows Kayıt Defteri, Güç Planı ve Çekirdek (Kernel) üzerindeki gerçek durumunu canlı olarak denetler ve raporlar.");
-            pnlTopHeader.Controls.Add(btnVerifyTop);
+            btnSmartTuneTop.FlatAppearance.BorderSize = 0;
+            btnSmartTuneTop.Click += (s, e) => ApplyHardwareAwareSmartTune();
+            mainToolTip.SetToolTip(btnSmartTuneTop, "Sisteminize ve seçili profilinize en uygun güvenli ayarları tek tıkla uygular.");
+            pnlTopHeader.Controls.Add(btnSmartTuneTop);
 
-            Button btnRestartPcTop = new Button
+            btnResetAllTop = new Button
             {
-                Text = "🟠 PC Yeniden Başlat",
+                Text = Loc.T("↺ Fabrika Sıfırla", "↺ Reset All"),
                 Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
                 FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(217, 119, 6),
-                ForeColor = Color.Black,
-                Size = new Size(140, 24),
+                BackColor = Color.FromArgb(153, 27, 27),
+                ForeColor = Color.White,
+                Size = new Size(118, 24),
                 Cursor = Cursors.Hand
             };
-            btnRestartPcTop.FlatAppearance.BorderSize = 0;
-            btnRestartPcTop.Click += (s, e) => PromptAndRestartComputerNow();
-            mainToolTip.SetToolTip(btnRestartPcTop, "Açık profilinizi güvenle kaydeder ve restart gerektiren ayarların tam devreye girmesi için bilgisayarı yeniden başlatır.");
-            pnlTopHeader.Controls.Add(btnRestartPcTop);
+            btnResetAllTop.FlatAppearance.BorderSize = 1;
+            btnResetAllTop.FlatAppearance.BorderColor = Color.FromArgb(220, 38, 38);
+            btnResetAllTop.Click += (s, e) => RevertAllActiveTweaksToOriginal();
+            mainToolTip.SetToolTip(btnResetAllTop, "Orijinal fabrika değerlerini birebir geri yükler ve canlı OS denetimiyle sıfırlandığını doğrular.");
+            pnlTopHeader.Controls.Add(btnResetAllTop);
 
-            Button btnMinimizeTray = new Button
+            btnMinimizeTray = new Button
             {
-                Text = "📥 Tepsiye Küçült",
+                Text = Loc.T("– Tepsiye Küçült", "– Tray"),
                 Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
                 FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(37, 45, 64),
+                BackColor = Color.FromArgb(30, 41, 59),
                 ForeColor = Color.FromArgb(203, 213, 225),
-                Size = new Size(135, 24),
+                Size = new Size(120, 24),
                 Cursor = Cursors.Hand
             };
             btnMinimizeTray.FlatAppearance.BorderSize = 1;
@@ -5465,21 +6250,41 @@ namespace ArgonLatencyStudio
             btnMinimizeTray.Click += (s, e) =>
             {
                 this.Hide();
-                trayIcon.ShowBalloonTip(1500, "Argon Studio v4.0", "Arka planda aktif. Yaptığınız ayarlar her açılışta sabit kalır; sıfırlamak için üstteki kırmızı butonu kullanabilirsiniz.", ToolTipIcon.Info);
+                trayIcon.ShowBalloonTip(1500, "Argon Studio v4.0", "Arka planda aktif. Ayarlarınız korunuyor.", ToolTipIcon.Info);
             };
             pnlTopHeader.Controls.Add(btnMinimizeTray);
 
-            Button btnElevate = null;
+            btnLangToggle = new Button
+            {
+                Text = Loc.IsEnglish ? "🌐 EN" : "🌐 TR",
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(20, 32, 50),
+                ForeColor = Color.FromArgb(56, 189, 248),
+                Size = new Size(62, 24),
+                Cursor = Cursors.Hand
+            };
+            btnLangToggle.FlatAppearance.BorderSize = 1;
+            btnLangToggle.FlatAppearance.BorderColor = Color.FromArgb(56, 189, 248);
+            btnLangToggle.Click += (s, e) =>
+            {
+                string nextLang = Loc.IsEnglish ? "TR" : "EN";
+                ApplyLanguage(nextLang);
+            };
+            mainToolTip.SetToolTip(btnLangToggle, "Dili Değiştir / Switch Language (Türkçe / English)");
+            pnlTopHeader.Controls.Add(btnLangToggle);
+
+            btnElevate = null;
             if (!isAdmin)
             {
                 btnElevate = new Button
                 {
-                    Text = "🛡️ Yönetici Aç",
+                    Text = Loc.T("🛡️ Yönetici Aç", "🛡️ Admin"),
                     Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
                     FlatStyle = FlatStyle.Flat,
                     BackColor = Color.FromArgb(217, 119, 6),
                     ForeColor = Color.Black,
-                    Size = new Size(125, 24),
+                    Size = new Size(100, 24),
                     Cursor = Cursors.Hand
                 };
                 btnElevate.FlatAppearance.BorderSize = 0;
@@ -5487,82 +6292,112 @@ namespace ArgonLatencyStudio
                 pnlTopHeader.Controls.Add(btnElevate);
             }
 
-            chkRevertOnExit = new CheckBox
-            {
-                Text = "♻ Kapatınca varsayılanlara dön",
-                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(203, 213, 225),
-                BackColor = Color.FromArgb(17, 21, 31),
-                AutoSize = true,
-                Cursor = Cursors.Hand,
-                Location = new Point(18, 79)
-            };
-            chkRevertOnExit.CheckedChanged += (s, e) => SetRevertOnExit(chkRevertOnExit.Checked);
-            mainToolTip.SetToolTip(chkRevertOnExit, "Açıkken: program kapanınca TÜM ayarlar varsayılana döner, program açılınca profilden yeniden uygulanır.\nKapalıyken: kayıt defteri/netsh ayarları kapatınca sistemde kalır.");
-            pnlTopHeader.Controls.Add(chkRevertOnExit);
-
-            chkAutoStart = new CheckBox
-            {
-                Text = "🚀 Windows ile başlat (tepsiye, yönetici)",
-                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(203, 213, 225),
-                BackColor = Color.FromArgb(17, 21, 31),
-                AutoSize = true,
-                Cursor = Cursors.Hand,
-                Location = new Point(242, 79)
-            };
-            chkAutoStart.CheckedChanged += (s, e) => OnAutoStartToggled();
-            mainToolTip.SetToolTip(chkAutoStart, "Oturum açılınca Argon yönetici yetkisiyle (UAC sormadan) tepside başlar ve seçili ayarları uygular.");
-            pnlTopHeader.Controls.Add(chkAutoStart);
-
-            Label lblSecurityPromise = new Label
-            {
-                Text = "🔒 Güvenli Mimari: Sıfır Debloat • Defender/Güvenlik Dokunulmaz • Canlı OS Doğrulamalı",
-                Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(148, 163, 184),
-                AutoSize = true,
-                Location = new Point(515, 81)
-            };
-            pnlTopHeader.Controls.Add(lblSecurityPromise);
-
             Action layoutTopHeader = () =>
             {
-                int w = Math.Max(1180, pnlTopHeader.ClientSize.Width);
-                btnResetAllTop.Location = new Point(w - btnResetAllTop.Width - 14, 5);
-                btnVerifyTop.Location = new Point(btnResetAllTop.Left - btnVerifyTop.Width - 6, 5);
+                int w = pnlTopHeader.ClientSize.Width > 0 ? pnlTopHeader.ClientSize.Width : 1380;
+                bool isCompact = (w < 1440);
 
-                btnMinimizeTray.Location = new Point(w - btnMinimizeTray.Width - 14, 32);
-                btnRestartPcTop.Location = new Point(btnMinimizeTray.Left - btnRestartPcTop.Width - 6, 32);
+                // Left Flow: Dynamic spacing prevents any DPI overlaps
+                int lx = 10;
+                pnlBrandEmblem.Location = new Point(lx, 7);
+                lx += pnlBrandEmblem.Width + 8;
+
+                lblBrand.Location = new Point(lx, 10);
+                int brandW = Math.Max(130, lblBrand.PreferredSize.Width);
+                lx += brandW + 8;
+
+                lblVersionPill.Location = new Point(lx, 12);
+                lx += Math.Max(55, lblVersionPill.PreferredSize.Width) + 12;
+
+                lblProfCaption.Location = new Point(lx, 13);
+                lx += lblProfCaption.PreferredSize.Width + 6;
+
+                cmbProfileSelector.Location = new Point(lx, 9);
+                cmbProfileSelector.Width = isCompact ? 145 : 175;
+                lx += cmbProfileSelector.Width + 6;
+
+                btnQuickSaveProf.Text = isCompact ? "+" : Loc.T("+ Kaydet", "+ Save");
+                btnQuickSaveProf.Width = isCompact ? 30 : Math.Max(74, btnQuickSaveProf.PreferredSize.Width + 10);
+                btnQuickSaveProf.Location = new Point(lx, 9);
+                lx += btnQuickSaveProf.Width + 10;
+
+                lblLiveSystemStatusPill.Location = new Point(lx, 12);
+
+                // Right Flow
+                int rx = w - 10;
+
+                btnMinimizeTray.Text = isCompact ? Loc.T("Tepsi", "Tray") : Loc.T("- Tepsiye", "- Tray");
+                btnMinimizeTray.Width = isCompact ? 60 : Math.Max(85, btnMinimizeTray.PreferredSize.Width + 8);
+                rx -= btnMinimizeTray.Width;
+                btnMinimizeTray.Location = new Point(rx, 9);
+                rx -= 5;
+
+                btnLangToggle.Width = 62;
+                rx -= btnLangToggle.Width;
+                btnLangToggle.Location = new Point(rx, 9);
+                rx -= 6;
+
+                btnResetAllTop.Text = isCompact ? Loc.T("Sıfırla", "Reset") : Loc.T("↺ Fabrika Sıfırla", "↺ Reset All");
+                btnResetAllTop.Width = isCompact ? 68 : Math.Max(118, btnResetAllTop.PreferredSize.Width + 12);
+                rx -= btnResetAllTop.Width;
+                btnResetAllTop.Location = new Point(rx, 9);
+                rx -= 6;
+
+                btnSmartTuneTop.Text = isCompact ? Loc.T("Akıllı Ayar", "Smart Tune") : Loc.T("⚡ Akıllı Profil", "⚡ Smart Profile");
+                btnSmartTuneTop.Width = isCompact ? 86 : Math.Max(115, btnSmartTuneTop.PreferredSize.Width + 12);
+                rx -= btnSmartTuneTop.Width;
+                btnSmartTuneTop.Location = new Point(rx, 9);
+                rx -= 10;
+
                 if (btnElevate != null)
-                    btnElevate.Location = new Point(btnRestartPcTop.Left - btnElevate.Width - 6, 32);
+                {
+                    btnElevate.Text = isCompact ? Loc.T("Yönetici", "Admin") : Loc.T("🛡️ Yönetici Aç", "🛡️ Admin");
+                    btnElevate.Width = isCompact ? 80 : Math.Max(100, btnElevate.PreferredSize.Width + 10);
+                    rx -= btnElevate.Width;
+                    btnElevate.Location = new Point(rx, 9);
+                    rx -= 8;
+                }
 
-                ReflowTelemetryHeaderBadges();
+                rx -= chkAutoStart.PreferredSize.Width;
+                chkAutoStart.Location = new Point(rx, 13);
+                rx -= 8;
+
+                rx -= chkRevertOnExit.PreferredSize.Width;
+                chkRevertOnExit.Location = new Point(rx, 13);
             };
             pnlTopHeader.Resize += (s, e) => layoutTopHeader();
             layoutTopHeader();
             RefreshProfileSelectorCombo();
 
-            // 2. Navigation Bar (10 Standardized Tabs + True Global Search)
+            // 2. Compact Navigation Bar (10 Technical Category Tabs + Global Search)
             pnlNavBar = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 44,
-                BackColor = Color.FromArgb(22, 27, 39)
+                Height = 36,
+                BackColor = Color.FromArgb(20, 25, 36)
+            };
+            pnlNavBar.Paint += (s, e) =>
+            {
+                using (Pen borderPen = new Pen(Color.FromArgb(34, 43, 62), 1))
+                {
+                    e.Graphics.DrawLine(borderPen, 0, pnlNavBar.Height - 1, pnlNavBar.Width, pnlNavBar.Height - 1);
+                }
             };
             this.Controls.Add(pnlNavBar);
 
             string[] tabNames = new string[]
             {
-                "🤖 Donanım (0)",
-                "🌐 Network (0/12)",
-                "⏱️ Latency (0/9)",
-                "🚀 FPS & GPU (0/9)",
-                "🛡️ WinUtil (0/7)",
-                "🧪 Deneysel (0/8)",
-                "🎯 Süreçler",
-                "📊 Benchmark",
-                "🔍 Yedek & OS",
-                "⚙️ Ayarlar"
+                "Donanım (4)",
+                "Ağ (0/11)",
+                "Timer (0/8)",
+                "Grafik (0/9)",
+                "Sistem (0/7)",
+                "Kernel (0/8)",
+                "İşlemler",
+                "Otomasyon",
+                "Tanı Test",
+                "Günlük",
+                "Ayarlar"
             };
 
             int navX = 10;
@@ -5572,13 +6407,14 @@ namespace ArgonLatencyStudio
                 Button btnNav = new Button
                 {
                     Text = tabNames[i],
-                    Font = new Font("Segoe UI", 7.6f, FontStyle.Bold),
+                    Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
                     FlatStyle = FlatStyle.Flat,
-                    AutoSize = true,
-                    Height = 30,
-                    Location = new Point(navX, 7),
+                    AutoSize = false,
+                    UseMnemonic = false,
+                    Height = 26,
+                    Location = new Point(navX, 5),
                     Cursor = Cursors.Hand,
-                    Padding = new Padding(1, 0, 1, 0)
+                    Padding = new Padding(2, 0, 2, 0)
                 };
                 btnNav.FlatAppearance.BorderSize = 0;
                 btnNav.Click += (s, e) =>
@@ -5589,139 +6425,155 @@ namespace ArgonLatencyStudio
                 };
                 pnlNavBar.Controls.Add(btnNav);
                 navButtons.Add(btnNav);
-                navX += btnNav.PreferredSize.Width + 3;
+                navX += btnNav.PreferredSize.Width + 4;
             }
 
-            Label lblSearchIcon = new Label
+            lblSearchIcon = new Label
             {
-                Text = "🔎",
-                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(56, 189, 248),
+                Text = "Ara:",
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(148, 163, 184),
                 AutoSize = true
             };
             pnlNavBar.Controls.Add(lblSearchIcon);
 
             txtGlobalSearch = new TextBox
             {
-                Width = 148,
-                BackColor = Color.FromArgb(13, 16, 23),
+                Width = 165,
+                BackColor = Color.FromArgb(12, 15, 22),
                 ForeColor = Color.FromArgb(56, 189, 248),
                 BorderStyle = BorderStyle.FixedSingle,
-                Font = new Font("Segoe UI", 8.2f, FontStyle.Regular)
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Regular)
             };
             txtGlobalSearch.TextChanged += (s, e) => ApplySearchFilter(txtGlobalSearch.Text);
-            mainToolTip.SetToolTip(txtGlobalSearch, "TÜM SEKMELERDE GENEL ARAMA:\nHangi sekmede olursanız olun Nagle, MPO, Teredo, Timer, Ryzen, NVIDIA, USB, Hibernation vb. yazarak 45 ayarın tamamında arama yapabilirsiniz.");
+            mainToolTip.SetToolTip(txtGlobalSearch, "TÜM SEKMELERDE GENEL ARAMA:\nNagle, MPO, Teredo, Timer, Ryzen, NVIDIA, USB, Hibernation vb. yazarak 45 ayarın tamamında arama yapabilirsiniz.");
             pnlNavBar.Controls.Add(txtGlobalSearch);
 
-            Action layoutNavBar = () =>
-            {
-                int w = Math.Max(1180, pnlNavBar.ClientSize.Width);
-                txtGlobalSearch.Location = new Point(w - txtGlobalSearch.Width - 12, 10);
-                lblSearchIcon.Location = new Point(txtGlobalSearch.Left - 20, 12);
-            };
-            pnlNavBar.Resize += (s, e) => layoutNavBar();
-            layoutNavBar();
+            pnlNavBar.Resize += (s, e) => LayoutNavBarButtons();
+            LayoutNavBarButtons();
 
-            // 3. Reboot / Adapter Reload Notification Bar (Dynamic Interactive Alert)
+            // 3. Intelligent Reboot & Adapter Reload Notification Bar (Zero False Positives)
             pnlRebootWarningBanner = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 36,
-                BackColor = Color.FromArgb(45, 28, 12),
-                Visible = false
+                Height = 38,
+                BackColor = Color.FromArgb(42, 26, 14),
+                Visible = false,
+                Padding = new Padding(10, 5, 10, 5)
+            };
+            pnlRebootWarningBanner.Paint += (s, e) =>
+            {
+                using (Pen bPen = new Pen(Color.FromArgb(217, 119, 6), 1))
+                {
+                    e.Graphics.DrawLine(bPen, 0, pnlRebootWarningBanner.Height - 1, pnlRebootWarningBanner.Width, pnlRebootWarningBanner.Height - 1);
+                }
             };
             this.Controls.Add(pnlRebootWarningBanner);
 
-            lblRebootBannerText = new Label
+            btnDismissBanner = new Button
             {
-                Text = "ℹ️ Durum bilgisi güncelleniyor...",
+                Text = "✕",
                 Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(253, 224, 71),
-                AutoSize = true,
-                Location = new Point(14, 9)
-            };
-            pnlRebootWarningBanner.Controls.Add(lblRebootBannerText);
-
-            btnSoftReloadNow = new Button
-            {
-                Text = "🔄 Ağ & Sürücüyü Şimdi Yenile",
-                Font = new Font("Segoe UI", 7.6f, FontStyle.Bold),
                 FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(14, 165, 233),
-                ForeColor = Color.Black,
-                Size = new Size(235, 24),
+                BackColor = Color.Transparent,
+                ForeColor = Color.FromArgb(148, 163, 184),
+                Width = 26,
+                Dock = DockStyle.Right,
                 Cursor = Cursors.Hand
             };
-            btnSoftReloadNow.FlatAppearance.BorderSize = 0;
-            btnSoftReloadNow.Click += (s, e) => ExecuteSoftReloadWithoutReboot();
-            mainToolTip.SetToolTip(btnSoftReloadNow, "Ağ kartı ayarlarını bilgisayarı yeniden başlatmaya gerek kalmadan adaptörü hızlıca yenileyerek hemen devreye alır.");
-            pnlRebootWarningBanner.Controls.Add(btnSoftReloadNow);
+            btnDismissBanner.FlatAppearance.BorderSize = 0;
+            btnDismissBanner.Click += (s, e) =>
+            {
+                bannerDismissedBySession = true;
+                UpdateRebootAndReloadBannerVisibility();
+            };
+            pnlRebootWarningBanner.Controls.Add(btnDismissBanner);
 
             btnRebootPcBanner = new Button
             {
-                Text = "🟠 Şimdi Yeniden Başlat",
-                Font = new Font("Segoe UI", 7.6f, FontStyle.Bold),
+                Text = "⚡ Bilgisayarı Yeniden Başlat",
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.FromArgb(245, 158, 11),
                 ForeColor = Color.Black,
-                Size = new Size(175, 24),
-                Cursor = Cursors.Hand
+                AutoSize = true,
+                Dock = DockStyle.Right,
+                Padding = new Padding(12, 0, 12, 0),
+                Cursor = Cursors.Hand,
+                Visible = false
             };
             btnRebootPcBanner.FlatAppearance.BorderSize = 0;
             btnRebootPcBanner.Click += (s, e) => PromptAndRestartComputerNow();
-            mainToolTip.SetToolTip(btnRebootPcBanner, "Açık profilinizi kaydeder ve restart bekleyen ayarların devreye girmesi için bilgisayarı şimdi yeniden başlatır.");
             pnlRebootWarningBanner.Controls.Add(btnRebootPcBanner);
 
-            Label lblPersistentBadge = new Label
+            btnSoftReloadNow = new Button
             {
-                Text = "💾 Ayarlar Kalıcıdır",
-                Font = new Font("Segoe UI", 7.6f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(167, 243, 208),
-                AutoSize = true
+                Text = "🔄 Ağ Kartını Şimdi Yenile",
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(14, 165, 233),
+                ForeColor = Color.Black,
+                AutoSize = true,
+                Dock = DockStyle.Right,
+                Padding = new Padding(12, 0, 12, 0),
+                Cursor = Cursors.Hand,
+                Visible = false
             };
-            mainToolTip.SetToolTip(lblPersistentBadge, "Program ilk açıldığında bilgisayarınızın kendi varsayılan ayarlarını öğrenmiştir. Açtığınız ayarlar her açılışta sabit kalır.");
-            pnlRebootWarningBanner.Controls.Add(lblPersistentBadge);
+            btnSoftReloadNow.FlatAppearance.BorderSize = 0;
+            btnSoftReloadNow.Click += (s, e) => ExecuteSoftReloadWithoutReboot();
+            pnlRebootWarningBanner.Controls.Add(btnSoftReloadNow);
 
-            Action layoutRebootBanner = () =>
+            lblRebootBannerText = new Label
             {
-                int w = Math.Max(800, pnlRebootWarningBanner.ClientSize.Width);
-                lblPersistentBadge.Location = new Point(w - lblPersistentBadge.PreferredWidth - 14, 10);
-                btnRebootPcBanner.Location = new Point(lblPersistentBadge.Left - btnRebootPcBanner.Width - 10, 6);
-                btnSoftReloadNow.Location = new Point(btnRebootPcBanner.Left - btnSoftReloadNow.Width - 8, 6);
+                Text = "Durum bilgisi yükleniyor...",
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(253, 224, 71),
+                Dock = DockStyle.Fill,
+                AutoEllipsis = true,
+                TextAlign = ContentAlignment.MiddleLeft
             };
-            pnlRebootWarningBanner.Resize += (s, e) => layoutRebootBanner();
-            layoutRebootBanner();
+            pnlRebootWarningBanner.Controls.Add(lblRebootBannerText);
 
-            // 4. Compact 2-Line Hover Inspector Footer
+            // 4. Compact 2-Line Hover Inspector Status Bar at Bottom
             pnlInspectorFooter = new Panel
             {
                 Dock = DockStyle.Bottom,
-                Height = 56,
-                BackColor = Color.FromArgb(16, 20, 30)
+                Height = 46,
+                BackColor = Color.FromArgb(15, 19, 28)
+            };
+            pnlInspectorFooter.Paint += (s, e) =>
+            {
+                using (Pen borderPen = new Pen(Color.FromArgb(34, 43, 62), 1))
+                {
+                    e.Graphics.DrawLine(borderPen, 0, 0, pnlInspectorFooter.Width, 0);
+                }
             };
             this.Controls.Add(pnlInspectorFooter);
 
             lblInspectorTitle = new Label
             {
-                Text = "🔍 İpucu: Herhangi bir ayarın veya Mod 1/2/3 butonunun üzerine gelin; canlı Windows değerini ve teknik amacını burada görebilirsiniz.",
-                Font = new Font("Segoe UI", 8.3f, FontStyle.Bold),
+                Text = "Hazır — Herhangi bir ayarın üzerine gelerek canlı Windows değerini, kayıt defteri yolunu ve teknik amacını inceleyebilirsiniz.",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
                 ForeColor = Color.FromArgb(56, 189, 248),
                 AutoSize = true,
-                Location = new Point(14, 7)
+                Location = new Point(12, 5)
             };
             pnlInspectorFooter.Controls.Add(lblInspectorTitle);
 
             lblInspectorPath = new Label
             {
-                Text = "Gerçek Durum Algılama (Live OS Truth) Aktif: Tüm kartlar doğrudan Windows Kayıt Defteri, Güç Planı ve Kernel üzerinden denetlenir.",
-                Font = new Font("Segoe UI", 8.0f, FontStyle.Regular),
-                ForeColor = Color.FromArgb(165, 180, 202),
+                Text = "Canlı OS Algılama (Live OS Truth): Kayıt Defteri, Güç Planı, Win32 SPI ve Kernel gerçek zamanlı denetlenir.",
+                Font = new Font("Consolas", 7.8f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(148, 163, 184),
                 AutoSize = true,
-                Location = new Point(14, 29)
+                Location = new Point(12, 24)
             };
             pnlInspectorFooter.Controls.Add(lblInspectorPath);
 
-            // 5. Main Content Host
+            // 5. Right Sidebar (NetAdapter Repair-style Network Settings, Hardware Telemetry & Live Audit Console)
+            BuildRightTelemetryAndNetworkSidebar();
+
+            // 6. Main Content Host (Left/Center Compact Table Workspace)
             pnlContentHost = new Panel
             {
                 Dock = DockStyle.Fill,
@@ -5729,7 +6581,7 @@ namespace ArgonLatencyStudio
             };
             this.Controls.Add(pnlContentHost);
 
-            // Strictly enforce WinForms Dock Z-Order (Top Header -> NavBar -> Warning Banner -> Content Fill -> Bottom Footer)
+            pnlRightSidebar.SendToBack();
             pnlRebootWarningBanner.SendToBack();
             pnlNavBar.SendToBack();
             pnlTopHeader.SendToBack();
@@ -5743,6 +6595,7 @@ namespace ArgonLatencyStudio
             BuildWinUtilView();
             viewExperimental = BuildTweakCategoryFlowView("EXPERIMENTAL");
             BuildProcessesView();
+            BuildAutomationAndQoLView();
             BuildBenchmarkView();
             BuildSnapshotAuditView();
             BuildSettingsView();
@@ -5756,35 +6609,22 @@ namespace ArgonLatencyStudio
 
             // Tray Menu
             trayMenu = new ContextMenuStrip();
-            trayMenu.Items.Add("🖥️ Argon Studio v4.0 Penceresini Aç", null, (s, e) => { this.Show(); this.WindowState = FormWindowState.Normal; this.Activate(); });
+            trayMenu.Items.Add("Argon Studio v4.0 Penceresini Aç", null, (s, e) => { this.Show(); this.WindowState = FormWindowState.Normal; this.Activate(); });
             trayMenu.Items.Add(new ToolStripSeparator());
-            trayMenu.Items.Add("🤖 Seçili Donanım Matrisini Otomatik Uygula", null, (s, e) => ApplyHardwareAwareSmartTune());
-            trayMenu.Items.Add("🔄 Gerçek Windows Durumunu (Live OS) Algıla & Eşitle", null, (s, e) => ProbeAllTweaksLiveOsTruthAndOptionallySync(true));
-            trayMenu.Items.Add("🧹 Şimdi Akıllı RAM & Standby Temizle", null, (s, e) => ExecuteSmartRamAndStandbyPurge(true));
-            trayMenu.Items.Add("🔄 Makine Varsayılanlarına Döndür (Fabrika Sıfırla)", null, (s, e) => RevertAllActiveTweaksToOriginal());
+            trayMenu.Items.Add("Seçili Donanım Matrisini Otomatik Uygula", null, (s, e) => ApplyHardwareAwareSmartTune());
+            trayMenu.Items.Add("Gerçek Windows Durumunu (Live OS) Algıla & Eşitle", null, (s, e) => ProbeAllTweaksLiveOsTruthAndOptionallySync(true));
+            trayMenu.Items.Add("Şimdi Akıllı RAM & Standby Temizle", null, (s, e) => ExecuteSmartRamAndStandbyPurge(true));
+            trayMenu.Items.Add("Makine Varsayılanlarına Döndür (Fabrika Sıfırla)", null, (s, e) => RevertAllActiveTweaksToOriginal());
             trayMenu.Items.Add(new ToolStripSeparator());
-            mnuRevertOnExit = new ToolStripMenuItem("♻ Kapatınca varsayılanlara dön");
+            mnuRevertOnExit = new ToolStripMenuItem("Çıkışta varsayılanlara dön");
             mnuRevertOnExit.CheckOnClick = true;
             mnuRevertOnExit.Checked = revertOnExit;
             mnuRevertOnExit.CheckedChanged += (s, e) => SetRevertOnExit(mnuRevertOnExit.Checked);
             trayMenu.Items.Add(mnuRevertOnExit);
-            mnuExit = new ToolStripMenuItem("❌ Programdan Çık (Açık Ayarlar Sabit Kalır)");
+            mnuExit = new ToolStripMenuItem("Programdan Çık (Açık Ayarlar Sabit Kalır)");
             mnuExit.Click += (s, e) => this.Close();
             trayMenu.Items.Add(mnuExit);
             UpdateExitMenuText();
-
-            Icon appIcon = null;
-            try
-            {
-                string localIco = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "app.ico");
-                if (File.Exists(localIco))
-                    appIcon = new Icon(localIco);
-                else
-                    appIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
-            }
-            catch { }
-            if (appIcon == null) appIcon = SystemIcons.Shield;
-            try { this.Icon = appIcon; } catch { }
 
             trayIcon = new NotifyIcon
             {
@@ -5800,39 +6640,388 @@ namespace ArgonLatencyStudio
                 PerformCleanShutdownKeepSettings();
             };
 
+            AppendConsoleLog(string.Format("{0} ({1})", Environment.OSVersion.VersionString, Environment.Is64BitOperatingSystem ? "64-bit" : "32-bit"));
+            AppendConsoleLog("Argon Latency Studio v4.0 Yüklendi — Yetki: " + (isAdmin ? "Yönetici (Administrator)" : "Standart Kullanıcı"));
+            AppendConsoleLog(string.Format("Algılanan CPU: {0} ({1}C/{2}T)", detectedHw.CpuName, detectedHw.PhysicalCores, detectedHw.LogicalThreads));
+            AppendConsoleLog("Algılanan GPU: " + detectedHw.GpuName);
+            ProbeLiveNetworkSidebarDetails();
+
             SwitchActiveTab(0);
             RefreshHardwareMatrixCards();
         }
 
+        private void BuildRightTelemetryAndNetworkSidebar()
+        {
+            pnlRightSidebar = new Panel
+            {
+                Dock = DockStyle.Right,
+                Width = 420,
+                BackColor = Color.FromArgb(16, 20, 29),
+                Padding = new Padding(10, 8, 10, 8)
+            };
+            pnlRightSidebar.Paint += (s, e) =>
+            {
+                using (Pen p = new Pen(Color.FromArgb(34, 43, 62), 1))
+                {
+                    e.Graphics.DrawLine(p, 0, 0, 0, pnlRightSidebar.Height);
+                }
+            };
+            this.Controls.Add(pnlRightSidebar);
+
+            // Top Section: Network & Hardware Key-Value Grid (Fixed Height 398px)
+            Panel pnlSidebarTopGrid = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 398,
+                BackColor = Color.FromArgb(16, 20, 29)
+            };
+            pnlRightSidebar.Controls.Add(pnlSidebarTopGrid);
+
+            // Group 1 Header: Current Network Settings + Ping IP / Ping DNS / Flush / Refresh buttons
+            grpNetAdapter = new Label
+            {
+                Text = Loc.T("AĞ ADAPTÖRÜ VE BAĞLANTI", "NETWORK & ADAPTER"),
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(56, 189, 248),
+                AutoSize = true,
+                Location = new Point(2, 4),
+                UseMnemonic = false
+            };
+            pnlSidebarTopGrid.Controls.Add(grpNetAdapter);
+
+            btnSidePingIp = CreateActionButton(pnlSidebarTopGrid, 152, 1, 62, 21, "Ping IP", Color.FromArgb(30, 41, 59));
+            btnSidePingIp.Font = new Font("Segoe UI", 7.2f, FontStyle.Bold);
+            btnSidePingIp.FlatAppearance.BorderSize = 1;
+            btnSidePingIp.FlatAppearance.BorderColor = Color.FromArgb(56, 189, 248);
+            btnSidePingIp.UseMnemonic = false;
+            mainToolTip.SetToolTip(btnSidePingIp, "Cloudflare (1.1.1.1) omurgasına anlık ICMP Ping gönderir ve sonucu konsola yazar.");
+            btnSidePingIp.Click += (s, e) => RunQuickSidebarPingTarget("1.1.1.1", "Cloudflare IP");
+
+            btnSidePingDns = CreateActionButton(pnlSidebarTopGrid, 218, 1, 66, 21, "Ping DNS", Color.FromArgb(30, 41, 59));
+            btnSidePingDns.Font = new Font("Segoe UI", 7.2f, FontStyle.Bold);
+            btnSidePingDns.FlatAppearance.BorderSize = 1;
+            btnSidePingDns.FlatAppearance.BorderColor = Color.FromArgb(52, 211, 153);
+            btnSidePingDns.UseMnemonic = false;
+            mainToolTip.SetToolTip(btnSidePingDns, "Google Public DNS (8.8.8.8) sunucusuna anlık ICMP Ping gönderir ve sonucu konsola yazar.");
+            btnSidePingDns.Click += (s, e) => RunQuickSidebarPingTarget("8.8.8.8", "Google DNS");
+
+            btnSideFlush = CreateActionButton(pnlSidebarTopGrid, 288, 1, 46, 21, Loc.T("Temizle", "Clear"), Color.FromArgb(30, 41, 59));
+            btnSideFlush.Font = new Font("Segoe UI", 7.2f, FontStyle.Bold);
+            btnSideFlush.FlatAppearance.BorderSize = 1;
+            btnSideFlush.FlatAppearance.BorderColor = Color.FromArgb(148, 163, 184);
+            btnSideFlush.UseMnemonic = false;
+            mainToolTip.SetToolTip(btnSideFlush, "DNS önbelleğini (FlushDNS) ve ARP tablosunu anında temizler.");
+            btnSideFlush.Click += (s, e) =>
+            {
+                ExecuteInstantNetworkQueueFlush();
+                AppendConsoleLog("DNS Çözümleyici Önbelleği ve ARP tablosu temizlendi.");
+            };
+
+            btnSideRefreshNet = CreateActionButton(pnlSidebarTopGrid, 338, 1, 24, 21, "↻", Color.FromArgb(16, 185, 129));
+            btnSideRefreshNet.ForeColor = Color.Black;
+            btnSideRefreshNet.Font = new Font("Segoe UI", 8.0f, FontStyle.Bold);
+            btnSideRefreshNet.UseMnemonic = false;
+            mainToolTip.SetToolTip(btnSideRefreshNet, "Ağ adaptörü, IP, Gateway, DNS ve Ping bilgilerini yeniler.");
+            btnSideRefreshNet.Click += (s, e) =>
+            {
+                ProbeLiveNetworkSidebarDetails();
+                RunAsyncPingCheck();
+                AppendConsoleLog("Ağ adaptörü ve telemetri bilgileri güncellendi.");
+            };
+
+            Action layoutSidebarTopButtons = () =>
+            {
+                int curW = pnlSidebarTopGrid.ClientSize.Width > 0 ? pnlSidebarTopGrid.ClientSize.Width : 400;
+                int rx = curW - 2;
+
+                btnSideRefreshNet.Size = new Size(24, 22);
+                rx -= btnSideRefreshNet.Width;
+                btnSideRefreshNet.Location = new Point(rx, 1);
+                rx -= 4;
+
+                int fW = Math.Max(60, btnSideFlush.PreferredSize.Width + 10);
+                rx -= fW;
+                btnSideFlush.Size = new Size(fW, 22);
+                btnSideFlush.Location = new Point(rx, 1);
+                rx -= 4;
+
+                int pdW = Math.Max(72, btnSidePingDns.PreferredSize.Width + 10);
+                rx -= pdW;
+                btnSidePingDns.Size = new Size(pdW, 22);
+                btnSidePingDns.Location = new Point(rx, 1);
+                rx -= 4;
+
+                int piW = Math.Max(62, btnSidePingIp.PreferredSize.Width + 10);
+                rx -= piW;
+                btnSidePingIp.Size = new Size(piW, 22);
+                btnSidePingIp.Location = new Point(rx, 1);
+            };
+            pnlSidebarTopGrid.Resize += (s, e) => layoutSidebarTopButtons();
+            layoutSidebarTopButtons();
+
+            int ry = 27;
+            txtNetHostAdmin = CreateSidebarReadOnlyRow(pnlSidebarTopGrid, "Sistem / Yetki", ref ry, Color.FromArgb(226, 232, 240));
+            txtNetAdapter = CreateSidebarReadOnlyRow(pnlSidebarTopGrid, "Ağ Adaptörü", ref ry, Color.FromArgb(56, 189, 248));
+            txtNetLocalIp = CreateSidebarReadOnlyRow(pnlSidebarTopGrid, "Yerel IPv4 / Maske", ref ry, Color.FromArgb(226, 232, 240));
+            txtNetGateway = CreateSidebarReadOnlyRow(pnlSidebarTopGrid, "Varsayılan Geçit", ref ry, Color.FromArgb(203, 213, 225));
+            txtNetDns = CreateSidebarReadOnlyRow(pnlSidebarTopGrid, "DNS Sunucuları", ref ry, Color.FromArgb(52, 211, 153));
+            txtNetMac = CreateSidebarReadOnlyRow(pnlSidebarTopGrid, "MAC (Fiziksel)", ref ry, Color.FromArgb(203, 213, 225));
+            txtNetPingLive = CreateSidebarReadOnlyRow(pnlSidebarTopGrid, "Canlı Ping / RTT", ref ry, Color.FromArgb(52, 211, 153));
+
+            ry += 6;
+            lblHwHdr = new Label
+            {
+                Text = Loc.T("DONANIM İZLEME", "HARDWARE MONITOR"),
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(251, 191, 36),
+                AutoSize = true,
+                Location = new Point(2, ry)
+            };
+            pnlSidebarTopGrid.Controls.Add(lblHwHdr);
+            ry += 20;
+
+            txtHwCpuName = CreateSidebarReadOnlyRow(pnlSidebarTopGrid, "İşlemci (CPU)", ref ry, Color.FromArgb(226, 232, 240));
+            txtHwCpuTelemetry = CreateSidebarReadOnlyRow(pnlSidebarTopGrid, "CPU Sıcaklık / Yük", ref ry, Color.FromArgb(251, 146, 60));
+            txtHwGpuName = CreateSidebarReadOnlyRow(pnlSidebarTopGrid, "Ekran Kartı (GPU)", ref ry, Color.FromArgb(226, 232, 240));
+            txtHwGpuTelemetry = CreateSidebarReadOnlyRow(pnlSidebarTopGrid, "GPU Core / Hotspot", ref ry, Color.FromArgb(52, 211, 153));
+            txtHwRamUsage = CreateSidebarReadOnlyRow(pnlSidebarTopGrid, "Sistem Belleği", ref ry, Color.FromArgb(251, 191, 36));
+            txtHwTimerActive = CreateSidebarReadOnlyRow(pnlSidebarTopGrid, "Timer & Aktif Ayar", ref ry, Color.FromArgb(56, 189, 248));
+
+            txtHwCpuName.Text = string.Format("{0} ({1}C/{2}T)", detectedHw.CpuName, detectedHw.PhysicalCores, detectedHw.LogicalThreads);
+            txtHwGpuName.Text = detectedHw.GpuName;
+
+            // Bottom Footer of Right Sidebar: Network Traffic Stats (Sent / Received MB)
+            Panel pnlSidebarTrafficFooter = new Panel
+            {
+                Dock = DockStyle.Bottom,
+                Height = 22,
+                BackColor = Color.FromArgb(16, 20, 29)
+            };
+            pnlRightSidebar.Controls.Add(pnlSidebarTrafficFooter);
+
+            lblNetTrafficStats = new Label
+            {
+                Text = "Ağ Trafiği: Gönderilen: -- MB | Alınan: -- MB",
+                Font = new Font("Consolas", 7.6f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(148, 163, 184),
+                AutoSize = true,
+                Location = new Point(2, 4)
+            };
+            pnlSidebarTrafficFooter.Controls.Add(lblNetTrafficStats);
+
+            // Header for Live Console Log
+            Panel pnlConsoleHdr = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 22,
+                BackColor = Color.FromArgb(16, 20, 29)
+            };
+            pnlRightSidebar.Controls.Add(pnlConsoleHdr);
+
+            lblSideEventLogHeader = new Label
+            {
+                Text = Loc.T("SİSTEM OLAY GÜNLÜĞÜ", "SYSTEM EVENT LOG"),
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(167, 243, 208),
+                AutoSize = true,
+                Location = new Point(2, 3)
+            };
+            pnlConsoleHdr.Controls.Add(lblSideEventLogHeader);
+
+            // Multiline Console TextBox (NetAdapter Repair Bottom-Right Log Window)
+            txtLiveConsoleLog = new TextBox
+            {
+                Dock = DockStyle.Fill,
+                Multiline = true,
+                ReadOnly = true,
+                ScrollBars = ScrollBars.Vertical,
+                BackColor = Color.FromArgb(10, 13, 19),
+                ForeColor = Color.FromArgb(167, 243, 208),
+                BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Consolas", 7.8f, FontStyle.Regular)
+            };
+            pnlRightSidebar.Controls.Add(txtLiveConsoleLog);
+
+            pnlSidebarTrafficFooter.SendToBack();
+            pnlSidebarTopGrid.SendToBack();
+            pnlConsoleHdr.BringToFront();
+            txtLiveConsoleLog.BringToFront();
+        }
+
+        private TextBox CreateSidebarReadOnlyRow(Control parent, string labelText, ref int y, Color valueColor)
+        {
+            Label lbl = new Label
+            {
+                Text = labelText,
+                Font = new Font("Segoe UI", 7.6f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(165, 180, 202),
+                AutoSize = false,
+                Size = new Size(118, 20),
+                TextAlign = ContentAlignment.MiddleLeft,
+                Location = new Point(2, y + 1),
+                UseMnemonic = false
+            };
+            parent.Controls.Add(lbl);
+
+            int pWidth = parent.ClientSize.Width > 0 ? parent.ClientSize.Width : 400;
+            TextBox txt = new TextBox
+            {
+                ReadOnly = true,
+                BackColor = Color.FromArgb(11, 14, 21),
+                ForeColor = valueColor,
+                BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Consolas", 7.8f, FontStyle.Bold),
+                Location = new Point(122, y),
+                Size = new Size(Math.Max(265, pWidth - 128), 20),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                Text = "Okunuyor..."
+            };
+            parent.Controls.Add(txt);
+            sidebarRowLabels[txt] = lbl;
+            y += 24;
+            return txt;
+        }
+
+        private void AppendConsoleLog(string message)
+        {
+            if (string.IsNullOrEmpty(message) || txtLiveConsoleLog == null) return;
+            try
+            {
+                string line = string.Format("[{0}] {1}{2}", DateTime.Now.ToString("HH:mm:ss"), message, Environment.NewLine);
+                if (txtLiveConsoleLog.TextLength > 18000)
+                {
+                    txtLiveConsoleLog.Text = txtLiveConsoleLog.Text.Substring(txtLiveConsoleLog.TextLength - 10000);
+                }
+                txtLiveConsoleLog.AppendText(line);
+            }
+            catch { }
+        }
+
+        private void ProbeLiveNetworkSidebarDetails()
+        {
+            try
+            {
+                if (txtNetHostAdmin != null)
+                {
+                    txtNetHostAdmin.Text = string.Format("{0} | {1}", Environment.MachineName, isAdmin ? "YÖNETİCİ (Admin)" : "Standart");
+                }
+
+                NetworkInterface bestNic = null;
+                foreach (NetworkInterface ni in NetworkInterface.GetAllNetworkInterfaces())
+                {
+                    if (ni.OperationalStatus == OperationalStatus.Up &&
+                        ni.NetworkInterfaceType != NetworkInterfaceType.Loopback &&
+                        ni.NetworkInterfaceType != NetworkInterfaceType.Tunnel)
+                    {
+                        bestNic = ni;
+                        if (ni.GetIPProperties().GatewayAddresses.Count > 0)
+                            break;
+                    }
+                }
+
+                if (bestNic != null)
+                {
+                    IPInterfaceProperties ipProps = bestNic.GetIPProperties();
+                    string ipv4 = "N/A";
+                    string mask = "";
+                    foreach (UnicastIPAddressInformation ua in ipProps.UnicastAddresses)
+                    {
+                        if (ua.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                        {
+                            ipv4 = ua.Address.ToString();
+                            if (ua.IPv4Mask != null) mask = ua.IPv4Mask.ToString();
+                            break;
+                        }
+                    }
+
+                    string gw = "Yok";
+                    foreach (GatewayIPAddressInformation g in ipProps.GatewayAddresses)
+                    {
+                        if (g.Address != null && g.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                        {
+                            gw = g.Address.ToString();
+                            break;
+                        }
+                    }
+
+                    List<string> dnsList = new List<string>();
+                    foreach (System.Net.IPAddress dns in ipProps.DnsAddresses)
+                    {
+                        if (dns.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                            dnsList.Add(dns.ToString());
+                    }
+                    if (dnsList.Count == 0)
+                    {
+                        foreach (System.Net.IPAddress dns in ipProps.DnsAddresses)
+                            dnsList.Add(dns.ToString());
+                    }
+
+                    byte[] macBytes = bestNic.GetPhysicalAddress().GetAddressBytes();
+                    List<string> macHex = new List<string>();
+                    foreach (byte b in macBytes) macHex.Add(b.ToString("X2"));
+                    string macStr = macHex.Count > 0 ? string.Join(":", macHex.ToArray()) : "N/A";
+
+                    if (txtNetAdapter != null) txtNetAdapter.Text = bestNic.Description;
+                    if (txtNetLocalIp != null) txtNetLocalIp.Text = string.IsNullOrEmpty(mask) ? ipv4 : (ipv4 + " / " + mask);
+                    if (txtNetGateway != null) txtNetGateway.Text = gw;
+                    if (txtNetDns != null) txtNetDns.Text = dnsList.Count > 0 ? string.Join(", ", dnsList.ToArray()) : "Otomatik (DHCP)";
+                    if (txtNetMac != null) txtNetMac.Text = macStr;
+
+                    try
+                    {
+                        IPv4InterfaceStatistics stats = bestNic.GetIPv4Statistics();
+                        double sentMb = stats.BytesSent / (1024.0 * 1024.0);
+                        double recvMb = stats.BytesReceived / (1024.0 * 1024.0);
+                        if (lblNetTrafficStats != null)
+                        {
+                            lblNetTrafficStats.Text = string.Format("Gönderilen: {0:0.0} MB | Alınan: {1:0.0} MB", sentMb, recvMb);
+                        }
+                    }
+                    catch { }
+                }
+                else
+                {
+                    if (txtNetAdapter != null) txtNetAdapter.Text = detectedHw.NicName;
+                    if (txtNetLocalIp != null) txtNetLocalIp.Text = "Bağlantı Yok";
+                }
+            }
+            catch { }
+        }
+
+        private void RunQuickSidebarPingTarget(string host, string label)
+        {
+            if (txtNetPingLive != null) txtNetPingLive.Text = label + " (" + host + ") ölçülüyor...";
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try
+                {
+                    using (Ping p = new Ping())
+                    {
+                        var r = p.Send(host, 1000);
+                        long rtt = (r != null && r.Status == IPStatus.Success) ? r.RoundtripTime : -1;
+                        this.BeginInvoke((MethodInvoker)delegate
+                        {
+                            if (rtt >= 0)
+                            {
+                                string msg = string.Format("{0} ({1}): {2} ms", label, host, rtt);
+                                if (txtNetPingLive != null) txtNetPingLive.Text = msg;
+                                AppendConsoleLog("Ping Testi -> " + msg);
+                            }
+                            else
+                            {
+                                if (txtNetPingLive != null) txtNetPingLive.Text = host + ": Zaman aşımı";
+                                AppendConsoleLog("Ping Testi -> " + host + " yanıt vermedi.");
+                            }
+                        });
+                    }
+                }
+                catch { }
+            });
+        }
+
         private void ReflowTelemetryHeaderBadges()
         {
-            if (lblTopTimer == null) return;
-            lblTopTimer.Location = new Point(18, 53);
-            lblTopPing.Location = new Point(lblTopTimer.Right + 8, 53);
-            lblTopRam.Location = new Point(lblTopPing.Right + 8, 53);
-            lblTopActiveCount.Location = new Point(lblTopRam.Right + 8, 53);
-
-            bool showCpu = appSettings != null && appSettings.EnableTelemetrySensors && appSettings.ShowCpuSensor;
-            bool showGpu = appSettings != null && appSettings.EnableTelemetrySensors && (appSettings.ShowGpuCoreSensor || appSettings.ShowGpuMemHotspotSensor);
-
-            int nextX = lblTopActiveCount.Right + 8;
-            if (lblTopCpuSensor != null)
-            {
-                lblTopCpuSensor.Visible = showCpu;
-                if (showCpu)
-                {
-                    lblTopCpuSensor.Location = new Point(nextX, 53);
-                    nextX = lblTopCpuSensor.Right + 8;
-                }
-            }
-            if (lblTopGpuSensor != null)
-            {
-                lblTopGpuSensor.Visible = showGpu;
-                if (showGpu)
-                {
-                    lblTopGpuSensor.Location = new Point(nextX, 53);
-                }
-            }
+            // Telemetry is now rendered in the dedicated NetAdapter Repair-style right sidebar.
         }
 
         private Label CreateHeaderBadge(string text, Color foreColor, int x, int y)
@@ -5851,61 +7040,134 @@ namespace ArgonLatencyStudio
             return lbl;
         }
 
+        private Panel CreateTweakTableColumnHeader(string sectionTitle)
+        {
+            Panel pnlColHdr = new Panel
+            {
+                Height = 26,
+                Width = 820,
+                Margin = new Padding(0, 0, 0, 3),
+                BackColor = Color.FromArgb(22, 28, 41)
+            };
+
+            Label lblCol1 = new Label
+            {
+                Text = Loc.T("DURUM & DONANIM / SİSTEM AYARI", "STATUS & HARDWARE / SYSTEM TWEAK") + (string.IsNullOrEmpty(sectionTitle) ? "" : (" (" + sectionTitle + ")")),
+                Font = new Font("Segoe UI", 7.5f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(148, 163, 184),
+                AutoSize = true,
+                Location = new Point(10, 6),
+                UseMnemonic = false
+            };
+            pnlColHdr.Controls.Add(lblCol1);
+            tweakColHeadersCol1.Add(lblCol1);
+
+            Label lblCol2 = new Label
+            {
+                Text = Loc.T("UYGULAMA MODU / VARYASYON", "APPLICATION MODE / VARIATION"),
+                Font = new Font("Segoe UI", 7.5f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(56, 189, 248),
+                AutoSize = true,
+                Location = new Point(400, 6),
+                UseMnemonic = false
+            };
+            pnlColHdr.Controls.Add(lblCol2);
+            tweakColHeadersCol2.Add(lblCol2);
+
+            Label lblCol3 = new Label
+            {
+                Text = Loc.T("CANLI OS DEĞERİ", "LIVE OS VALUE"),
+                Font = new Font("Segoe UI", 7.5f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(52, 211, 153),
+                AutoSize = true,
+                Location = new Point(650, 6),
+                UseMnemonic = false
+            };
+            pnlColHdr.Controls.Add(lblCol3);
+            tweakColHeadersCol3.Add(lblCol3);
+
+            pnlColHdr.Resize += (s, e) =>
+            {
+                int w = Math.Max(520, pnlColHdr.ClientSize.Width);
+                int rightX = w - 6;
+                rightX -= 27; // btnInfoInspect (22px + 5px margin)
+
+                int badgeW = w >= 800 ? 168 : (w >= 700 ? 152 : 132);
+                int badgeX = rightX - badgeW;
+                rightX -= (badgeW + 6);
+
+                int comboW = w >= 800 ? 250 : (w >= 700 ? 220 : 185);
+                int comboX = rightX - comboW;
+
+                lblCol2.Location = new Point(comboX, 6);
+                lblCol3.Location = new Point(badgeX + 6, 6);
+            };
+
+            return pnlColHdr;
+        }
+
         private void BuildProgressiveHardwareMatrixView()
         {
             viewDashboard = new Panel
             {
                 Dock = DockStyle.Fill,
                 BackColor = Color.FromArgb(13, 16, 23),
-                Padding = new Padding(16, 12, 16, 12)
+                Padding = new Padding(10, 8, 10, 8)
             };
             pnlContentHost.Controls.Add(viewDashboard);
 
-            // Top Card: CPU + GPU Interactive Configurator & Progressive 3-Tier Auto-Pilot
+            // Top Card: Compact CPU + GPU Configurator & 3-Tier Auto-Pilot
             Panel pnlMatrixTop = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 186,
-                BackColor = Color.FromArgb(20, 25, 37)
+                Height = 142,
+                BackColor = Color.FromArgb(18, 23, 34)
+            };
+            pnlMatrixTop.Paint += (s, e) =>
+            {
+                using (Pen p = new Pen(Color.FromArgb(36, 46, 66), 1))
+                {
+                    e.Graphics.DrawRectangle(p, 0, 0, pnlMatrixTop.Width - 1, pnlMatrixTop.Height - 1);
+                }
             };
             viewDashboard.Controls.Add(pnlMatrixTop);
 
-            Label lblMatTitle = new Label
+            lblMatTitle = new Label
             {
-                Text = "🤖 AKILLI DONANIM MATRİSİ & KADEMELİ (PROGRESSIVE) OTO-PİLOT",
-                Font = new Font("Segoe UI", 9.8f, FontStyle.Bold),
+                Text = Loc.T("DONANIM PROFİLİ VE OPTİMİZASYON SEVİYESİ", "HARDWARE PROFILE & OPTIMIZATION LEVEL"),
+                Font = new Font("Segoe UI", 8.8f, FontStyle.Bold),
                 ForeColor = Color.FromArgb(52, 211, 153),
                 AutoSize = true,
-                Location = new Point(16, 11)
+                Location = new Point(12, 8)
             };
             pnlMatrixTop.Controls.Add(lblMatTitle);
 
             // CPU Selector
-            Label lblCpuPick = new Label
+            lblCpuPick = new Label
             {
-                Text = "1. İşlemci (CPU) Mimarisi:",
-                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                Text = Loc.T("1. İşlemci (CPU) Mimarisi:", "1. Processor (CPU) Architecture:"),
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
                 ForeColor = Color.FromArgb(203, 213, 225),
                 AutoSize = true,
-                Location = new Point(16, 40)
+                Location = new Point(12, 30)
             };
             pnlMatrixTop.Controls.Add(lblCpuPick);
 
             cmbCpuSelector = new ComboBox
             {
                 DropDownStyle = ComboBoxStyle.DropDownList,
-                Font = new Font("Segoe UI", 8.8f, FontStyle.Bold),
-                BackColor = Color.FromArgb(13, 16, 23),
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                BackColor = Color.FromArgb(12, 15, 22),
                 ForeColor = Color.FromArgb(56, 189, 248),
-                Location = new Point(16, 62),
-                Size = new Size(300, 28)
+                Location = new Point(12, 48),
+                Size = new Size(250, 24)
             };
             cmbCpuSelector.Items.AddRange(new object[]
             {
-                "AMD Ryzen Standart (Zen 2/3/4/5 - 5600, 7500F vb.)",
-                "AMD Ryzen X3D (3D V-Cache - 5800X3D, 7800X3D, 9800X3D)",
-                "Intel Core Hibrit (P-Core + E-Core - 12/13/14. Nesil & Ultra)",
-                "Intel Core Klasik (Homojen - 9/10/11. Nesil)"
+                "AMD Ryzen Standart (Zen 2/3/4/5)",
+                "AMD Ryzen X3D (3D V-Cache Serisi)",
+                "Intel Core Hibrit (P-Core + E-Core)",
+                "Intel Core Klasik (Homojen Çekirdek)"
             });
             cmbCpuSelector.SelectedIndex = (int)selectedCpuProfile;
             cmbCpuSelector.SelectedIndexChanged += (s, e) =>
@@ -5917,29 +7179,29 @@ namespace ArgonLatencyStudio
             pnlMatrixTop.Controls.Add(cmbCpuSelector);
 
             // GPU Selector
-            Label lblGpuPick = new Label
+            lblGpuPick = new Label
             {
-                Text = "2. Ekran Kartı (GPU) Mimarisi:",
-                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                Text = Loc.T("2. Ekran Kartı (GPU) Mimarisi:", "2. Graphics Card (GPU) Architecture:"),
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
                 ForeColor = Color.FromArgb(203, 213, 225),
                 AutoSize = true,
-                Location = new Point(328, 40)
+                Location = new Point(272, 30)
             };
             pnlMatrixTop.Controls.Add(lblGpuPick);
 
             cmbGpuSelector = new ComboBox
             {
                 DropDownStyle = ComboBoxStyle.DropDownList,
-                Font = new Font("Segoe UI", 8.8f, FontStyle.Bold),
-                BackColor = Color.FromArgb(13, 16, 23),
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                BackColor = Color.FromArgb(12, 15, 22),
                 ForeColor = Color.FromArgb(52, 211, 153),
-                Location = new Point(328, 62),
-                Size = new Size(290, 28)
+                Location = new Point(272, 48),
+                Size = new Size(240, 24)
             };
             cmbGpuSelector.Items.AddRange(new object[]
             {
-                "AMD Radeon (RX 6000 / 7000 / 9000 RDNA Serisi)",
-                "NVIDIA GeForce (RTX 20 / 30 / 40 / 50 & GTX Serisi)",
+                "AMD Radeon (RX 6000 / 7000 / 9000)",
+                "NVIDIA GeForce (RTX 20 / 30 / 40 / 50)",
                 "Intel Arc / Iris Xe (Alchemist / Battlemage)"
             });
             cmbGpuSelector.SelectedIndex = (int)selectedGpuProfile;
@@ -5952,39 +7214,39 @@ namespace ArgonLatencyStudio
             pnlMatrixTop.Controls.Add(cmbGpuSelector);
 
             // Progressive Intensity Tier Selector
-            Label lblTierPick = new Label
+            lblTierPick = new Label
             {
-                Text = "3. Kademe (Progressive Seviye):",
-                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                Text = Loc.T("3. Optimizasyon Kademesi:", "3. Optimization Level:"),
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
                 ForeColor = Color.FromArgb(203, 213, 225),
                 AutoSize = true,
-                Location = new Point(630, 40)
+                Location = new Point(522, 30)
             };
             pnlMatrixTop.Controls.Add(lblTierPick);
 
-            btnTier1 = CreateActionButton(pnlMatrixTop, 630, 61, 128, 29, "Kademe 1: Dengeli", Color.FromArgb(37, 45, 64));
-            btnTier2 = CreateActionButton(pnlMatrixTop, 764, 61, 128, 29, "Kademe 2: Espor", Color.FromArgb(16, 185, 129));
+            btnTier1 = CreateActionButton(pnlMatrixTop, 522, 47, 96, 25, Loc.T("1: Dengeli", "1: Balanced"), Color.FromArgb(37, 45, 64));
+            btnTier2 = CreateActionButton(pnlMatrixTop, 622, 47, 96, 25, Loc.T("2: Espor", "2: Esports"), Color.FromArgb(16, 185, 129));
             btnTier2.ForeColor = Color.Black;
-            btnTier3 = CreateActionButton(pnlMatrixTop, 898, 61, 128, 29, "Kademe 3: Ekstrem", Color.FromArgb(37, 45, 64));
+            btnTier3 = CreateActionButton(pnlMatrixTop, 722, 47, 96, 25, Loc.T("3: Ekstrem", "3: Extreme"), Color.FromArgb(37, 45, 64));
 
-            btnTier1.Font = new Font("Segoe UI", 7.8f, FontStyle.Bold);
-            btnTier2.Font = new Font("Segoe UI", 7.8f, FontStyle.Bold);
-            btnTier3.Font = new Font("Segoe UI", 7.8f, FontStyle.Bold);
+            btnTier1.Font = new Font("Segoe UI", 7.6f, FontStyle.Bold);
+            btnTier2.Font = new Font("Segoe UI", 7.6f, FontStyle.Bold);
+            btnTier3.Font = new Font("Segoe UI", 7.6f, FontStyle.Bold);
 
             btnTier1.Click += (s, e) => SelectProgressiveTier(1);
             btnTier2.Click += (s, e) => SelectProgressiveTier(2);
             btnTier3.Click += (s, e) => SelectProgressiveTier(3);
 
-            // Big Smart Apply Action Row
-            Button btnSmartApply = CreateActionButton(pnlMatrixTop, 16, 102, 530, 42,
-                "⚡ SEÇİLİ (CPU + GPU + AĞ) KOMBİNASYONUNU TEK TIKLA UYGULA", Color.FromArgb(16, 185, 129));
+            // Action Buttons Row
+            btnSmartApply = CreateActionButton(pnlMatrixTop, 12, 80, 410, 32,
+                Loc.T("⚡ SEÇİLİ PROFİLİ TEK TIKLA UYGULA", "⚡ APPLY SELECTED PROFILE (ONE-CLICK)"), Color.FromArgb(16, 185, 129));
             btnSmartApply.ForeColor = Color.Black;
-            btnSmartApply.Font = new Font("Segoe UI", 8.8f, FontStyle.Bold);
+            btnSmartApply.Font = new Font("Segoe UI", 8.2f, FontStyle.Bold);
             btnSmartApply.Click += (s, e) => ApplyHardwareAwareSmartTune();
-            mainToolTip.SetToolTip(btnSmartApply, "Seçtiğiniz İşlemci + Ekran Kartı ikilisine özel Windows çekirdek/sürücü ayarlarını, çakışma kurallarını (Fixed Kombinasyonlar) ve kademe seviyesini tek tıkla uygular.");
+            mainToolTip.SetToolTip(btnSmartApply, "Seçtiğiniz İşlemci + Ekran Kartı ikilisine özel Windows çekirdek/sürücü ayarlarını, çakışma kurallarını ve kademe seviyesini tek tıkla uygular.");
 
-            Button btnAutoDetectReset = CreateActionButton(pnlMatrixTop, 556, 102, 230, 42,
-                "🔍 Donanımımı Otomatik Algıla", Color.FromArgb(14, 165, 233));
+            btnAutoDetectReset = CreateActionButton(pnlMatrixTop, 430, 80, 190, 32,
+                Loc.T("Donanımımı Otomatik Algıla", "Auto-Detect Hardware"), Color.FromArgb(14, 165, 233));
             btnAutoDetectReset.ForeColor = Color.Black;
             btnAutoDetectReset.Click += (s, e) =>
             {
@@ -5992,85 +7254,77 @@ namespace ArgonLatencyStudio
                 cmbGpuSelector.SelectedIndex = (int)detectedHw.RecommendedGpuProfile;
                 SelectProgressiveTier(2);
                 RefreshHardwareMatrixCards();
+                AppendConsoleLog("Donanım matrisi sistem algılamasına göre sıfırlandı.");
             };
 
-            Button btnQuickRam = CreateActionButton(pnlMatrixTop, 796, 102, 230, 42,
-                "🧹 Anlık RAM & DNS Temizle", Color.FromArgb(79, 70, 229));
-            btnQuickRam.Click += (s, e) => { ExecuteSmartRamAndStandbyPurge(true); ExecuteInstantNetworkQueueFlush(); };
+            btnQuickRam = CreateActionButton(pnlMatrixTop, 628, 80, 190, 32,
+                Loc.T("Anlık RAM & DNS Temizle", "Instant RAM & DNS Purge"), Color.FromArgb(51, 65, 85));
+            btnQuickRam.UseMnemonic = false;
+            btnQuickRam.Click += (s, e) =>
+            {
+                ExecuteSmartRamAndStandbyPurge(true);
+                ExecuteInstantNetworkQueueFlush();
+                AppendConsoleLog("RAM Çalışma Kümesi, Standby List ve DNS önbelleği temizlendi.");
+            };
 
             lblMatrixSummary = new Label
             {
                 Text = "Aktif Kombinasyon Özeti hazırlanıyor...",
-                Font = new Font("Segoe UI", 8.0f, FontStyle.Italic),
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Regular),
                 ForeColor = Color.FromArgb(165, 180, 202),
                 AutoSize = true,
-                Location = new Point(16, 155)
+                Location = new Point(12, 118)
             };
             pnlMatrixTop.Controls.Add(lblMatrixSummary);
 
-            // Responsive Resize Handler for pnlMatrixTop so controls never clip or misalign at any DPI or window width
             Action layoutMatrixTop = () =>
             {
-                int availW = Math.Max(960, pnlMatrixTop.ClientSize.Width - 32);
-                int tierBlockW = Math.Max(396, (int)(availW * 0.40));
-                int eachTierW = (tierBlockW - 12) / 3;
-                int comboSpace = availW - tierBlockW - 24;
-                int cpuComboW = Math.Max(260, comboSpace / 2);
-                int gpuComboW = Math.Max(250, comboSpace - cpuComboW);
+                int availW = Math.Max(760, pnlMatrixTop.ClientSize.Width - 24);
+                int tierBlockW = Math.Max(296, (int)(availW * 0.36));
+                int eachTierW = (tierBlockW - 8) / 3;
+                int comboSpace = availW - tierBlockW - 20;
+                int cpuComboW = Math.Max(210, comboSpace / 2);
+                int gpuComboW = Math.Max(200, comboSpace - cpuComboW);
 
-                lblCpuPick.Location = new Point(16, 40);
-                cmbCpuSelector.Location = new Point(16, 62);
+                lblCpuPick.Location = new Point(12, 30);
+                cmbCpuSelector.Location = new Point(12, 48);
                 cmbCpuSelector.Width = cpuComboW;
 
-                lblGpuPick.Location = new Point(cmbCpuSelector.Right + 12, 40);
-                cmbGpuSelector.Location = new Point(cmbCpuSelector.Right + 12, 62);
+                lblGpuPick.Location = new Point(cmbCpuSelector.Right + 10, 30);
+                cmbGpuSelector.Location = new Point(cmbCpuSelector.Right + 10, 48);
                 cmbGpuSelector.Width = gpuComboW;
 
-                int tierStartX = cmbGpuSelector.Right + 12;
-                lblTierPick.Location = new Point(tierStartX, 40);
-                btnTier1.Location = new Point(tierStartX, 61);
-                btnTier1.Size = new Size(eachTierW, 29);
+                int tierStartX = cmbGpuSelector.Right + 10;
+                lblTierPick.Location = new Point(tierStartX, 30);
+                btnTier1.Location = new Point(tierStartX, 47);
+                btnTier1.Size = new Size(eachTierW, 25);
 
-                btnTier2.Location = new Point(btnTier1.Right + 6, 61);
-                btnTier2.Size = new Size(eachTierW, 29);
+                btnTier2.Location = new Point(btnTier1.Right + 4, 47);
+                btnTier2.Size = new Size(eachTierW, 25);
 
-                btnTier3.Location = new Point(btnTier2.Right + 6, 61);
-                btnTier3.Size = new Size(eachTierW, 29);
+                btnTier3.Location = new Point(btnTier2.Right + 4, 47);
+                btnTier3.Size = new Size(eachTierW, 25);
 
-                int smartW = Math.Max(480, (int)(availW * 0.52));
-                int remW = availW - smartW - 20;
-                int subBtnW = Math.Max(200, remW / 2);
+                int smartW = Math.Max(380, (int)(availW * 0.50));
+                int remW = availW - smartW - 16;
+                int subBtnW = Math.Max(160, remW / 2);
 
-                btnSmartApply.Location = new Point(16, 102);
-                btnSmartApply.Size = new Size(smartW, 42);
+                btnSmartApply.Location = new Point(12, 80);
+                btnSmartApply.Size = new Size(smartW, 32);
 
-                btnAutoDetectReset.Location = new Point(btnSmartApply.Right + 10, 102);
-                btnAutoDetectReset.Size = new Size(subBtnW, 42);
+                btnAutoDetectReset.Location = new Point(btnSmartApply.Right + 8, 80);
+                btnAutoDetectReset.Size = new Size(subBtnW, 32);
 
-                btnQuickRam.Location = new Point(btnAutoDetectReset.Right + 10, 102);
-                btnQuickRam.Size = new Size(subBtnW, 42);
+                btnQuickRam.Location = new Point(btnAutoDetectReset.Right + 8, 80);
+                btnQuickRam.Size = new Size(subBtnW, 32);
             };
             pnlMatrixTop.Resize += (s, e) => layoutMatrixTop();
             layoutMatrixTop();
 
-            // Section 2: Filtered Hardware-Specific Cards Header
-            Panel pnlHwCardsHeader = new Panel
-            {
-                Dock = DockStyle.Top,
-                Height = 36,
-                BackColor = Color.FromArgb(13, 16, 23)
-            };
+            // Section 2: Table Column Header for Hardware-Specific Tweaks
+            Panel pnlHwCardsHeader = CreateTweakTableColumnHeader("Seçili İşlemci & Ekran Kartı Mimarisi");
+            pnlHwCardsHeader.Dock = DockStyle.Top;
             viewDashboard.Controls.Add(pnlHwCardsHeader);
-
-            Label lblHwCardsHeader = new Label
-            {
-                Text = "🎛️ SEÇİLEN İŞLEMCİ VE EKRAN KARTI İKİLİSİNE ÖZEL DOĞRUDAN AYARLAR (Diğer genel ayarlar üst sekmelerdedir):",
-                Font = new Font("Segoe UI", 8.8f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(251, 191, 36),
-                AutoSize = true,
-                Location = new Point(4, 11)
-            };
-            pnlHwCardsHeader.Controls.Add(lblHwCardsHeader);
 
             flowHardwareSpecificCards = new FlowLayoutPanel
             {
@@ -6091,14 +7345,14 @@ namespace ArgonLatencyStudio
             {
                 if (tweak.Category != "HARDWARE") continue;
                 var card = new MultiVariationTweakCard(tweak, mainToolTip, OnTweakCardToggled, OnTweakCardHovered);
-                card.Width = Math.Max(780, this.ClientSize.Width - 60);
+                card.Width = Math.Max(540, viewDashboard.ClientSize.Width - 28);
                 flowHardwareSpecificCards.Controls.Add(card);
                 allCards.Add(card);
             }
 
             flowHardwareSpecificCards.Resize += (s, e) =>
             {
-                int w = Math.Max(780, flowHardwareSpecificCards.ClientSize.Width - 28);
+                int w = Math.Max(540, flowHardwareSpecificCards.ClientSize.Width - 24);
                 foreach (Control c in flowHardwareSpecificCards.Controls)
                 {
                     c.Width = w;
@@ -6185,7 +7439,7 @@ namespace ArgonLatencyStudio
             {
                 DialogResult dr = MessageBox.Show(
                     "Seçtiğiniz CPU + GPU + TCP Optimizer kombinasyonundaki sürücü ve kayıt defteri ayarlarının tamamının uygulanabilmesi için Yönetici (Admin) yetkisi önerilir.\n\nProgramı şimdi Yönetici olarak yeniden başlatmak ister misiniz? ('Hayır' derseniz yönetici gerektirmeyen tüm anlık Kernel/Güç/Fare/FSO ayarları hemen uygulanır.)",
-                    "Akıllı Oto-Pilot",
+                    "Akıllı Donanım Profili",
                     MessageBoxButtons.YesNo,
                     MessageBoxIcon.Question);
                 if (dr == DialogResult.Yes)
@@ -6294,36 +7548,21 @@ namespace ArgonLatencyStudio
                 if (enable && (!t.RequiresAdmin || isAdmin))
                 {
                     int targetVar = Math.Min(varIdx, t.Variations.Count - 1);
-                    bool changedState = (!t.IsEnabled || t.SelectedVariationIndex != targetVar);
                     t.IsEnabled = true;
-                    t.PendingRebootAfterDisable = false;
-                    if (changedState)
-                    {
-                        if (t.NeedsReboot)
-                        {
-                            t.RebootSatisfied = false;
-                            t.ModifiedBootStamp = currentBootStamp;
-                        }
-                        if (t.NeedsNetReload)
-                        {
-                            t.NetReloadSatisfied = false;
-                        }
-                    }
                     t.SelectedVariationIndex = targetVar;
                     if (t.Variations[t.SelectedVariationIndex].ApplyAction != null)
                         t.Variations[t.SelectedVariationIndex].ApplyAction();
-                    VerifySingleTweakInLiveOs(t);
+                    t.CurrentAppliedText = string.Format("Mod {0}: {1}", targetVar + 1, t.Variations[targetVar].ShortLabel);
+                    AutoResolveRebootAndReloadState(t);
                 }
                 else if (!enable && t.IsEnabled)
                 {
-                    if (t.NeedsReboot && t.RebootSatisfied)
-                        t.PendingRebootAfterDisable = true;
                     t.IsEnabled = false;
-                    t.RebootSatisfied = false;
-                    t.NetReloadSatisfied = false;
                     t.IsVerifiedInOs = false;
                     t.VerifiedSystemValue = "";
                     if (t.RevertAction != null) t.RevertAction();
+                    t.CurrentAppliedText = "Pasif (Orijinal)";
+                    AutoResolveRebootAndReloadState(t);
                 }
                 card.RefreshVisualState();
             }
@@ -6333,6 +7572,7 @@ namespace ArgonLatencyStudio
             UpdateActiveCountsAndNavBadges();
             RefreshSnapshotAuditView();
             SaveUserProfileState();
+            AppendConsoleLog("Donanım duyarlı Akıllı Ayar (Smart Tune) uygulandı ve canlı OS doğrulaması tamamlandı.");
         }
 
         /// <summary>
@@ -6427,105 +7667,129 @@ namespace ArgonLatencyStudio
             UpdateRebootAndReloadBannerVisibility();
         }
 
-        private void UpdateRebootAndReloadBannerVisibility()
+        private void LayoutNavBarButtons()
         {
-            int rebootCount = 0;
-            int reloadPendingCount = 0;
-            int reloadDoneCount = 0;
+            if (pnlNavBar == null || navButtons == null || navButtons.Count == 0) return;
 
-            foreach (var t in allTweaks)
+            int w = pnlNavBar.ClientSize.Width > 0 ? pnlNavBar.ClientSize.Width : 1380;
+
+            // Search box positioning at right edge
+            int searchW = 0;
+            if (txtGlobalSearch != null && lblSearchIcon != null)
             {
-                if (!t.IsEnabled)
-                {
-                    if (t.PendingRebootAfterDisable) rebootCount++;
-                    continue;
-                }
-                if (t.NeedsReboot)
-                {
-                    if (!t.RebootSatisfied) rebootCount++;
-                }
-                else if (t.NeedsNetReload)
-                {
-                    if (t.NetReloadSatisfied) reloadDoneCount++;
-                    else reloadPendingCount++;
-                }
+                txtGlobalSearch.Width = 100;
+                txtGlobalSearch.Location = new Point(w - txtGlobalSearch.Width - 10, 6);
+                lblSearchIcon.Location = new Point(txtGlobalSearch.Left - lblSearchIcon.PreferredSize.Width - 4, 8);
+                searchW = txtGlobalSearch.Width + lblSearchIcon.PreferredSize.Width + 18;
             }
 
-            if (pnlRebootWarningBanner != null)
+            int availForTabs = w - searchW - 12;
+
+            int totalPrefW = 0;
+            for (int i = 0; i < navButtons.Count; i++)
             {
-                if (rebootCount > 0 || reloadPendingCount > 0)
+                totalPrefW += navButtons[i].PreferredSize.Width + 6;
+            }
+
+            double scale = 1.0;
+            if (totalPrefW > availForTabs && totalPrefW > 0)
+            {
+                scale = (double)availForTabs / totalPrefW;
+            }
+
+            int nx = 6;
+            for (int i = 0; i < navButtons.Count; i++)
+            {
+                var btn = navButtons[i];
+                btn.Location = new Point(nx, 5);
+                if (scale < 1.0)
                 {
-                    pnlRebootWarningBanner.Visible = true;
-                    if (reloadPendingCount > 0 && rebootCount > 0)
-                    {
-                        lblRebootBannerText.Text = string.Format(
-                            "ℹ️ Durum: {0} ağ ayarı [🔄 Ağ Yenileme], {1} sistem ayarı [🟠 Restart] bekliyor.",
-                            reloadPendingCount, rebootCount);
-                        lblRebootBannerText.ForeColor = Color.FromArgb(253, 224, 71);
-                    }
-                    else if (reloadPendingCount > 0 && rebootCount == 0)
-                    {
-                        lblRebootBannerText.Text = string.Format(
-                            "ℹ️ Durum: {0} ağ ayarı [🔄 Ağ Yenileme] bekliyor. Sağdaki butonla restart atmadan hemen devreye alabilirsiniz.",
-                            reloadPendingCount);
-                        lblRebootBannerText.ForeColor = Color.FromArgb(125, 211, 252);
-                    }
-                    else
-                    {
-                        // reloadPendingCount == 0 && rebootCount > 0
-                        if (reloadDoneCount > 0)
-                        {
-                            lblRebootBannerText.Text = string.Format(
-                                "✅ Ağ kartı yenilendi ({0} ayar aktif)!  |  🟠 Yeni değiştirilen {1} ayar için sağdaki butonla yeniden başlatabilirsiniz.",
-                                reloadDoneCount, rebootCount);
-                        }
-                        else
-                        {
-                            lblRebootBannerText.Text = string.Format(
-                                "ℹ️ Durum: Yeni değiştirilen {0} ayar [🟠 Restart Gerekli] bekliyor; sağdaki butonla hemen yeniden başlatabilirsiniz.",
-                                rebootCount);
-                        }
-                        lblRebootBannerText.ForeColor = Color.FromArgb(253, 186, 116);
-                    }
-
-                    if (btnSoftReloadNow != null)
-                    {
-                        if (reloadPendingCount > 0)
-                        {
-                            btnSoftReloadNow.Visible = true;
-                            btnSoftReloadNow.Enabled = true;
-                            btnSoftReloadNow.Text = string.Format("🔄 Ağ & Sürücüyü Yenile ({0})", reloadPendingCount);
-                            btnSoftReloadNow.BackColor = Color.FromArgb(14, 165, 233);
-                            btnSoftReloadNow.ForeColor = Color.Black;
-                        }
-                        else
-                        {
-                            btnSoftReloadNow.Visible = true;
-                            btnSoftReloadNow.Enabled = true;
-                            btnSoftReloadNow.Text = "✅ Ağ Yenilendi (Tekrar)";
-                            btnSoftReloadNow.BackColor = Color.FromArgb(16, 185, 129);
-                            btnSoftReloadNow.ForeColor = Color.Black;
-                        }
-                    }
-
-                    if (btnRebootPcBanner != null)
-                    {
-                        if (rebootCount > 0)
-                        {
-                            btnRebootPcBanner.Visible = true;
-                            btnRebootPcBanner.Enabled = true;
-                            btnRebootPcBanner.Text = string.Format("🟠 Şimdi Yeniden Başlat ({0})", rebootCount);
-                        }
-                        else
-                        {
-                            btnRebootPcBanner.Visible = false;
-                        }
-                    }
+                    btn.Width = Math.Max(38, (int)(btn.PreferredSize.Width * scale));
+                    nx += btn.Width + 1;
                 }
                 else
                 {
-                    pnlRebootWarningBanner.Visible = false;
+                    btn.Width = btn.PreferredSize.Width + 6;
+                    nx += btn.Width + 3;
                 }
+            }
+        }
+
+        private void LayoutRebootWarningBannerControls()
+        {
+            // WinForms DockStyle.Right on buttons and DockStyle.Fill on lblRebootBannerText handle all layout automatically
+        }
+
+        private void UpdateRebootAndReloadBannerVisibility()
+        {
+            if (pnlRebootWarningBanner == null) return;
+
+            int rebootCount = 0;
+            int reloadPendingCount = 0;
+            List<string> rebootTitles = new List<string>();
+            List<string> reloadTitles = new List<string>();
+
+            foreach (var t in allTweaks)
+            {
+                if (t.IsRebootPending)
+                {
+                    rebootCount++;
+                    rebootTitles.Add(t.Title);
+                }
+                else if (t.IsNetReloadPending)
+                {
+                    reloadPendingCount++;
+                    reloadTitles.Add(t.Title);
+                }
+            }
+
+            if (rebootCount == 0 && reloadPendingCount == 0)
+            {
+                bannerDismissedBySession = false;
+                pnlRebootWarningBanner.Visible = false;
+                pnlRebootWarningBanner.Height = 0;
+                return;
+            }
+
+            if (bannerDismissedBySession)
+            {
+                pnlRebootWarningBanner.Visible = false;
+                pnlRebootWarningBanner.Height = 0;
+                return;
+            }
+
+            pnlRebootWarningBanner.Visible = true;
+            pnlRebootWarningBanner.Height = 38;
+
+            if (rebootCount > 0 && reloadPendingCount > 0)
+            {
+                string rName = rebootTitles[0];
+                if (rebootTitles.Count > 1) rName += string.Format(" (+{0})", rebootTitles.Count - 1);
+                lblRebootBannerText.Text = string.Format("⚠️ {0} sistem ayarı [Restart: {1}], {2} ağ ayarı [Ağ Yenileme] bekliyor.", rebootCount, rName, reloadPendingCount);
+                lblRebootBannerText.ForeColor = Color.FromArgb(253, 224, 71);
+                btnRebootPcBanner.Visible = true;
+                btnRebootPcBanner.Text = string.Format("⚡ Bilgisayarı Yeniden Başlat ({0})", rebootCount);
+                btnSoftReloadNow.Visible = true;
+                btnSoftReloadNow.Text = string.Format("🔄 Ağ Kartını Yenile ({0})", reloadPendingCount);
+            }
+            else if (rebootCount > 0)
+            {
+                string names = rebootTitles[0];
+                if (rebootTitles.Count > 1) names += ", " + rebootTitles[1];
+                if (rebootTitles.Count > 2) names += string.Format(" (+{0} daha)", rebootTitles.Count - 2);
+                lblRebootBannerText.Text = string.Format("⚠️ Restart Bekliyor ({0} Ayar): {1} — Windows çekirdeğinde tam devreye girmesi için yeniden başlatma gerekir.", rebootCount, names);
+                lblRebootBannerText.ForeColor = Color.FromArgb(253, 186, 116);
+                btnRebootPcBanner.Visible = true;
+                btnRebootPcBanner.Text = string.Format("⚡ Bilgisayarı Yeniden Başlat ({0})", rebootCount);
+                btnSoftReloadNow.Visible = false;
+            }
+            else
+            {
+                lblRebootBannerText.Text = string.Format("⚡ {0} ağ ayarı için Ağ Adaptörünün yenilenmesi gerekiyor (Bilgisayarı yeniden başlatmaya gerek yoktur).", reloadPendingCount);
+                lblRebootBannerText.ForeColor = Color.FromArgb(125, 211, 252);
+                btnSoftReloadNow.Visible = true;
+                btnSoftReloadNow.Text = "🔄 Ağ Kartını Şimdi Yenile";
+                btnRebootPcBanner.Visible = false;
             }
         }
 
@@ -6603,30 +7867,35 @@ namespace ArgonLatencyStudio
                 AutoScroll = true,
                 FlowDirection = FlowDirection.TopDown,
                 WrapContents = false,
-                Padding = new Padding(16, 12, 16, 12),
+                Padding = new Padding(10, 8, 10, 8),
                 BackColor = Color.FromArgb(13, 16, 23),
                 Visible = false
             };
+
+            string catTitle = category == "NETWORK" ? "Ağ, NDIS & TCP/IP Yığını"
+                            : category == "LATENCY" ? "Çekirdek Zamanlayıcı, Güç & HID Giriş"
+                            : category == "FPS" ? "Kare Hızı (FPS), DWM, MMCSS & Bellek"
+                            : "İleri Seviye / Deneysel Çekirdek Parametreleri";
+
+            Panel colHdr = CreateTweakTableColumnHeader(catTitle);
+            flow.Controls.Add(colHdr);
 
             foreach (var tweak in allTweaks)
             {
                 if (tweak.Category != category) continue;
                 var card = new MultiVariationTweakCard(tweak, mainToolTip, OnTweakCardToggled, OnTweakCardHovered);
-                card.Width = this.ClientSize.Width - 56;
+                card.Width = 810;
                 flow.Controls.Add(card);
                 allCards.Add(card);
             }
 
             flow.Resize += (s, e) =>
             {
-                int targetW = Math.Max(780, flow.ClientSize.Width - 42);
+                int targetW = Math.Max(520, flow.ClientSize.Width - 26);
                 foreach (Control c in flow.Controls)
                 {
-                    if (c is MultiVariationTweakCard)
-                    {
-                        c.Width = targetW;
-                        c.Invalidate(true);
-                    }
+                    c.Width = targetW;
+                    c.Invalidate(true);
                 }
             };
 
@@ -6639,7 +7908,7 @@ namespace ArgonLatencyStudio
             Button b = new Button
             {
                 Text = text,
-                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = bg,
                 ForeColor = Color.White,
@@ -6662,7 +7931,7 @@ namespace ArgonLatencyStudio
             {
                 Dock = DockStyle.Fill,
                 BackColor = Color.FromArgb(13, 16, 23),
-                Padding = new Padding(16),
+                Padding = new Padding(10, 8, 10, 8),
                 Visible = false
             };
             pnlContentHost.Controls.Add(viewProcesses);
@@ -6670,43 +7939,43 @@ namespace ArgonLatencyStudio
             Panel pnlTopProc = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 50,
-                BackColor = Color.FromArgb(20, 25, 36)
+                Height = 42,
+                BackColor = Color.FromArgb(18, 23, 34)
             };
             viewProcesses.Controls.Add(pnlTopProc);
 
             Label lblFilter = new Label
             {
-                Text = "🔍 Süreç (.exe) Ara:",
-                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+                Text = "Süreç (.exe) Ara:",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
                 ForeColor = Color.FromArgb(148, 163, 184),
                 AutoSize = true,
-                Location = new Point(14, 15)
+                Location = new Point(10, 12)
             };
             pnlTopProc.Controls.Add(lblFilter);
 
             txtProcFilter = new TextBox
             {
-                Location = new Point(135, 12),
-                Size = new Size(220, 24),
-                BackColor = Color.FromArgb(13, 16, 23),
+                Location = new Point(112, 9),
+                Size = new Size(165, 22),
+                BackColor = Color.FromArgb(12, 15, 22),
                 ForeColor = Color.White,
                 BorderStyle = BorderStyle.FixedSingle
             };
             txtProcFilter.TextChanged += (s, e) => RefreshProcessTable();
             pnlTopProc.Controls.Add(txtProcFilter);
 
-            Button btnRefProc = CreateActionButton(pnlTopProc, 365, 10, 110, 28, "🔄 Listeyi Yenile", Color.FromArgb(51, 65, 85));
+            Button btnRefProc = CreateActionButton(pnlTopProc, 285, 8, 96, 25, "Listeyi Yenile", Color.FromArgb(51, 65, 85));
             btnRefProc.Click += (s, e) => RefreshProcessTable();
 
             chkWatchdogToggle = new CheckBox
             {
-                Text = "🎯 Otomatik Oyun Algılayıcı (Oyun Açıldığında Otomatik High Prio + EcoQoS Kalkanı)",
-                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                Text = "Otomatik Oyun Algılayıcı (Oyun Açıldığında High Prio + EcoQoS Kalkanı)",
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
                 ForeColor = Color.FromArgb(52, 211, 153),
                 AutoSize = true,
                 Checked = false,
-                Location = new Point(490, 14)
+                Location = new Point(392, 12)
             };
             chkWatchdogToggle.CheckedChanged += (s, e) => autoGameWatchdogActive = chkWatchdogToggle.Checked;
             pnlTopProc.Controls.Add(chkWatchdogToggle);
@@ -6714,40 +7983,41 @@ namespace ArgonLatencyStudio
             Panel pnlBottomProc = new Panel
             {
                 Dock = DockStyle.Bottom,
-                Height = 96,
-                BackColor = Color.FromArgb(20, 25, 36)
+                Height = 76,
+                BackColor = Color.FromArgb(18, 23, 34)
             };
             viewProcesses.Controls.Add(pnlBottomProc);
 
-            int bx = 14;
-            Button bHigh = CreateActionButton(pnlBottomProc, bx, 10, 180, 32, "🚀 High Priority (Tüm Ağaç)", Color.FromArgb(16, 185, 129));
+            int bx = 10;
+            Button bHigh = CreateActionButton(pnlBottomProc, bx, 8, 155, 28, "High Priority (Ağaç)", Color.FromArgb(16, 185, 129));
             bHigh.ForeColor = Color.Black;
             bHigh.Click += (s, e) => ApplySelectedProcessPriority(ProcessPriorityClass.High);
-            bx += 188;
+            bx += 161;
 
-            Button bNoCore0 = CreateActionButton(pnlBottomProc, bx, 10, 180, 32, "🛡️ Core 0 Hariç Tut (DPC İzole)", Color.FromArgb(14, 165, 233));
+            Button bNoCore0 = CreateActionButton(pnlBottomProc, bx, 8, 158, 28, "Core 0 İzole (DPC)", Color.FromArgb(14, 165, 233));
+            bNoCore0.ForeColor = Color.Black;
             bNoCore0.Click += (s, e) => ApplySelectedProcessTopology(1);
-            bx += 188;
+            bx += 164;
 
-            Button bPhysOnly = CreateActionButton(pnlBottomProc, bx, 10, 200, 32, "⚡ Sadece Fiziksel Çekirdekler", Color.FromArgb(168, 85, 247));
+            Button bPhysOnly = CreateActionButton(pnlBottomProc, bx, 8, 168, 28, "Fiziksel Çekirdekler", Color.FromArgb(168, 85, 247));
             bPhysOnly.Click += (s, e) => ApplySelectedProcessTopology(2);
-            bx += 208;
+            bx += 174;
 
-            Button bEcoShield = CreateActionButton(pnlBottomProc, bx, 10, 190, 32, "🔥 Win11 EcoQoS + I/O High", Color.FromArgb(217, 119, 6));
+            Button bEcoShield = CreateActionButton(pnlBottomProc, bx, 8, 162, 28, "EcoQoS + I/O High", Color.FromArgb(217, 119, 6));
             bEcoShield.ForeColor = Color.Black;
             bEcoShield.Click += (s, e) => ApplySelectedProcessEcoAndIoBoost();
-            bx += 198;
+            bx += 168;
 
-            Button bRevertProc = CreateActionButton(pnlBottomProc, bx, 10, 175, 32, "↩ Süreci Orijinale Döndür", Color.FromArgb(71, 85, 105));
+            Button bRevertProc = CreateActionButton(pnlBottomProc, bx, 8, 145, 28, "Orijinale Döndür", Color.FromArgb(71, 85, 105));
             bRevertProc.Click += (s, e) => RevertSelectedProcessToOriginal();
 
             lblProcActionStatus = new Label
             {
-                Text = "💡 Listeden herhangi bir .exe seçip tek tıkla öncelik ve çekirdek topolojisi atayabilirsiniz. İstediğiniz zaman orijinale döndürebilirsiniz.",
-                Font = new Font("Segoe UI", 8.2f, FontStyle.Italic),
+                Text = "Listeden herhangi bir .exe seçip tek tıkla öncelik ve çekirdek topolojisi atayabilirsiniz. İstediğiniz zaman orijinale döndürebilirsiniz.",
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Regular),
                 ForeColor = Color.FromArgb(148, 163, 184),
                 AutoSize = true,
-                Location = new Point(14, 54)
+                Location = new Point(10, 44)
             };
             pnlBottomProc.Controls.Add(lblProcActionStatus);
 
@@ -6757,22 +8027,2141 @@ namespace ArgonLatencyStudio
                 View = View.Details,
                 FullRowSelect = true,
                 GridLines = true,
-                BackColor = Color.FromArgb(16, 20, 29),
+                BackColor = Color.FromArgb(14, 18, 26),
                 ForeColor = Color.White,
                 BorderStyle = BorderStyle.FixedSingle,
-                Font = new Font("Segoe UI", 8.8f, FontStyle.Regular)
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Regular)
             };
-            lvProcesses.Columns.Add("Süreç Adı (.exe)", 230);
-            lvProcesses.Columns.Add("PID", 75);
-            lvProcesses.Columns.Add("CPU Önceliği", 120);
-            lvProcesses.Columns.Add("Çekirdek Maskesi (Affinity)", 230);
-            lvProcesses.Columns.Add("Bellek (MB)", 110);
-            lvProcesses.Columns.Add("Yedek Durumu", 180);
+            lvProcesses.Columns.Add("Süreç Adı (.exe)", 185);
+            lvProcesses.Columns.Add("PID", 65);
+            lvProcesses.Columns.Add("CPU Önceliği", 105);
+            lvProcesses.Columns.Add("Çekirdek Maskesi (Affinity)", 190);
+            lvProcesses.Columns.Add("Bellek (MB)", 95);
+            lvProcesses.Columns.Add("Yedek Durumu", 160);
             viewProcesses.Controls.Add(lvProcesses);
             pnlTopProc.SendToBack();
             pnlBottomProc.SendToBack();
             lvProcesses.BringToFront();
         }
+
+        #region Otomasyon & QoL (Swiss Army Knife) View & Systems
+
+        private void BuildAutomationAndQoLView()
+        {
+            viewAutomationQoL = new Panel
+            {
+                Dock = DockStyle.Fill,
+                AutoScroll = true,
+                BackColor = Color.FromArgb(13, 16, 23),
+                Padding = new Padding(12, 10, 12, 10),
+                Visible = false
+            };
+            pnlContentHost.Controls.Add(viewAutomationQoL);
+
+            // Container panel for smooth layout
+            Panel pnlScrollBody = new Panel
+            {
+                Location = new Point(12, 10),
+                Width = Math.Max(780, viewAutomationQoL.ClientSize.Width - 36),
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                BackColor = Color.Transparent
+            };
+            viewAutomationQoL.Controls.Add(pnlScrollBody);
+
+            int cardY = 0;
+
+            // -------------------------------------------------------------
+            // CARD 1: AKILLI GÜÇ & KAPATMA ZAMANLAYICISI
+            // -------------------------------------------------------------
+            Panel pnlCardPower = new Panel
+            {
+                Location = new Point(0, cardY),
+                Size = new Size(pnlScrollBody.Width, 130),
+                BackColor = Color.FromArgb(18, 23, 34)
+            };
+            pnlCardPower.Paint += (s, e) =>
+            {
+                using (Pen p = new Pen(Color.FromArgb(36, 46, 66), 1))
+                {
+                    e.Graphics.DrawRectangle(p, 0, 0, pnlCardPower.Width - 1, pnlCardPower.Height - 1);
+                }
+            };
+            pnlScrollBody.Controls.Add(pnlCardPower);
+
+            Label lblPowerTitle = new Label
+            {
+                Text = "⏱️ AKILLI GÜÇ & KAPATMA ZAMANLAYICISI",
+                Font = new Font("Segoe UI", 9.0f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(56, 189, 248),
+                Location = new Point(12, 10),
+                AutoSize = true
+            };
+            pnlCardPower.Controls.Add(lblPowerTitle);
+
+            Button btnGearPower = new Button
+            {
+                Text = "⚙️ İndirme & Boşta Koruması",
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(28, 35, 50),
+                ForeColor = Color.FromArgb(203, 213, 225),
+                Size = new Size(185, 24),
+                Location = new Point(pnlCardPower.Width - 195, 8),
+                Cursor = Cursors.Hand
+            };
+            btnGearPower.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnGearPower.Click += (s, e) => ShowPowerTimerSettingsDialog();
+            pnlCardPower.Controls.Add(btnGearPower);
+
+            rbPowerCountdown = new RadioButton
+            {
+                Text = "Geri Sayım:",
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(226, 232, 240),
+                Location = new Point(14, 40),
+                AutoSize = true,
+                Checked = (qolConfig.PowerTimerMode == "COUNTDOWN")
+            };
+            pnlCardPower.Controls.Add(rbPowerCountdown);
+
+            numPowerHours = new NumericUpDown
+            {
+                Minimum = 0,
+                Maximum = 48,
+                Value = Math.Max(0, Math.Min(48, qolConfig.PowerTimerHours)),
+                Location = new Point(110, 39),
+                Width = 45,
+                BackColor = Color.FromArgb(12, 15, 22),
+                ForeColor = Color.FromArgb(56, 189, 248),
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold)
+            };
+            pnlCardPower.Controls.Add(numPowerHours);
+
+            Label lblH = new Label { Text = "saat", ForeColor = Color.FromArgb(148, 163, 184), Font = new Font("Segoe UI", 8.0f), Location = new Point(158, 42), AutoSize = true };
+            pnlCardPower.Controls.Add(lblH);
+
+            numPowerMins = new NumericUpDown
+            {
+                Minimum = 0,
+                Maximum = 59,
+                Value = Math.Max(0, Math.Min(59, qolConfig.PowerTimerMinutes)),
+                Location = new Point(195, 39),
+                Width = 45,
+                BackColor = Color.FromArgb(12, 15, 22),
+                ForeColor = Color.FromArgb(56, 189, 248),
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold)
+            };
+            pnlCardPower.Controls.Add(numPowerMins);
+
+            Label lblM = new Label { Text = "dk sonra", ForeColor = Color.FromArgb(148, 163, 184), Font = new Font("Segoe UI", 8.0f), Location = new Point(243, 42), AutoSize = true };
+            pnlCardPower.Controls.Add(lblM);
+
+            rbPowerSpecific = new RadioButton
+            {
+                Text = "Belirli Saatte:",
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(226, 232, 240),
+                Location = new Point(320, 40),
+                AutoSize = true,
+                Checked = (qolConfig.PowerTimerMode == "SPECIFIC_TIME")
+            };
+            pnlCardPower.Controls.Add(rbPowerSpecific);
+
+            txtPowerSpecificTime = new TextBox
+            {
+                Text = string.IsNullOrEmpty(qolConfig.PowerTimerSpecificTime) ? "23:00" : qolConfig.PowerTimerSpecificTime,
+                Location = new Point(425, 39),
+                Width = 60,
+                BackColor = Color.FromArgb(12, 15, 22),
+                ForeColor = Color.FromArgb(56, 189, 248),
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                TextAlign = HorizontalAlignment.Center
+            };
+            pnlCardPower.Controls.Add(txtPowerSpecificTime);
+
+            Label lblActHdr = new Label { Text = "İşlem:", ForeColor = Color.FromArgb(148, 163, 184), Font = new Font("Segoe UI", 8.0f, FontStyle.Bold), Location = new Point(515, 42), AutoSize = true };
+            pnlCardPower.Controls.Add(lblActHdr);
+
+            cmbPowerAction = new ComboBox
+            {
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Location = new Point(560, 39),
+                Width = 195,
+                BackColor = Color.FromArgb(12, 15, 22),
+                ForeColor = Color.FromArgb(56, 189, 248),
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold)
+            };
+            cmbPowerAction.Items.AddRange(new object[] { "Bilgisayarı Kapat (Shutdown)", "Yeniden Başlat (Restart)", "Uyku Moduna Al (Sleep)", "Oturumu Kilitle (Lock)" });
+            int actIdx = 0;
+            if (qolConfig.PowerTimerAction == "RESTART") actIdx = 1;
+            else if (qolConfig.PowerTimerAction == "SLEEP") actIdx = 2;
+            else if (qolConfig.PowerTimerAction == "LOCK") actIdx = 3;
+            cmbPowerAction.SelectedIndex = actIdx;
+            pnlCardPower.Controls.Add(cmbPowerAction);
+
+            btnStartPowerTimer = new Button
+            {
+                Text = "▶️ Zamanlayıcıyı Başlat",
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(16, 185, 129),
+                ForeColor = Color.Black,
+                Size = new Size(165, 28),
+                Location = new Point(14, 84),
+                Cursor = Cursors.Hand
+            };
+            btnStartPowerTimer.FlatAppearance.BorderSize = 0;
+            btnStartPowerTimer.Click += (s, e) => ToggleStartPowerTimer();
+            pnlCardPower.Controls.Add(btnStartPowerTimer);
+
+            btnCancelPowerTimer = new Button
+            {
+                Text = "⏹️ İptal Et",
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(220, 38, 38),
+                ForeColor = Color.White,
+                Size = new Size(95, 28),
+                Location = new Point(185, 84),
+                Cursor = Cursors.Hand,
+                Enabled = qolConfig.PowerTimerActive
+            };
+            btnCancelPowerTimer.FlatAppearance.BorderSize = 0;
+            btnCancelPowerTimer.Click += (s, e) => CancelPowerTimer(true);
+            pnlCardPower.Controls.Add(btnCancelPowerTimer);
+
+            lblPowerTimerStatus = new Label
+            {
+                Text = qolConfig.PowerTimerActive ? "⏳ Zamanlayıcı Aktif..." : "Zamanlayıcı pasif. Süre ve işlem türü seçip 'Başlat' butonuna basabilirsiniz.",
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                ForeColor = qolConfig.PowerTimerActive ? Color.FromArgb(253, 224, 71) : Color.FromArgb(148, 163, 184),
+                Location = new Point(290, 89),
+                AutoSize = true
+            };
+            pnlCardPower.Controls.Add(lblPowerTimerStatus);
+
+            cardY += 140;
+
+            // -------------------------------------------------------------
+            // CARD 2: PERİYODİK & ZAMANLI ALARMLAR (KRİPTO & RUTİNLER)
+            // -------------------------------------------------------------
+            Panel pnlCardAlarms = new Panel
+            {
+                Location = new Point(0, cardY),
+                Size = new Size(pnlScrollBody.Width, 240),
+                BackColor = Color.FromArgb(18, 23, 34)
+            };
+            pnlCardAlarms.Paint += (s, e) =>
+            {
+                using (Pen p = new Pen(Color.FromArgb(36, 46, 66), 1))
+                {
+                    e.Graphics.DrawRectangle(p, 0, 0, pnlCardAlarms.Width - 1, pnlCardAlarms.Height - 1);
+                }
+            };
+            pnlScrollBody.Controls.Add(pnlCardAlarms);
+
+            Label lblAlarmTitle = new Label
+            {
+                Text = "⏰ PERİYODİK & ZAMANLI ALARMLAR (KRİPTO KAPANIŞLARI & RUTİNLER)",
+                Font = new Font("Segoe UI", 9.0f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(168, 85, 247),
+                Location = new Point(12, 10),
+                AutoSize = true
+            };
+            pnlCardAlarms.Controls.Add(lblAlarmTitle);
+
+            Button btnGearAlarms = new Button
+            {
+                Text = "⚙️ Ses & Bildirim Ayarları",
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(28, 35, 50),
+                ForeColor = Color.FromArgb(203, 213, 225),
+                Size = new Size(185, 24),
+                Location = new Point(pnlCardAlarms.Width - 195, 8),
+                Cursor = Cursors.Hand
+            };
+            btnGearAlarms.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnGearAlarms.Click += (s, e) => ShowAlarmAudioSettingsDialog();
+            pnlCardAlarms.Controls.Add(btnGearAlarms);
+
+            // Preset Buttons Bar
+            int preX = 12;
+            Button btnPre4H = new Button
+            {
+                Text = "⚡ 4H Kripto Mumu (03, 07, 11, 15, 19, 23)",
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(30, 41, 59),
+                ForeColor = Color.FromArgb(56, 189, 248),
+                Size = new Size(250, 24),
+                Location = new Point(preX, 38),
+                Cursor = Cursors.Hand
+            };
+            btnPre4H.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnPre4H.Click += (s, e) => AddCryptoPresetAlarm("CRYPTO_4H");
+            pnlCardAlarms.Controls.Add(btnPre4H);
+            preX += 256;
+
+            Button btnPreDaily = new Button
+            {
+                Text = "📅 Günlük Kapanış (03:00 UTC+3)",
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(30, 41, 59),
+                ForeColor = Color.FromArgb(52, 211, 153),
+                Size = new Size(205, 24),
+                Location = new Point(preX, 38),
+                Cursor = Cursors.Hand
+            };
+            btnPreDaily.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnPreDaily.Click += (s, e) => AddCryptoPresetAlarm("CRYPTO_DAILY");
+            pnlCardAlarms.Controls.Add(btnPreDaily);
+            preX += 211;
+
+            Button btnPreWeekly = new Button
+            {
+                Text = "📅 Haftalık Kapanış (Pzt 03:00)",
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(30, 41, 59),
+                ForeColor = Color.FromArgb(251, 191, 36),
+                Size = new Size(195, 24),
+                Location = new Point(preX, 38),
+                Cursor = Cursors.Hand
+            };
+            btnPreWeekly.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnPreWeekly.Click += (s, e) => AddCryptoPresetAlarm("CRYPTO_WEEKLY");
+            pnlCardAlarms.Controls.Add(btnPreWeekly);
+            preX += 201;
+
+            Button btnAddAlarm = new Button
+            {
+                Text = "➕ Özel Alarm Ekle...",
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(124, 58, 237),
+                ForeColor = Color.White,
+                Size = new Size(135, 24),
+                Location = new Point(preX, 38),
+                Cursor = Cursors.Hand
+            };
+            btnAddAlarm.FlatAppearance.BorderSize = 0;
+            btnAddAlarm.Click += (s, e) => ShowAddCustomAlarmDialog();
+            pnlCardAlarms.Controls.Add(btnAddAlarm);
+
+            // Alarms ListView
+            lvAlarms = new ListView
+            {
+                Location = new Point(12, 68),
+                Size = new Size(pnlCardAlarms.Width - 24, 130),
+                View = View.Details,
+                FullRowSelect = true,
+                CheckBoxes = true,
+                BackColor = Color.FromArgb(12, 15, 22),
+                ForeColor = Color.FromArgb(226, 232, 240),
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Regular),
+                BorderStyle = BorderStyle.FixedSingle
+            };
+            lvAlarms.Columns.Add("Durum", 60);
+            lvAlarms.Columns.Add("Alarm Başlığı", 250);
+            lvAlarms.Columns.Add("Açıklama / Not", 270);
+            lvAlarms.Columns.Add("Aralık / Tür", 160);
+            lvAlarms.Columns.Add("Sonraki Çalma Saati", 160);
+            lvAlarms.ItemChecked += (s, e) =>
+            {
+                if (e.Item != null && e.Item.Tag is CustomAlarmItem)
+                {
+                    CustomAlarmItem item = (CustomAlarmItem)e.Item.Tag;
+                    item.IsEnabled = e.Item.Checked;
+                    qolConfig.SaveToFile(qolConfigPath);
+                }
+            };
+            pnlCardAlarms.Controls.Add(lvAlarms);
+
+            // Sub-buttons below list
+            Button btnStopSound = new Button
+            {
+                Text = "⏹️ Sesi Sustur",
+                Font = new Font("Segoe UI", 7.6f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(30, 41, 59),
+                ForeColor = Color.FromArgb(248, 113, 113),
+                Size = new Size(110, 24),
+                Location = new Point(12, 204),
+                Cursor = Cursors.Hand
+            };
+            btnStopSound.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnStopSound.Click += (s, e) => AudioAlertPlayer.StopAlert();
+            pnlCardAlarms.Controls.Add(btnStopSound);
+
+            Button btnTestAlarm = new Button
+            {
+                Text = "🔔 Seçiliyi Test Et",
+                Font = new Font("Segoe UI", 7.6f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(30, 41, 59),
+                ForeColor = Color.FromArgb(52, 211, 153),
+                Size = new Size(130, 24),
+                Location = new Point(128, 204),
+                Cursor = Cursors.Hand
+            };
+            btnTestAlarm.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnTestAlarm.Click += (s, e) =>
+            {
+                if (lvAlarms.SelectedItems.Count > 0 && lvAlarms.SelectedItems[0].Tag is CustomAlarmItem)
+                {
+                    CustomAlarmItem itm = (CustomAlarmItem)lvAlarms.SelectedItems[0].Tag;
+                    TriggerAlarmAlert(itm);
+                }
+                else
+                {
+                    AudioAlertPlayer.PlayAlert(qolConfig.AlarmCustomSoundPath, qolConfig.AlarmMaxPlayDurationSec);
+                    ShowQoLToast("⏰ Test Alarm Uyarısı", "Alarm ses ve darbe sistemi çalışıyor!", "Tamam", () => AudioAlertPlayer.StopAlert(), Color.FromArgb(168, 85, 247), 15, true);
+                }
+            };
+            pnlCardAlarms.Controls.Add(btnTestAlarm);
+
+            Button btnDelAlarm = new Button
+            {
+                Text = "🗑️ Seçili Alarmı Sil",
+                Font = new Font("Segoe UI", 7.6f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(30, 41, 59),
+                ForeColor = Color.FromArgb(220, 38, 38),
+                Size = new Size(135, 24),
+                Location = new Point(264, 204),
+                Cursor = Cursors.Hand
+            };
+            btnDelAlarm.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnDelAlarm.Click += (s, e) =>
+            {
+                if (lvAlarms.SelectedItems.Count > 0 && lvAlarms.SelectedItems[0].Tag is CustomAlarmItem)
+                {
+                    CustomAlarmItem itm = (CustomAlarmItem)lvAlarms.SelectedItems[0].Tag;
+                    qolConfig.Alarms.Remove(itm);
+                    qolConfig.SaveToFile(qolConfigPath);
+                    RefreshAlarmsListView();
+                }
+            };
+            pnlCardAlarms.Controls.Add(btnDelAlarm);
+
+            cardY += 250;
+
+            // -------------------------------------------------------------
+            // CARD 3: OYUN HATIRLATICI & NOT KALKANI
+            // -------------------------------------------------------------
+            Panel pnlCardGameNotes = new Panel
+            {
+                Location = new Point(0, cardY),
+                Size = new Size(pnlScrollBody.Width, 205),
+                BackColor = Color.FromArgb(18, 23, 34)
+            };
+            pnlCardGameNotes.Paint += (s, e) =>
+            {
+                using (Pen p = new Pen(Color.FromArgb(36, 46, 66), 1))
+                {
+                    e.Graphics.DrawRectangle(p, 0, 0, pnlCardGameNotes.Width - 1, pnlCardGameNotes.Height - 1);
+                }
+            };
+            pnlScrollBody.Controls.Add(pnlCardGameNotes);
+
+            Label lblGameTitle = new Label
+            {
+                Text = "🎮 OYUN HATIRLATICI & NOT KALKANI (OYUN İÇİ SESSİZ NOTLAR)",
+                Font = new Font("Segoe UI", 9.0f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(251, 191, 36),
+                Location = new Point(12, 10),
+                AutoSize = true
+            };
+            pnlCardGameNotes.Controls.Add(lblGameTitle);
+
+            Label lblGameSub = new Label
+            {
+                Text = "Seçilen oyun (.exe) açıldığında masaüstünde sessizce notlarınızı hatırlatır (Ses çalmaz; sadece görsel bildirim).",
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(148, 163, 184),
+                Location = new Point(12, 30),
+                AutoSize = true
+            };
+            pnlCardGameNotes.Controls.Add(lblGameSub);
+
+            Button btnAddGame = new Button
+            {
+                Text = "➕ Oyuna Not Ekle...",
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(217, 119, 6),
+                ForeColor = Color.White,
+                Size = new Size(160, 24),
+                Location = new Point(pnlCardGameNotes.Width - 170, 8),
+                Cursor = Cursors.Hand
+            };
+            btnAddGame.FlatAppearance.BorderSize = 0;
+            btnAddGame.Click += (s, e) => ShowAddGameNoteDialog();
+            pnlCardGameNotes.Controls.Add(btnAddGame);
+
+            lvGameNotes = new ListView
+            {
+                Location = new Point(12, 54),
+                Size = new Size(pnlCardGameNotes.Width - 24, 115),
+                View = View.Details,
+                FullRowSelect = true,
+                BackColor = Color.FromArgb(12, 15, 22),
+                ForeColor = Color.FromArgb(226, 232, 240),
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Regular),
+                BorderStyle = BorderStyle.FixedSingle
+            };
+            lvGameNotes.Columns.Add("Oyun Adı", 180);
+            lvGameNotes.Columns.Add("Süreç Adı (.exe)", 130);
+            lvGameNotes.Columns.Add("Özel Not İçeriği", 360);
+            lvGameNotes.Columns.Add("Hatırlatma Sıklığı", 150);
+            pnlCardGameNotes.Controls.Add(lvGameNotes);
+
+            Button btnDelGame = new Button
+            {
+                Text = "🗑️ Seçili Notu Sil",
+                Font = new Font("Segoe UI", 7.6f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(30, 41, 59),
+                ForeColor = Color.FromArgb(220, 38, 38),
+                Size = new Size(130, 24),
+                Location = new Point(12, 174),
+                Cursor = Cursors.Hand
+            };
+            btnDelGame.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnDelGame.Click += (s, e) =>
+            {
+                if (lvGameNotes.SelectedItems.Count > 0 && lvGameNotes.SelectedItems[0].Tag is GameLaunchNoteItem)
+                {
+                    GameLaunchNoteItem itm = (GameLaunchNoteItem)lvGameNotes.SelectedItems[0].Tag;
+                    qolConfig.GameNotes.Remove(itm);
+                    qolConfig.SaveToFile(qolConfigPath);
+                    RefreshGameNotesListView();
+                }
+            };
+            pnlCardGameNotes.Controls.Add(btnDelGame);
+
+            Button btnTestGameNote = new Button
+            {
+                Text = "👁️ Önizleme Göster",
+                Font = new Font("Segoe UI", 7.6f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(30, 41, 59),
+                ForeColor = Color.FromArgb(251, 191, 36),
+                Size = new Size(135, 24),
+                Location = new Point(148, 174),
+                Cursor = Cursors.Hand
+            };
+            btnTestGameNote.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnTestGameNote.Click += (s, e) =>
+            {
+                if (lvGameNotes.SelectedItems.Count > 0 && lvGameNotes.SelectedItems[0].Tag is GameLaunchNoteItem)
+                {
+                    GameLaunchNoteItem itm = (GameLaunchNoteItem)lvGameNotes.SelectedItems[0].Tag;
+                    ShowQoLToast("🎮 Oyun Notu: " + itm.GameTitle, itm.NoteText, "Kapat", null, Color.FromArgb(251, 191, 36), 10, false);
+                }
+                else
+                {
+                    ShowQoLToast("🎮 Oyun Notu Önizleme", "Örnek Not: Isınmadan rekabetçiye girme!\nSens: 1.15 | 800 DPI | Crosshair: CSGO-xxx", "Kapat", null, Color.FromArgb(251, 191, 36), 10, false);
+                }
+            };
+            pnlCardGameNotes.Controls.Add(btnTestGameNote);
+
+            cardY += 215;
+
+            // -------------------------------------------------------------
+            // CARD 4: AKILLI RAM & STANDBY LIST OTOMASYONU
+            // -------------------------------------------------------------
+            Panel pnlCardRam = new Panel
+            {
+                Location = new Point(0, cardY),
+                Size = new Size(pnlScrollBody.Width, 115),
+                BackColor = Color.FromArgb(18, 23, 34)
+            };
+            pnlCardRam.Paint += (s, e) =>
+            {
+                using (Pen p = new Pen(Color.FromArgb(36, 46, 66), 1))
+                {
+                    e.Graphics.DrawRectangle(p, 0, 0, pnlCardRam.Width - 1, pnlCardRam.Height - 1);
+                }
+            };
+            pnlScrollBody.Controls.Add(pnlCardRam);
+
+            Label lblRamTitle = new Label
+            {
+                Text = "🧠 AKILLI RAM & STANDBY LIST OTOMASYONU",
+                Font = new Font("Segoe UI", 9.0f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(52, 211, 153),
+                Location = new Point(12, 10),
+                AutoSize = true
+            };
+            pnlCardRam.Controls.Add(lblRamTitle);
+
+            Button btnGearRam = new Button
+            {
+                Text = "⚙️ RAM Ayarları",
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(28, 35, 50),
+                ForeColor = Color.FromArgb(203, 213, 225),
+                Size = new Size(130, 24),
+                Location = new Point(pnlCardRam.Width - 140, 8),
+                Cursor = Cursors.Hand
+            };
+            btnGearRam.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnGearRam.Click += (s, e) => ShowRamCleanSettingsDialog();
+            pnlCardRam.Controls.Add(btnGearRam);
+
+            chkAutoRamEnable = new CheckBox
+            {
+                Text = "Otomatik RAM Eşik Temizleyicisini Etkinleştir",
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(226, 232, 240),
+                Location = new Point(14, 38),
+                AutoSize = true,
+                Checked = qolConfig.AutoRamCleanActive
+            };
+            chkAutoRamEnable.CheckedChanged += (s, e) =>
+            {
+                qolConfig.AutoRamCleanActive = chkAutoRamEnable.Checked;
+                qolConfig.SaveToFile(qolConfigPath);
+                UpdateQoLRamStatusLabel();
+            };
+            pnlCardRam.Controls.Add(chkAutoRamEnable);
+
+            // Thresholds
+            rbRam10 = new RadioButton { Text = "%10 Kala", Location = new Point(14, 68), AutoSize = true, ForeColor = Color.FromArgb(203, 213, 225), Font = new Font("Segoe UI", 8.0f), Checked = (qolConfig.RamFreeThresholdPercent == 10) };
+            rbRam15 = new RadioButton { Text = "%15 Kala (Önerilen)", Location = new Point(95, 68), AutoSize = true, ForeColor = Color.FromArgb(203, 213, 225), Font = new Font("Segoe UI", 8.0f), Checked = (qolConfig.RamFreeThresholdPercent == 15) };
+            rbRam20 = new RadioButton { Text = "%20 Kala", Location = new Point(230, 68), AutoSize = true, ForeColor = Color.FromArgb(203, 213, 225), Font = new Font("Segoe UI", 8.0f), Checked = (qolConfig.RamFreeThresholdPercent == 20) };
+            rbRam30 = new RadioButton { Text = "%30 Kala", Location = new Point(310, 68), AutoSize = true, ForeColor = Color.FromArgb(203, 213, 225), Font = new Font("Segoe UI", 8.0f), Checked = (qolConfig.RamFreeThresholdPercent == 30) };
+            rbRamCustom = new RadioButton { Text = "Serbest Eşik (%):", Location = new Point(390, 68), AutoSize = true, ForeColor = Color.FromArgb(203, 213, 225), Font = new Font("Segoe UI", 8.0f), Checked = (qolConfig.RamFreeThresholdPercent != 10 && qolConfig.RamFreeThresholdPercent != 15 && qolConfig.RamFreeThresholdPercent != 20 && qolConfig.RamFreeThresholdPercent != 30) };
+
+            numRamCustom = new NumericUpDown
+            {
+                Minimum = 1,
+                Maximum = 50,
+                Value = Math.Max(1, Math.Min(50, qolConfig.RamFreeThresholdPercent)),
+                Location = new Point(510, 67),
+                Width = 45,
+                BackColor = Color.FromArgb(12, 15, 22),
+                ForeColor = Color.FromArgb(52, 211, 153),
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold)
+            };
+
+            EventHandler onRamThreshChanged = (s, e) =>
+            {
+                if (rbRam10.Checked) qolConfig.RamFreeThresholdPercent = 10;
+                else if (rbRam15.Checked) qolConfig.RamFreeThresholdPercent = 15;
+                else if (rbRam20.Checked) qolConfig.RamFreeThresholdPercent = 20;
+                else if (rbRam30.Checked) qolConfig.RamFreeThresholdPercent = 30;
+                else if (rbRamCustom.Checked) qolConfig.RamFreeThresholdPercent = (int)numRamCustom.Value;
+                qolConfig.SaveToFile(qolConfigPath);
+                UpdateQoLRamStatusLabel();
+            };
+            rbRam10.CheckedChanged += onRamThreshChanged;
+            rbRam15.CheckedChanged += onRamThreshChanged;
+            rbRam20.CheckedChanged += onRamThreshChanged;
+            rbRam30.CheckedChanged += onRamThreshChanged;
+            rbRamCustom.CheckedChanged += onRamThreshChanged;
+            numRamCustom.ValueChanged += (s, e) => { if (rbRamCustom.Checked) { qolConfig.RamFreeThresholdPercent = (int)numRamCustom.Value; qolConfig.SaveToFile(qolConfigPath); UpdateQoLRamStatusLabel(); } };
+
+            pnlCardRam.Controls.Add(rbRam10);
+            pnlCardRam.Controls.Add(rbRam15);
+            pnlCardRam.Controls.Add(rbRam20);
+            pnlCardRam.Controls.Add(rbRam30);
+            pnlCardRam.Controls.Add(rbRamCustom);
+            pnlCardRam.Controls.Add(numRamCustom);
+
+            Button btnPurgeRam = new Button
+            {
+                Text = "🧹 Şimdi Standby & RAM Boşalt",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(16, 185, 129),
+                ForeColor = Color.Black,
+                Size = new Size(195, 26),
+                Location = new Point(570, 64),
+                Cursor = Cursors.Hand
+            };
+            btnPurgeRam.FlatAppearance.BorderSize = 0;
+            btnPurgeRam.Click += (s, e) =>
+            {
+                ExecuteSmartRamAndStandbyPurge(qolConfig.RamCleanProtectForegroundGame);
+                UpdateQoLRamStatusLabel();
+            };
+            pnlCardRam.Controls.Add(btnPurgeRam);
+
+            lblQoLRamStatus = new Label
+            {
+                Text = "Canlı RAM: Taranıyor...",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(148, 163, 184),
+                Location = new Point(310, 40),
+                AutoSize = true
+            };
+            pnlCardRam.Controls.Add(lblQoLRamStatus);
+
+            cardY += 125;
+
+            // -------------------------------------------------------------
+            // CARD 5: BAĞIMSIZ SİSTEM & GPU SHADER ÖNBELLEK TEMİZLEYİCİ
+            // -------------------------------------------------------------
+            Panel pnlCardCleaners = new Panel
+            {
+                Location = new Point(0, cardY),
+                Size = new Size(pnlScrollBody.Width, 140),
+                BackColor = Color.FromArgb(18, 23, 34)
+            };
+            pnlCardCleaners.Paint += (s, e) =>
+            {
+                using (Pen p = new Pen(Color.FromArgb(36, 46, 66), 1))
+                {
+                    e.Graphics.DrawRectangle(p, 0, 0, pnlCardCleaners.Width - 1, pnlCardCleaners.Height - 1);
+                }
+            };
+            pnlScrollBody.Controls.Add(pnlCardCleaners);
+
+            Label lblCleanTitle = new Label
+            {
+                Text = "🧹 BAĞIMSIZ SİSTEM & GPU SHADER ÖNBELLEK TEMİZLEYİCİ",
+                Font = new Font("Segoe UI", 9.0f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(248, 113, 113),
+                Location = new Point(12, 10),
+                AutoSize = true
+            };
+            pnlCardCleaners.Controls.Add(lblCleanTitle);
+
+            Label lblCleanSub = new Label
+            {
+                Text = "İki temizleme işlemi birbirinden tamamen bağımsızdır; dilediğinizi ayrı ayrı tek tıkla çalıştırabilirsiniz.",
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(148, 163, 184),
+                Location = new Point(12, 30),
+                AutoSize = true
+            };
+            pnlCardCleaners.Controls.Add(lblCleanSub);
+
+            int subBoxW = (pnlCardCleaners.Width - 36) / 2;
+
+            // Box 1: Windows Temp & Prefetch
+            Panel pnlBoxTemp = new Panel
+            {
+                Location = new Point(12, 52),
+                Size = new Size(subBoxW, 76),
+                BackColor = Color.FromArgb(12, 15, 22)
+            };
+            pnlBoxTemp.Paint += (s, e) =>
+            {
+                using (Pen p = new Pen(Color.FromArgb(40, 50, 72), 1))
+                {
+                    e.Graphics.DrawRectangle(p, 0, 0, pnlBoxTemp.Width - 1, pnlBoxTemp.Height - 1);
+                }
+            };
+            pnlCardCleaners.Controls.Add(pnlBoxTemp);
+
+            Label lblBox1Title = new Label
+            {
+                Text = "🗑️ Windows Temp & Prefetch Dosyaları",
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(203, 213, 225),
+                Location = new Point(10, 8),
+                AutoSize = true
+            };
+            pnlBoxTemp.Controls.Add(lblBox1Title);
+
+            lblSystemTempStatus = new Label
+            {
+                Text = "%TEMP% ve kilitli olmayan Windows geçici dosyaları temizlenmeye hazır.",
+                Font = new Font("Segoe UI", 7.6f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(148, 163, 184),
+                Location = new Point(10, 28),
+                Size = new Size(subBoxW - 20, 18),
+                AutoEllipsis = true
+            };
+            pnlBoxTemp.Controls.Add(lblSystemTempStatus);
+
+            btnCleanTempNow = new Button
+            {
+                Text = "🧹 Windows Temp Temizle",
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(30, 41, 59),
+                ForeColor = Color.FromArgb(56, 189, 248),
+                Size = new Size(180, 22),
+                Location = new Point(10, 48),
+                Cursor = Cursors.Hand
+            };
+            btnCleanTempNow.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnCleanTempNow.Click += (s, e) => RunSystemTempCleanAsync();
+            pnlBoxTemp.Controls.Add(btnCleanTempNow);
+
+            // Box 2: GPU Shader Cache
+            Panel pnlBoxShader = new Panel
+            {
+                Location = new Point(subBoxW + 24, 52),
+                Size = new Size(subBoxW, 76),
+                BackColor = Color.FromArgb(12, 15, 22)
+            };
+            pnlBoxShader.Paint += (s, e) =>
+            {
+                using (Pen p = new Pen(Color.FromArgb(40, 50, 72), 1))
+                {
+                    e.Graphics.DrawRectangle(p, 0, 0, pnlBoxShader.Width - 1, pnlBoxShader.Height - 1);
+                }
+            };
+            pnlCardCleaners.Controls.Add(pnlBoxShader);
+
+            Label lblBox2Title = new Label
+            {
+                Text = "🎮 Ekran Kartı Shader Önbelleği (DirectX / NVIDIA / AMD)",
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(203, 213, 225),
+                Location = new Point(10, 8),
+                AutoSize = true
+            };
+            pnlBoxShader.Controls.Add(lblBox2Title);
+
+            lblShaderCacheStatus = new Label
+            {
+                Text = "DirectX D3D, NVIDIA DXCache ve AMD Shader havuzları temizlenmeye hazır.",
+                Font = new Font("Segoe UI", 7.6f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(148, 163, 184),
+                Location = new Point(10, 28),
+                Size = new Size(subBoxW - 20, 18),
+                AutoEllipsis = true
+            };
+            pnlBoxShader.Controls.Add(lblShaderCacheStatus);
+
+            btnCleanShaderNow = new Button
+            {
+                Text = "🎮 GPU Shader Önbelleğini Temizle",
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(30, 41, 59),
+                ForeColor = Color.FromArgb(248, 113, 113),
+                Size = new Size(220, 22),
+                Location = new Point(10, 48),
+                Cursor = Cursors.Hand
+            };
+            btnCleanShaderNow.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnCleanShaderNow.Click += (s, e) => RunGpuShaderCleanAsync();
+            pnlBoxShader.Controls.Add(btnCleanShaderNow);
+
+            // Responsive Layout Handling for QoL Cards
+            Action layoutQoLCards = () =>
+            {
+                int availW = Math.Max(780, viewAutomationQoL.ClientSize.Width - 36);
+                pnlScrollBody.Width = availW;
+
+                pnlCardPower.Width = availW;
+                btnGearPower.Location = new Point(availW - 195, 8);
+
+                pnlCardAlarms.Width = availW;
+                btnGearAlarms.Location = new Point(availW - 195, 8);
+                lvAlarms.Width = availW - 24;
+
+                pnlCardGameNotes.Width = availW;
+                btnAddGame.Location = new Point(availW - 170, 8);
+                lvGameNotes.Width = availW - 24;
+
+                pnlCardRam.Width = availW;
+                btnGearRam.Location = new Point(availW - 140, 8);
+
+                pnlCardCleaners.Width = availW;
+                int innerSubW = (availW - 36) / 2;
+                pnlBoxTemp.Width = innerSubW;
+                lblSystemTempStatus.Width = innerSubW - 20;
+
+                pnlBoxShader.Location = new Point(innerSubW + 24, 52);
+                pnlBoxShader.Width = innerSubW;
+                lblShaderCacheStatus.Width = innerSubW - 20;
+            };
+
+            viewAutomationQoL.Resize += (s, e) => layoutQoLCards();
+            layoutQoLCards();
+
+            RefreshAlarmsListView();
+            RefreshGameNotesListView();
+            UpdateQoLRamStatusLabel();
+        }
+
+        private void RefreshAutomationQoLView()
+        {
+            RefreshAlarmsListView();
+            RefreshGameNotesListView();
+            UpdateQoLRamStatusLabel();
+        }
+
+        private void RefreshAlarmsListView()
+        {
+            if (lvAlarms == null) return;
+            lvAlarms.BeginUpdate();
+            try
+            {
+                lvAlarms.Items.Clear();
+                foreach (var a in qolConfig.Alarms)
+                {
+                    string statusText = a.IsEnabled ? "Açık" : "Kapalı";
+                    string typeDesc = a.AlarmType;
+                    if (a.AlarmType == "CRYPTO_4H") typeDesc = "4H Kripto (03, 07, 11, 15, 19, 23)";
+                    else if (a.AlarmType == "CRYPTO_DAILY") typeDesc = "Günlük Kapanış (03:00)";
+                    else if (a.AlarmType == "CRYPTO_WEEKLY") typeDesc = "Haftalık Kapanış (Pzt 03:00)";
+                    else if (a.AlarmType == "PERIODIC") typeDesc = string.Format("Her {0} Dakikada Bir", a.PeriodMinutes);
+                    else if (a.AlarmType == "SPECIFIC_TIME") typeDesc = string.Format("Saat {0}", a.SpecificTimeHHmm);
+
+                    string nextStr = a.NextTrigger > DateTime.MinValue ? a.NextTrigger.ToString("dd.MM.yyyy HH:mm:ss") : "--";
+
+                    ListViewItem itm = new ListViewItem(statusText);
+                    itm.SubItems.Add(a.Title ?? "Alarm");
+                    itm.SubItems.Add(a.Description ?? "--");
+                    itm.SubItems.Add(typeDesc);
+                    itm.SubItems.Add(nextStr);
+                    itm.Tag = a;
+                    itm.Checked = a.IsEnabled;
+                    if (!a.IsEnabled) itm.ForeColor = Color.FromArgb(148, 163, 184);
+                    lvAlarms.Items.Add(itm);
+                }
+            }
+            finally
+            {
+                lvAlarms.EndUpdate();
+            }
+        }
+
+        private void RefreshGameNotesListView()
+        {
+            if (lvGameNotes == null) return;
+            lvGameNotes.BeginUpdate();
+            try
+            {
+                lvGameNotes.Items.Clear();
+                foreach (var g in qolConfig.GameNotes)
+                {
+                    string freq = g.PeriodicInGame ? string.Format("Girişte + Her {0} Dk", g.PeriodicIntervalMinutes) : "Sadece Girişte";
+                    string safeNote = (g.NoteText ?? "").Replace("\r\n", "  |  ").Replace("\n", "  |  ");
+
+                    ListViewItem itm = new ListViewItem(g.GameTitle ?? "Oyun");
+                    itm.SubItems.Add(g.ProcessName ?? "--");
+                    itm.SubItems.Add(safeNote);
+                    itm.SubItems.Add(freq);
+                    itm.Tag = g;
+                    lvGameNotes.Items.Add(itm);
+                }
+            }
+            finally
+            {
+                lvGameNotes.EndUpdate();
+            }
+        }
+
+        private void UpdateQoLRamStatusLabel()
+        {
+            if (lblQoLRamStatus == null) return;
+            try
+            {
+                NativeMethods.MEMORYSTATUSEX mem = new NativeMethods.MEMORYSTATUSEX();
+                if (NativeMethods.GlobalMemoryStatusEx(mem))
+                {
+                    double usedLoad = mem.dwMemoryLoad;
+                    double freeGb = mem.ullAvailPhys / (1024.0 * 1024.0 * 1024.0);
+                    double totalGb = mem.ullTotalPhys / (1024.0 * 1024.0 * 1024.0);
+                    string autoStatus = qolConfig.AutoRamCleanActive ? string.Format("Otomatik Temizlik: Aktif (%{0} Eşik)", qolConfig.RamFreeThresholdPercent) : "Otomatik Temizlik: Kapalı";
+                    lblQoLRamStatus.Text = string.Format("Canlı RAM: %{0:0} Kullanım ({1:0.0} / {2:0.0} GB) — {3}", usedLoad, (totalGb - freeGb), totalGb, autoStatus);
+                    lblQoLRamStatus.ForeColor = qolConfig.AutoRamCleanActive ? Color.FromArgb(52, 211, 153) : Color.FromArgb(148, 163, 184);
+                }
+            }
+            catch { }
+        }
+
+        private void ToggleStartPowerTimer()
+        {
+            if (qolConfig.PowerTimerActive)
+            {
+                CancelPowerTimer(true);
+                return;
+            }
+
+            int h = (int)numPowerHours.Value;
+            int m = (int)numPowerMins.Value;
+            string spec = (txtPowerSpecificTime.Text ?? "").Trim();
+            string act = "SHUTDOWN";
+            if (cmbPowerAction.SelectedIndex == 1) act = "RESTART";
+            else if (cmbPowerAction.SelectedIndex == 2) act = "SLEEP";
+            else if (cmbPowerAction.SelectedIndex == 3) act = "LOCK";
+
+            qolConfig.PowerTimerAction = act;
+            qolConfig.PowerTimerHours = h;
+            qolConfig.PowerTimerMinutes = m;
+            qolConfig.PowerTimerSpecificTime = spec;
+
+            if (rbPowerCountdown.Checked)
+            {
+                qolConfig.PowerTimerMode = "COUNTDOWN";
+                if (h == 0 && m == 0)
+                {
+                    MessageBox.Show("Lütfen en az 1 dakika süre belirleyin.", "Geçersiz Süre", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                qolConfig.PowerTimerTarget = DateTime.Now.AddHours(h).AddMinutes(m);
+            }
+            else
+            {
+                qolConfig.PowerTimerMode = "SPECIFIC_TIME";
+                DateTime targetClock;
+                if (!DateTime.TryParse(spec, out targetClock))
+                {
+                    MessageBox.Show("Lütfen geçerli bir saat girin (Örnek: 23:45).", "Geçersiz Saat Formatı", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                DateTime now = DateTime.Now;
+                DateTime sched = new DateTime(now.Year, now.Month, now.Day, targetClock.Hour, targetClock.Minute, 0);
+                if (sched <= now) sched = sched.AddDays(1);
+                qolConfig.PowerTimerTarget = sched;
+            }
+
+            qolConfig.PowerTimerActive = true;
+            qolConfig.PowerTimerWarnGiven = false;
+            qolConfig.SaveToFile(qolConfigPath);
+
+            if (btnStartPowerTimer != null)
+            {
+                btnStartPowerTimer.Text = "⏹️ Zamanlayıcıyı Durdur";
+                btnStartPowerTimer.BackColor = Color.FromArgb(245, 158, 11);
+                btnStartPowerTimer.ForeColor = Color.Black;
+            }
+            if (btnCancelPowerTimer != null) btnCancelPowerTimer.Enabled = true;
+
+            TimeSpan diff = qolConfig.PowerTimerTarget - DateTime.Now;
+            lblPowerTimerStatus.Text = string.Format("⏳ Hedef: {0:HH:mm:ss} — Kalan: {1:00}:{2:00}:{3:00} [{4}]",
+                qolConfig.PowerTimerTarget, (int)diff.TotalHours, diff.Minutes, diff.Seconds, qolConfig.PowerTimerAction);
+            lblPowerTimerStatus.ForeColor = Color.FromArgb(253, 224, 71);
+
+            ShowQoLToast("⏱️ Güç Zamanlayıcısı Başlatıldı",
+                string.Format("Hedef: {0:HH:mm:ss} ({1}). İptal etmek için istediğiniz an bildirimdeki butona tıklayabilirsiniz.", qolConfig.PowerTimerTarget, qolConfig.PowerTimerAction),
+                "İptal Et", () => CancelPowerTimer(true), Color.FromArgb(56, 189, 248), 8, false);
+        }
+
+        private void CancelPowerTimer(bool showToast)
+        {
+            qolConfig.PowerTimerActive = false;
+            qolConfig.PowerTimerWarnGiven = false;
+            qolConfig.SaveToFile(qolConfigPath);
+
+            if (btnStartPowerTimer != null)
+            {
+                btnStartPowerTimer.Text = "▶️ Zamanlayıcıyı Başlat";
+                btnStartPowerTimer.BackColor = Color.FromArgb(16, 185, 129);
+                btnStartPowerTimer.ForeColor = Color.Black;
+            }
+            if (btnCancelPowerTimer != null) btnCancelPowerTimer.Enabled = false;
+
+            if (lblPowerTimerStatus != null)
+            {
+                lblPowerTimerStatus.Text = "Zamanlayıcı iptal edildi. Pasif durumda.";
+                lblPowerTimerStatus.ForeColor = Color.FromArgb(148, 163, 184);
+            }
+
+            if (showToast)
+            {
+                ShowQoLToast("⏹️ Güç Zamanlayıcısı İptal Edildi", "Planlanmış güç işlemi tamamen durduruldu.", null, null, Color.FromArgb(248, 113, 113), 5, false);
+            }
+        }
+
+        private void AddCryptoPresetAlarm(string type)
+        {
+            CustomAlarmItem itm = new CustomAlarmItem();
+            itm.IsEnabled = true;
+            itm.AlarmType = type;
+
+            if (type == "CRYPTO_4H")
+            {
+                itm.Title = "BTC 4H Mum Kapanışı (03, 07, 11, 15, 19, 23)";
+                itm.Description = "4 Saatlik grafikleri ve açık pozisyonları kontrol et";
+                itm.PeriodMinutes = 240;
+                itm.NextTrigger = CryptoAlarmHelpers.GetNextCrypto4HCandleTime();
+            }
+            else if (type == "CRYPTO_DAILY")
+            {
+                itm.Title = "Kripto Günlük Kapanış (03:00 UTC+3)";
+                itm.Description = "Günlük mum kapanışı, fonlama oranları ve emirleri kontrol et";
+                itm.PeriodMinutes = 1440;
+                itm.SpecificTimeHHmm = "03:00";
+                itm.NextTrigger = CryptoAlarmHelpers.GetNextCryptoDailyCloseTime();
+            }
+            else if (type == "CRYPTO_WEEKLY")
+            {
+                itm.Title = "Kripto Haftalık Kapanış (Pazartesi 03:00 UTC+3)";
+                itm.Description = "Haftalık mum kapanışı ve yeni hafta destek/direnç seviyelerini incele";
+                itm.PeriodMinutes = 10080;
+                itm.SpecificTimeHHmm = "03:00";
+                itm.NextTrigger = CryptoAlarmHelpers.GetNextCryptoWeeklyCloseTime();
+            }
+
+            qolConfig.Alarms.Add(itm);
+            qolConfig.SaveToFile(qolConfigPath);
+            RefreshAlarmsListView();
+
+            ShowQoLToast("⏰ Kripto Alarmı Eklendi",
+                string.Format("'{0}' alarmı kuruldu. İlk çalma saati: {1:dd.MM.yyyy HH:mm:ss}", itm.Title, itm.NextTrigger),
+                "Tamam", null, Color.FromArgb(168, 85, 247), 8, false);
+        }
+
+        private void TriggerAlarmAlert(CustomAlarmItem itm)
+        {
+            AudioAlertPlayer.PlayAlert(qolConfig.AlarmCustomSoundPath, qolConfig.AlarmMaxPlayDurationSec);
+            ShowQoLToast(
+                "⏰ " + (itm.Title ?? "Alarm Uyarısı"),
+                itm.Description ?? "Planlanan alarm zamanı geldi!",
+                "Sesi Durdur",
+                () => AudioAlertPlayer.StopAlert(),
+                Color.FromArgb(168, 85, 247),
+                15,
+                true
+            );
+        }
+
+        private void ShowQoLToast(string title, string msg, string actionText, Action action, Color accent, int autoCloseSec, bool pulse3Sec)
+        {
+            if (this.IsDisposed) return;
+            if (this.InvokeRequired)
+            {
+                this.BeginInvoke((MethodInvoker)delegate
+                {
+                    ShowQoLToast(title, msg, actionText, action, accent, autoCloseSec, pulse3Sec);
+                });
+                return;
+            }
+
+            try
+            {
+                QoLToastForm toast = new QoLToastForm(title, msg, actionText, action, accent, autoCloseSec, pulse3Sec);
+                toast.Show();
+            }
+            catch { }
+        }
+
+        // -------------------------------------------------------------
+        // SETTINGS GEAR DIALOGS
+        // -------------------------------------------------------------
+        private void ShowPowerTimerSettingsDialog()
+        {
+            using (Form dlg = new Form())
+            {
+                dlg.Text = "Akıllı Güç & Kapatma Koruma Ayarları";
+                dlg.Size = new Size(520, 310);
+                dlg.StartPosition = FormStartPosition.CenterParent;
+                dlg.FormBorderStyle = FormBorderStyle.FixedDialog;
+                dlg.MaximizeBox = false;
+                dlg.MinimizeBox = false;
+                dlg.BackColor = Color.FromArgb(18, 23, 34);
+                dlg.ForeColor = Color.White;
+                dlg.Font = new Font("Segoe UI", 9.0f);
+
+                CheckBox chkNet = new CheckBox
+                {
+                    Text = "Akıllı İndirme Koruması: Ağ İndirmesi Eşiğin Üzerindeyse Kapatmayı Ertele",
+                    Location = new Point(20, 20),
+                    Width = 460,
+                    Checked = qolConfig.PowerTimerPostponeIfNetBusy,
+                    ForeColor = Color.FromArgb(56, 189, 248),
+                    Font = new Font("Segoe UI", 8.5f, FontStyle.Bold)
+                };
+                dlg.Controls.Add(chkNet);
+
+                Label lblNetSub = new Label
+                {
+                    Text = "Minimum İndirme Hızı Eşiği (KB/s):",
+                    Location = new Point(44, 48),
+                    AutoSize = true,
+                    ForeColor = Color.FromArgb(148, 163, 184)
+                };
+                dlg.Controls.Add(lblNetSub);
+
+                NumericUpDown numNet = new NumericUpDown
+                {
+                    Minimum = 50,
+                    Maximum = 50000,
+                    Value = Math.Max(50, Math.Min(50000, qolConfig.PowerTimerNetThresholdKBps)),
+                    Location = new Point(275, 46),
+                    Width = 80,
+                    BackColor = Color.FromArgb(12, 15, 22),
+                    ForeColor = Color.FromArgb(56, 189, 248)
+                };
+                dlg.Controls.Add(numNet);
+
+                CheckBox chkCpu = new CheckBox
+                {
+                    Text = "Akıllı Boşta Dedektörü: CPU Yükü Yüksekse Kapatmayı Ertele",
+                    Location = new Point(20, 90),
+                    Width = 460,
+                    Checked = qolConfig.PowerTimerPostponeIfCpuBusy,
+                    ForeColor = Color.FromArgb(52, 211, 153),
+                    Font = new Font("Segoe UI", 8.5f, FontStyle.Bold)
+                };
+                dlg.Controls.Add(chkCpu);
+
+                Label lblCpuSub = new Label
+                {
+                    Text = "Maksimum CPU Yük Eşiği (%):",
+                    Location = new Point(44, 118),
+                    AutoSize = true,
+                    ForeColor = Color.FromArgb(148, 163, 184)
+                };
+                dlg.Controls.Add(lblCpuSub);
+
+                NumericUpDown numCpu = new NumericUpDown
+                {
+                    Minimum = 5,
+                    Maximum = 95,
+                    Value = Math.Max(5, Math.Min(95, qolConfig.PowerTimerCpuThresholdPercent)),
+                    Location = new Point(275, 116),
+                    Width = 80,
+                    BackColor = Color.FromArgb(12, 15, 22),
+                    ForeColor = Color.FromArgb(52, 211, 153)
+                };
+                dlg.Controls.Add(numCpu);
+
+                CheckBox chkWarn = new CheckBox
+                {
+                    Text = "Kapatmaya 5 Dakika Kala Güvenli Bildirim Göster (İptal Butonlu)",
+                    Location = new Point(20, 160),
+                    Width = 460,
+                    Checked = qolConfig.PowerTimer5MinWarn,
+                    ForeColor = Color.FromArgb(251, 191, 36),
+                    Font = new Font("Segoe UI", 8.5f, FontStyle.Bold)
+                };
+                dlg.Controls.Add(chkWarn);
+
+                Button btnSave = new Button
+                {
+                    Text = "Ayarları Kaydet",
+                    DialogResult = DialogResult.OK,
+                    Location = new Point(250, 220),
+                    Size = new Size(130, 32),
+                    BackColor = Color.FromArgb(16, 185, 129),
+                    ForeColor = Color.Black,
+                    FlatStyle = FlatStyle.Flat,
+                    Font = new Font("Segoe UI", 8.5f, FontStyle.Bold)
+                };
+                btnSave.FlatAppearance.BorderSize = 0;
+                dlg.Controls.Add(btnSave);
+
+                Button btnCancel = new Button
+                {
+                    Text = "İptal",
+                    DialogResult = DialogResult.Cancel,
+                    Location = new Point(390, 220),
+                    Size = new Size(95, 32),
+                    BackColor = Color.FromArgb(30, 41, 59),
+                    ForeColor = Color.FromArgb(203, 213, 225),
+                    FlatStyle = FlatStyle.Flat
+                };
+                btnCancel.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+                dlg.Controls.Add(btnCancel);
+
+                if (dlg.ShowDialog(this) == DialogResult.OK)
+                {
+                    qolConfig.PowerTimerPostponeIfNetBusy = chkNet.Checked;
+                    qolConfig.PowerTimerNetThresholdKBps = (int)numNet.Value;
+                    qolConfig.PowerTimerPostponeIfCpuBusy = chkCpu.Checked;
+                    qolConfig.PowerTimerCpuThresholdPercent = (int)numCpu.Value;
+                    qolConfig.PowerTimer5MinWarn = chkWarn.Checked;
+                    qolConfig.SaveToFile(qolConfigPath);
+                }
+            }
+        }
+
+        private void ShowAlarmAudioSettingsDialog()
+        {
+            using (Form dlg = new Form())
+            {
+                dlg.Text = "Ses & Bildirim Ayarları";
+                dlg.Size = new Size(540, 340);
+                dlg.StartPosition = FormStartPosition.CenterParent;
+                dlg.FormBorderStyle = FormBorderStyle.FixedDialog;
+                dlg.MaximizeBox = false;
+                dlg.MinimizeBox = false;
+                dlg.BackColor = Color.FromArgb(18, 23, 34);
+                dlg.ForeColor = Color.White;
+                dlg.Font = new Font("Segoe UI", 9.0f);
+
+                Label lblSound = new Label
+                {
+                    Text = "Özel Alarm Sesi (.mp3 veya .wav):",
+                    Location = new Point(20, 18),
+                    AutoSize = true,
+                    ForeColor = Color.FromArgb(168, 85, 247),
+                    Font = new Font("Segoe UI", 8.5f, FontStyle.Bold)
+                };
+                dlg.Controls.Add(lblSound);
+
+                TextBox txtSoundPath = new TextBox
+                {
+                    Text = qolConfig.AlarmCustomSoundPath ?? "",
+                    Location = new Point(20, 42),
+                    Width = 370,
+                    BackColor = Color.FromArgb(12, 15, 22),
+                    ForeColor = Color.FromArgb(226, 232, 240)
+                };
+                dlg.Controls.Add(txtSoundPath);
+
+                Button btnBrowse = new Button
+                {
+                    Text = "Gözat...",
+                    Location = new Point(400, 40),
+                    Size = new Size(100, 26),
+                    BackColor = Color.FromArgb(30, 41, 59),
+                    ForeColor = Color.FromArgb(203, 213, 225),
+                    FlatStyle = FlatStyle.Flat
+                };
+                btnBrowse.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+                btnBrowse.Click += (s, e) =>
+                {
+                    using (OpenFileDialog ofd = new OpenFileDialog())
+                    {
+                        ofd.Title = "Alarm Sesi Seçin (.mp3 veya .wav)";
+                        ofd.Filter = "Ses Dosyaları (*.mp3;*.wav)|*.mp3;*.wav|Tüm Dosyalar (*.*)|*.*";
+                        if (ofd.ShowDialog(dlg) == DialogResult.OK)
+                        {
+                            txtSoundPath.Text = ofd.FileName;
+                        }
+                    }
+                };
+                dlg.Controls.Add(btnBrowse);
+
+                Label lblHint = new Label
+                {
+                    Text = "Boş bırakılırsa Windows varsayılan uyarı sesi kullanılır.",
+                    Location = new Point(20, 72),
+                    AutoSize = true,
+                    ForeColor = Color.FromArgb(148, 163, 184),
+                    Font = new Font("Segoe UI", 7.8f)
+                };
+                dlg.Controls.Add(lblHint);
+
+                Button btnTest = new Button
+                {
+                    Text = "▶️ Sesi Test Et",
+                    Location = new Point(20, 96),
+                    Size = new Size(115, 26),
+                    BackColor = Color.FromArgb(30, 41, 59),
+                    ForeColor = Color.FromArgb(52, 211, 153),
+                    FlatStyle = FlatStyle.Flat
+                };
+                btnTest.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+                btnTest.Click += (s, e) => AudioAlertPlayer.PlayAlert(txtSoundPath.Text, qolConfig.AlarmMaxPlayDurationSec);
+                dlg.Controls.Add(btnTest);
+
+                Button btnStop = new Button
+                {
+                    Text = "⏹️ Durdur",
+                    Location = new Point(145, 96),
+                    Size = new Size(90, 26),
+                    BackColor = Color.FromArgb(30, 41, 59),
+                    ForeColor = Color.FromArgb(248, 113, 113),
+                    FlatStyle = FlatStyle.Flat
+                };
+                btnStop.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+                btnStop.Click += (s, e) => AudioAlertPlayer.StopAlert();
+                dlg.Controls.Add(btnStop);
+
+                Label lblDur = new Label
+                {
+                    Text = "Maksimum Çalma Kesinti Süresi (Cutoff):",
+                    Location = new Point(20, 140),
+                    AutoSize = true,
+                    ForeColor = Color.FromArgb(203, 213, 225),
+                    Font = new Font("Segoe UI", 8.2f, FontStyle.Bold)
+                };
+                dlg.Controls.Add(lblDur);
+
+                ComboBox cmbCutoff = new ComboBox
+                {
+                    DropDownStyle = ComboBoxStyle.DropDownList,
+                    Location = new Point(280, 137),
+                    Width = 140,
+                    BackColor = Color.FromArgb(12, 15, 22),
+                    ForeColor = Color.FromArgb(168, 85, 247)
+                };
+                cmbCutoff.Items.AddRange(new object[] { "5 Saniye", "10 Saniye", "15 Saniye (Önerilen)", "30 Saniye", "1 Dakika (Maksimum)" });
+                int cutIdx = 2;
+                if (qolConfig.AlarmMaxPlayDurationSec == 5) cutIdx = 0;
+                else if (qolConfig.AlarmMaxPlayDurationSec == 10) cutIdx = 1;
+                else if (qolConfig.AlarmMaxPlayDurationSec == 15) cutIdx = 2;
+                else if (qolConfig.AlarmMaxPlayDurationSec == 30) cutIdx = 3;
+                else if (qolConfig.AlarmMaxPlayDurationSec == 60) cutIdx = 4;
+                cmbCutoff.SelectedIndex = cutIdx;
+                dlg.Controls.Add(cmbCutoff);
+
+                Label lblPulseInfo = new Label
+                {
+                    Text = "ℹ️ Tekrarlama Mantığı: Alarm tetiklendiğinde ses çalar ve 15 saniye boyunca\nher 3 saniyede bir masaüstü bildirim uyarısı titreşir.",
+                    Location = new Point(20, 172),
+                    Size = new Size(480, 36),
+                    ForeColor = Color.FromArgb(148, 163, 184),
+                    Font = new Font("Segoe UI", 7.8f)
+                };
+                dlg.Controls.Add(lblPulseInfo);
+
+                CheckBox chkHealth = new CheckBox
+                {
+                    Text = "Sağlık & Mola Hatırlatıcıları (Göz Dinlendirme & Su İçme - Her 60 dk)",
+                    Location = new Point(20, 215),
+                    Width = 480,
+                    Checked = qolConfig.HealthRemindersEnabled,
+                    ForeColor = Color.FromArgb(56, 189, 248),
+                    Font = new Font("Segoe UI", 8.2f, FontStyle.Bold)
+                };
+                dlg.Controls.Add(chkHealth);
+
+                Button btnSave = new Button
+                {
+                    Text = "Ayarları Kaydet",
+                    DialogResult = DialogResult.OK,
+                    Location = new Point(270, 260),
+                    Size = new Size(130, 32),
+                    BackColor = Color.FromArgb(16, 185, 129),
+                    ForeColor = Color.Black,
+                    FlatStyle = FlatStyle.Flat,
+                    Font = new Font("Segoe UI", 8.5f, FontStyle.Bold)
+                };
+                btnSave.FlatAppearance.BorderSize = 0;
+                dlg.Controls.Add(btnSave);
+
+                Button btnCancel = new Button
+                {
+                    Text = "Kapat",
+                    DialogResult = DialogResult.Cancel,
+                    Location = new Point(410, 260),
+                    Size = new Size(90, 32),
+                    BackColor = Color.FromArgb(30, 41, 59),
+                    ForeColor = Color.FromArgb(203, 213, 225),
+                    FlatStyle = FlatStyle.Flat
+                };
+                btnCancel.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+                dlg.Controls.Add(btnCancel);
+
+                if (dlg.ShowDialog(this) == DialogResult.OK)
+                {
+                    AudioAlertPlayer.StopAlert();
+                    qolConfig.AlarmCustomSoundPath = txtSoundPath.Text.Trim();
+                    int selCut = 15;
+                    if (cmbCutoff.SelectedIndex == 0) selCut = 5;
+                    else if (cmbCutoff.SelectedIndex == 1) selCut = 10;
+                    else if (cmbCutoff.SelectedIndex == 2) selCut = 15;
+                    else if (cmbCutoff.SelectedIndex == 3) selCut = 30;
+                    else if (cmbCutoff.SelectedIndex == 4) selCut = 60;
+                    qolConfig.AlarmMaxPlayDurationSec = selCut;
+                    qolConfig.HealthRemindersEnabled = chkHealth.Checked;
+                    qolConfig.SaveToFile(qolConfigPath);
+                }
+                else
+                {
+                    AudioAlertPlayer.StopAlert();
+                }
+            }
+        }
+
+        private void ShowAddCustomAlarmDialog()
+        {
+            using (Form dlg = new Form())
+            {
+                dlg.Text = "Yeni Özel Alarm Oluştur";
+                dlg.Size = new Size(480, 300);
+                dlg.StartPosition = FormStartPosition.CenterParent;
+                dlg.FormBorderStyle = FormBorderStyle.FixedDialog;
+                dlg.MaximizeBox = false;
+                dlg.MinimizeBox = false;
+                dlg.BackColor = Color.FromArgb(18, 23, 34);
+                dlg.ForeColor = Color.White;
+                dlg.Font = new Font("Segoe UI", 9.0f);
+
+                Label lblT = new Label { Text = "Alarm Başlığı:", Location = new Point(20, 18), AutoSize = true, ForeColor = Color.FromArgb(168, 85, 247), Font = new Font("Segoe UI", 8.5f, FontStyle.Bold) };
+                dlg.Controls.Add(lblT);
+
+                TextBox txtTitle = new TextBox { Text = "İşe Hazırlan", Location = new Point(20, 38), Width = 420, BackColor = Color.FromArgb(12, 15, 22), ForeColor = Color.FromArgb(226, 232, 240) };
+                dlg.Controls.Add(txtTitle);
+
+                Label lblD = new Label { Text = "Açıklama / Not:", Location = new Point(20, 68), AutoSize = true, ForeColor = Color.FromArgb(148, 163, 184) };
+                dlg.Controls.Add(lblD);
+
+                TextBox txtDesc = new TextBox { Text = "Çantayı al ve hazır ol", Location = new Point(20, 88), Width = 420, BackColor = Color.FromArgb(12, 15, 22), ForeColor = Color.FromArgb(226, 232, 240) };
+                dlg.Controls.Add(txtDesc);
+
+                RadioButton rbPer = new RadioButton { Text = "Periyodik Aralık:", Location = new Point(20, 122), AutoSize = true, Checked = true, ForeColor = Color.FromArgb(203, 213, 225) };
+                dlg.Controls.Add(rbPer);
+
+                NumericUpDown numPer = new NumericUpDown { Minimum = 1, Maximum = 1440, Value = 60, Location = new Point(150, 121), Width = 60, BackColor = Color.FromArgb(12, 15, 22), ForeColor = Color.FromArgb(56, 189, 248) };
+                dlg.Controls.Add(numPer);
+
+                Label lblDk = new Label { Text = "dakikada bir", Location = new Point(218, 124), AutoSize = true, ForeColor = Color.FromArgb(148, 163, 184) };
+                dlg.Controls.Add(lblDk);
+
+                RadioButton rbClock = new RadioButton { Text = "Hedef Saatte:", Location = new Point(20, 154), AutoSize = true, ForeColor = Color.FromArgb(203, 213, 225) };
+                dlg.Controls.Add(rbClock);
+
+                TextBox txtClock = new TextBox { Text = DateTime.Now.AddMinutes(30).ToString("HH:mm"), Location = new Point(150, 153), Width = 60, BackColor = Color.FromArgb(12, 15, 22), ForeColor = Color.FromArgb(56, 189, 248), TextAlign = HorizontalAlignment.Center };
+                dlg.Controls.Add(txtClock);
+
+                Button btnAdd = new Button
+                {
+                    Text = "Alarmı Ekle",
+                    DialogResult = DialogResult.OK,
+                    Location = new Point(230, 210),
+                    Size = new Size(115, 32),
+                    BackColor = Color.FromArgb(124, 58, 237),
+                    ForeColor = Color.White,
+                    FlatStyle = FlatStyle.Flat,
+                    Font = new Font("Segoe UI", 8.5f, FontStyle.Bold)
+                };
+                btnAdd.FlatAppearance.BorderSize = 0;
+                dlg.Controls.Add(btnAdd);
+
+                Button btnCancel = new Button
+                {
+                    Text = "İptal",
+                    DialogResult = DialogResult.Cancel,
+                    Location = new Point(355, 210),
+                    Size = new Size(85, 32),
+                    BackColor = Color.FromArgb(30, 41, 59),
+                    ForeColor = Color.FromArgb(203, 213, 225),
+                    FlatStyle = FlatStyle.Flat
+                };
+                btnCancel.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+                dlg.Controls.Add(btnCancel);
+
+                if (dlg.ShowDialog(this) == DialogResult.OK)
+                {
+                    string t = (txtTitle.Text ?? "").Trim();
+                    if (string.IsNullOrEmpty(t)) t = "Özel Alarm";
+                    string d = (txtDesc.Text ?? "").Trim();
+
+                    CustomAlarmItem item = new CustomAlarmItem();
+                    item.Title = t;
+                    item.Description = d;
+                    item.IsEnabled = true;
+
+                    if (rbPer.Checked)
+                    {
+                        item.AlarmType = "PERIODIC";
+                        item.PeriodMinutes = (int)numPer.Value;
+                        item.NextTrigger = DateTime.Now.AddMinutes(item.PeriodMinutes);
+                    }
+                    else
+                    {
+                        item.AlarmType = "SPECIFIC_TIME";
+                        DateTime targetClock;
+                        if (!DateTime.TryParse(txtClock.Text.Trim(), out targetClock))
+                        {
+                            targetClock = DateTime.Now.AddMinutes(30);
+                        }
+                        DateTime sched = new DateTime(DateTime.Now.Year, DateTime.Now.Month, DateTime.Now.Day, targetClock.Hour, targetClock.Minute, 0);
+                        if (sched <= DateTime.Now) sched = sched.AddDays(1);
+                        item.SpecificTimeHHmm = sched.ToString("HH:mm");
+                        item.NextTrigger = sched;
+                    }
+
+                    qolConfig.Alarms.Add(item);
+                    qolConfig.SaveToFile(qolConfigPath);
+                    RefreshAlarmsListView();
+
+                    ShowQoLToast("⏰ Yeni Alarm Kuruldu", string.Format("'{0}' alarmı aktif. İlk çalma: {1:HH:mm:ss}", item.Title, item.NextTrigger), "Tamam", null, Color.FromArgb(168, 85, 247), 8, false);
+                }
+            }
+        }
+
+        private void ShowAddGameNoteDialog()
+        {
+            using (Form dlg = new Form())
+            {
+                dlg.Text = "Yeni Oyun Notu & Hatırlatıcı Ekle";
+                dlg.Size = new Size(520, 360);
+                dlg.StartPosition = FormStartPosition.CenterParent;
+                dlg.FormBorderStyle = FormBorderStyle.FixedDialog;
+                dlg.MaximizeBox = false;
+                dlg.MinimizeBox = false;
+                dlg.BackColor = Color.FromArgb(18, 23, 34);
+                dlg.ForeColor = Color.White;
+                dlg.Font = new Font("Segoe UI", 9.0f);
+
+                Label lblGame = new Label { Text = "Oyun Adı:", Location = new Point(20, 18), AutoSize = true, ForeColor = Color.FromArgb(251, 191, 36), Font = new Font("Segoe UI", 8.5f, FontStyle.Bold) };
+                dlg.Controls.Add(lblGame);
+
+                TextBox txtGame = new TextBox { Text = "Counter-Strike 2", Location = new Point(20, 38), Width = 230, BackColor = Color.FromArgb(12, 15, 22), ForeColor = Color.FromArgb(226, 232, 240) };
+                dlg.Controls.Add(txtGame);
+
+                Label lblProc = new Label { Text = "Süreç Adı (.exe):", Location = new Point(265, 18), AutoSize = true, ForeColor = Color.FromArgb(56, 189, 248), Font = new Font("Segoe UI", 8.5f, FontStyle.Bold) };
+                dlg.Controls.Add(lblProc);
+
+                TextBox txtProc = new TextBox { Text = "cs2.exe", Location = new Point(265, 38), Width = 215, BackColor = Color.FromArgb(12, 15, 22), ForeColor = Color.FromArgb(226, 232, 240) };
+                dlg.Controls.Add(txtProc);
+
+                Label lblNote = new Label { Text = "Özel Hatırlatma Notunuz (Oyun başladığında ekranda görünecektir):", Location = new Point(20, 72), AutoSize = true, ForeColor = Color.FromArgb(148, 163, 184) };
+                dlg.Controls.Add(lblNote);
+
+                TextBox txtNote = new TextBox
+                {
+                    Text = "Isınmadan rekabetçiye girme!\nSens: 1.15 | 800 DPI | Crosshair: CSGO-xxx",
+                    Location = new Point(20, 94),
+                    Size = new Size(460, 90),
+                    Multiline = true,
+                    ScrollBars = ScrollBars.Vertical,
+                    BackColor = Color.FromArgb(12, 15, 22),
+                    ForeColor = Color.FromArgb(226, 232, 240)
+                };
+                dlg.Controls.Add(txtNote);
+
+                CheckBox chkLaunchOnly = new CheckBox
+                {
+                    Text = "Oyun Başladığında Sessizce Göster (Ses Yok)",
+                    Location = new Point(20, 198),
+                    AutoSize = true,
+                    Checked = true,
+                    ForeColor = Color.FromArgb(52, 211, 153),
+                    Font = new Font("Segoe UI", 8.2f, FontStyle.Bold)
+                };
+                dlg.Controls.Add(chkLaunchOnly);
+
+                CheckBox chkPeriodic = new CheckBox
+                {
+                    Text = "Oyun Sırasında Periyodik Olarak da Hatırla:",
+                    Location = new Point(20, 226),
+                    AutoSize = true,
+                    Checked = false,
+                    ForeColor = Color.FromArgb(203, 213, 225)
+                };
+                dlg.Controls.Add(chkPeriodic);
+
+                NumericUpDown numPer = new NumericUpDown
+                {
+                    Minimum = 5,
+                    Maximum = 240,
+                    Value = 45,
+                    Location = new Point(315, 225),
+                    Width = 55,
+                    BackColor = Color.FromArgb(12, 15, 22),
+                    ForeColor = Color.FromArgb(251, 191, 36)
+                };
+                dlg.Controls.Add(numPer);
+
+                Label lblMin = new Label { Text = "dk aralıkla", Location = new Point(376, 227), AutoSize = true, ForeColor = Color.FromArgb(148, 163, 184) };
+                dlg.Controls.Add(lblMin);
+
+                Button btnAdd = new Button
+                {
+                    Text = "Notu Kaydet",
+                    DialogResult = DialogResult.OK,
+                    Location = new Point(260, 275),
+                    Size = new Size(125, 32),
+                    BackColor = Color.FromArgb(217, 119, 6),
+                    ForeColor = Color.White,
+                    FlatStyle = FlatStyle.Flat,
+                    Font = new Font("Segoe UI", 8.5f, FontStyle.Bold)
+                };
+                btnAdd.FlatAppearance.BorderSize = 0;
+                dlg.Controls.Add(btnAdd);
+
+                Button btnCancel = new Button
+                {
+                    Text = "İptal",
+                    DialogResult = DialogResult.Cancel,
+                    Location = new Point(395, 275),
+                    Size = new Size(85, 32),
+                    BackColor = Color.FromArgb(30, 41, 59),
+                    ForeColor = Color.FromArgb(203, 213, 225),
+                    FlatStyle = FlatStyle.Flat
+                };
+                btnCancel.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+                dlg.Controls.Add(btnCancel);
+
+                if (dlg.ShowDialog(this) == DialogResult.OK)
+                {
+                    GameLaunchNoteItem gn = new GameLaunchNoteItem();
+                    gn.GameTitle = (txtGame.Text ?? "").Trim();
+                    gn.ProcessName = (txtProc.Text ?? "").Trim().Replace(".exe", "");
+                    gn.NoteText = txtNote.Text;
+                    gn.IsEnabled = true;
+                    gn.PeriodicInGame = chkPeriodic.Checked;
+                    gn.PeriodicIntervalMinutes = (int)numPer.Value;
+
+                    qolConfig.GameNotes.Add(gn);
+                    qolConfig.SaveToFile(qolConfigPath);
+                    RefreshGameNotesListView();
+
+                    ShowQoLToast("🎮 Oyun Notu Kaydedildi", string.Format("'{0}' ({1}.exe) başladığında notunuz sessizce masaüstünde gösterilecektir.", gn.GameTitle, gn.ProcessName), "Tamam", null, Color.FromArgb(251, 191, 36), 8, false);
+                }
+            }
+        }
+
+        private void ShowRamCleanSettingsDialog()
+        {
+            using (Form dlg = new Form())
+            {
+                dlg.Text = "Akıllı RAM & Standby List Ayarları";
+                dlg.Size = new Size(460, 230);
+                dlg.StartPosition = FormStartPosition.CenterParent;
+                dlg.FormBorderStyle = FormBorderStyle.FixedDialog;
+                dlg.MaximizeBox = false;
+                dlg.MinimizeBox = false;
+                dlg.BackColor = Color.FromArgb(18, 23, 34);
+                dlg.ForeColor = Color.White;
+                dlg.Font = new Font("Segoe UI", 9.0f);
+
+                CheckBox chkProt = new CheckBox
+                {
+                    Text = "Ön Plandaki Oyunu Koru (Oyun Çalışma Kümesini Boşaltma)",
+                    Location = new Point(20, 24),
+                    Width = 400,
+                    Checked = qolConfig.RamCleanProtectForegroundGame,
+                    ForeColor = Color.FromArgb(52, 211, 153),
+                    Font = new Font("Segoe UI", 8.2f, FontStyle.Bold)
+                };
+                dlg.Controls.Add(chkProt);
+
+                Label lblProtInfo = new Label
+                {
+                    Text = "Aktif olduğunda yalnızca arka plan programları ve Windows Standby List temizlenir; oynadığınız oyunda FPS takılması veya drop yaşanmaz.",
+                    Location = new Point(20, 52),
+                    Size = new Size(400, 48),
+                    ForeColor = Color.FromArgb(148, 163, 184),
+                    Font = new Font("Segoe UI", 7.8f)
+                };
+                dlg.Controls.Add(lblProtInfo);
+
+                Button btnSave = new Button
+                {
+                    Text = "Kaydet",
+                    DialogResult = DialogResult.OK,
+                    Location = new Point(220, 140),
+                    Size = new Size(110, 32),
+                    BackColor = Color.FromArgb(16, 185, 129),
+                    ForeColor = Color.Black,
+                    FlatStyle = FlatStyle.Flat,
+                    Font = new Font("Segoe UI", 8.5f, FontStyle.Bold)
+                };
+                btnSave.FlatAppearance.BorderSize = 0;
+                dlg.Controls.Add(btnSave);
+
+                Button btnCancel = new Button
+                {
+                    Text = "Kapat",
+                    DialogResult = DialogResult.Cancel,
+                    Location = new Point(340, 140),
+                    Size = new Size(80, 32),
+                    BackColor = Color.FromArgb(30, 41, 59),
+                    ForeColor = Color.FromArgb(203, 213, 225),
+                    FlatStyle = FlatStyle.Flat
+                };
+                btnCancel.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+                dlg.Controls.Add(btnCancel);
+
+                if (dlg.ShowDialog(this) == DialogResult.OK)
+                {
+                    qolConfig.RamCleanProtectForegroundGame = chkProt.Checked;
+                    qolConfig.SaveToFile(qolConfigPath);
+                }
+            }
+        }
+
+        // -------------------------------------------------------------
+        // BACKGROUND TICK PROCESSOR & CLEANERS
+        // -------------------------------------------------------------
+        private void ProcessQoLAutomationTick()
+        {
+            DateTime now = DateTime.Now;
+
+            // 1. Live Network Throughput Tracking for Smart Download Detector
+            try
+            {
+                if (tickCounter % 2 == 0) // Every 1 second
+                {
+                    long totalRecv = 0;
+                    foreach (NetworkInterface ni in NetworkInterface.GetAllNetworkInterfaces())
+                    {
+                        if (ni.OperationalStatus == OperationalStatus.Up &&
+                            (ni.NetworkInterfaceType == NetworkInterfaceType.Ethernet || ni.NetworkInterfaceType == NetworkInterfaceType.Wireless80211))
+                        {
+                            totalRecv += ni.GetIPStatistics().BytesReceived;
+                        }
+                    }
+
+                    if (lastTrafficBytesRecv > 0 && lastTrafficSampleTime > DateTime.MinValue)
+                    {
+                        double sec = (now - lastTrafficSampleTime).TotalSeconds;
+                        if (sec > 0.4)
+                        {
+                            long delta = totalRecv - lastTrafficBytesRecv;
+                            if (delta >= 0)
+                            {
+                                liveDownloadSpeedKBps = (delta / 1024.0) / sec;
+                            }
+                        }
+                    }
+                    lastTrafficBytesRecv = totalRecv;
+                    lastTrafficSampleTime = now;
+                }
+            }
+            catch { }
+
+            // 2. Power Timer Processing
+            if (qolConfig.PowerTimerActive)
+            {
+                TimeSpan remaining = qolConfig.PowerTimerTarget - now;
+
+                if (lblPowerTimerStatus != null && currentActiveTabIndex == 7)
+                {
+                    if (remaining.TotalSeconds > 0)
+                    {
+                        lblPowerTimerStatus.Text = string.Format("⏳ Hedef: {0:HH:mm:ss} — Kalan: {1:00}:{2:00}:{3:00} [{4}]",
+                            qolConfig.PowerTimerTarget, (int)remaining.TotalHours, remaining.Minutes, remaining.Seconds, qolConfig.PowerTimerAction);
+                    }
+                }
+
+                // 5-Minute Warning Toast
+                if (remaining.TotalMinutes <= 5 && remaining.TotalMinutes > 0 && !qolConfig.PowerTimerWarnGiven && qolConfig.PowerTimer5MinWarn)
+                {
+                    qolConfig.PowerTimerWarnGiven = true;
+                    ShowQoLToast("⚠️ Kapatma Uyarısı (5 Dakika Kaldı)",
+                        string.Format("Bilgisayarınız 5 dakika içinde kapatılacak ({0}). İptal etmek için butona tıklayabilirsiniz.", qolConfig.PowerTimerAction),
+                        "Kapatmayı İptal Et", () => CancelPowerTimer(true), Color.FromArgb(245, 158, 11), 30, false);
+                }
+
+                // Timer Reached: Check Idle/Download Conditions or Trigger
+                if (remaining.TotalSeconds <= 0)
+                {
+                    // Check Smart Download Detector
+                    if (qolConfig.PowerTimerPostponeIfNetBusy && liveDownloadSpeedKBps > qolConfig.PowerTimerNetThresholdKBps)
+                    {
+                        qolConfig.PowerTimerTarget = now.AddMinutes(5);
+                        ShowQoLToast("⏱️ Kapatma 5 Dk Ertelendi",
+                            string.Format("Aktif indirme algılandı ({0:0} KB/s > {1} KB/s). Bilgisayarın kapanması 5 dakika ertelendi.", liveDownloadSpeedKBps, qolConfig.PowerTimerNetThresholdKBps),
+                            "Şimdi Kapat", () => ExecutePowerActionNow(qolConfig.PowerTimerAction), Color.FromArgb(56, 189, 248), 10, false);
+                        return;
+                    }
+
+                    // Check Smart CPU Idle Detector
+                    if (qolConfig.PowerTimerPostponeIfCpuBusy && sensorEngine != null && sensorEngine.CpuTotalLoad > qolConfig.PowerTimerCpuThresholdPercent)
+                    {
+                        qolConfig.PowerTimerTarget = now.AddMinutes(5);
+                        ShowQoLToast("⏱️ Kapatma 5 Dk Ertelendi",
+                            string.Format("CPU yükü yüksek (%{0:0.0} > %{1}). İşlemin bitmesi için kapatma 5 dakika ertelendi.", sensorEngine.CpuTotalLoad, qolConfig.PowerTimerCpuThresholdPercent),
+                            "Şimdi Kapat", () => ExecutePowerActionNow(qolConfig.PowerTimerAction), Color.FromArgb(56, 189, 248), 10, false);
+                        return;
+                    }
+
+                    // Execute Power Action
+                    string actionToExec = qolConfig.PowerTimerAction;
+                    CancelPowerTimer(false);
+                    ExecutePowerActionNow(actionToExec);
+                }
+            }
+
+            // 3. Alarms Evaluation (Every 1 second)
+            if (tickCounter % 2 == 0 && qolConfig.Alarms.Count > 0)
+            {
+                for (int i = 0; i < qolConfig.Alarms.Count; i++)
+                {
+                    var a = qolConfig.Alarms[i];
+                    if (!a.IsEnabled) continue;
+                    if (now >= a.NextTrigger)
+                    {
+                        a.LastTriggered = now;
+                        if (a.AlarmType == "CRYPTO_4H")
+                        {
+                            a.NextTrigger = CryptoAlarmHelpers.GetNextCrypto4HCandleTime();
+                        }
+                        else if (a.AlarmType == "CRYPTO_DAILY")
+                        {
+                            a.NextTrigger = CryptoAlarmHelpers.GetNextCryptoDailyCloseTime();
+                        }
+                        else if (a.AlarmType == "CRYPTO_WEEKLY")
+                        {
+                            a.NextTrigger = CryptoAlarmHelpers.GetNextCryptoWeeklyCloseTime();
+                        }
+                        else if (a.AlarmType == "PERIODIC")
+                        {
+                            a.NextTrigger = now.AddMinutes(Math.Max(1, a.PeriodMinutes));
+                        }
+                        else // ONE-TIME
+                        {
+                            a.IsEnabled = false;
+                        }
+
+                        qolConfig.SaveToFile(qolConfigPath);
+                        RefreshAlarmsListView();
+
+                        TriggerAlarmAlert(a);
+                    }
+                }
+            }
+
+            // 4. Game Notes Watchdog (Every 2 seconds)
+            if (tickCounter % 4 == 0 && qolConfig.GameNotes.Count > 0)
+            {
+                ThreadPool.QueueUserWorkItem(_ =>
+                {
+                    try
+                    {
+                        HashSet<string> currentProcs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        foreach (var p in Process.GetProcesses())
+                        {
+                            try { currentProcs.Add(p.ProcessName); } catch { }
+                        }
+
+                        foreach (var gn in qolConfig.GameNotes)
+                        {
+                            if (!gn.IsEnabled) continue;
+                            string cleanTarget = (gn.ProcessName ?? "").Replace(".exe", "").Trim();
+                            if (string.IsNullOrEmpty(cleanTarget)) continue;
+
+                            bool isRunning = currentProcs.Contains(cleanTarget);
+
+                            if (isRunning && !gn.WasRunningLastCheck)
+                            {
+                                gn.WasRunningLastCheck = true;
+                                gn.LastNotified = DateTime.Now;
+                                this.BeginInvoke((MethodInvoker)delegate
+                                {
+                                    ShowQoLToast("🎮 Oyun Hatırlatıcı: " + gn.GameTitle, gn.NoteText, "Kapat", null, Color.FromArgb(251, 191, 36), 12, false);
+                                });
+                            }
+                            else if (isRunning && gn.PeriodicInGame && gn.PeriodicIntervalMinutes > 0)
+                            {
+                                if ((DateTime.Now - gn.LastNotified).TotalMinutes >= gn.PeriodicIntervalMinutes)
+                                {
+                                    gn.LastNotified = DateTime.Now;
+                                    this.BeginInvoke((MethodInvoker)delegate
+                                    {
+                                        ShowQoLToast("🎮 Oyun Notu: " + gn.GameTitle, gn.NoteText, "Kapat", null, Color.FromArgb(251, 191, 36), 10, false);
+                                    });
+                                }
+                            }
+                            else if (!isRunning)
+                            {
+                                gn.WasRunningLastCheck = false;
+                            }
+                        }
+                    }
+                    catch { }
+                });
+            }
+
+            // 5. Health Break Reminders (Opt-in only, default false)
+            if (tickCounter % 20 == 0 && qolConfig.HealthRemindersEnabled)
+            {
+                if (qolConfig.LastHealthReminderTime == DateTime.MinValue)
+                {
+                    qolConfig.LastHealthReminderTime = now;
+                }
+                else if ((now - qolConfig.LastHealthReminderTime).TotalMinutes >= Math.Max(15, qolConfig.HealthReminderIntervalMin))
+                {
+                    qolConfig.LastHealthReminderTime = now;
+                    ShowQoLToast("💧 Sağlık & Mola Hatırlatıcı",
+                        "Gözlerinizi 20 saniye uzağa odaklayın ve bir bardak su için!",
+                        "Tamam", null, Color.FromArgb(56, 189, 248), 10, false);
+                }
+            }
+
+            // 6. Smart RAM Auto Threshold Purge (Every 10 seconds)
+            if (tickCounter % 20 == 0)
+            {
+                UpdateQoLRamStatusLabel();
+                if (qolConfig.AutoRamCleanActive)
+                {
+                    try
+                    {
+                        NativeMethods.MEMORYSTATUSEX mem = new NativeMethods.MEMORYSTATUSEX();
+                        if (NativeMethods.GlobalMemoryStatusEx(mem))
+                        {
+                            double freePercent = 100.0 - mem.dwMemoryLoad;
+                            if (freePercent <= qolConfig.RamFreeThresholdPercent)
+                            {
+                                ExecuteSmartRamAndStandbyPurge(qolConfig.RamCleanProtectForegroundGame);
+                            }
+                        }
+                    }
+                    catch { }
+                }
+            }
+        }
+
+        private void ExecutePowerActionNow(string action)
+        {
+            try
+            {
+                if (action == "SHUTDOWN")
+                {
+                    Process.Start("shutdown.exe", "/s /t 0");
+                }
+                else if (action == "RESTART")
+                {
+                    Process.Start("shutdown.exe", "/r /t 0");
+                }
+                else if (action == "SLEEP")
+                {
+                    Application.SetSuspendState(PowerState.Suspend, false, false);
+                }
+                else if (action == "LOCK")
+                {
+                    NativeMethods.LockWorkStation();
+                }
+            }
+            catch (Exception ex)
+            {
+                ShowQoLToast("⚠️ Güç İşlemi Hatası", ex.Message, "Kapat", null, Color.FromArgb(248, 113, 113), 8, false);
+            }
+        }
+
+        private void RunSystemTempCleanAsync()
+        {
+            if (btnCleanTempNow != null)
+            {
+                btnCleanTempNow.Enabled = false;
+                btnCleanTempNow.Text = "⏳ Temizleniyor...";
+            }
+            if (lblSystemTempStatus != null) lblSystemTempStatus.Text = "Geçici sistem dosyaları taranıyor ve siliniyor...";
+
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                long totalBytes = 0;
+                int filesDeleted = 0;
+                int skipped = 0;
+
+                List<string> paths = new List<string>();
+                try { paths.Add(Path.GetTempPath()); } catch { }
+                try
+                {
+                    string winTemp = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Temp");
+                    if (Directory.Exists(winTemp)) paths.Add(winTemp);
+                }
+                catch { }
+                try
+                {
+                    string prefetch = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Prefetch");
+                    if (Directory.Exists(prefetch)) paths.Add(prefetch);
+                }
+                catch { }
+
+                foreach (string dir in paths)
+                {
+                    if (!Directory.Exists(dir)) continue;
+                    try
+                    {
+                        DirectoryInfo di = new DirectoryInfo(dir);
+                        foreach (FileInfo fi in di.GetFiles("*", SearchOption.AllDirectories))
+                        {
+                            try
+                            {
+                                long len = fi.Length;
+                                fi.Delete();
+                                totalBytes += len;
+                                filesDeleted++;
+                            }
+                            catch
+                            {
+                                skipped++;
+                            }
+                        }
+                    }
+                    catch { }
+                }
+
+                double freedMb = totalBytes / (1024.0 * 1024.0);
+                string report = string.Format("✅ {0:0.0} MB geçici dosya temizlendi ({1} silindi, {2} kullanımda atlandı).", freedMb, filesDeleted, skipped);
+
+                this.BeginInvoke((MethodInvoker)delegate
+                {
+                    if (btnCleanTempNow != null)
+                    {
+                        btnCleanTempNow.Enabled = true;
+                        btnCleanTempNow.Text = "🧹 Windows Temp Temizle";
+                    }
+                    if (lblSystemTempStatus != null)
+                    {
+                        lblSystemTempStatus.Text = report;
+                        lblSystemTempStatus.ForeColor = Color.FromArgb(52, 211, 153);
+                    }
+                    ShowQoLToast("🧹 Windows Temp Temizliği", report, "Tamam", null, Color.FromArgb(56, 189, 248), 6, false);
+                });
+            });
+        }
+
+        private void RunGpuShaderCleanAsync()
+        {
+            if (btnCleanShaderNow != null)
+            {
+                btnCleanShaderNow.Enabled = false;
+                btnCleanShaderNow.Text = "⏳ Shader Temizleniyor...";
+            }
+            if (lblShaderCacheStatus != null) lblShaderCacheStatus.Text = "DirectX, NVIDIA ve AMD Shader havuzları taranıyor...";
+
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                long totalBytes = 0;
+                int filesDeleted = 0;
+                int skipped = 0;
+
+                string localApp = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+
+                List<string> shaderPaths = new List<string>
+                {
+                    Path.Combine(localApp, @"NVIDIA\DXCache"),
+                    Path.Combine(localApp, @"NVIDIA\GLCache"),
+                    Path.Combine(appData, @"NVIDIA\ComputeCache"),
+                    Path.Combine(localApp, @"AMD\DxCache"),
+                    Path.Combine(localApp, @"AMD\GLCache"),
+                    Path.Combine(localApp, @"AMD\D3DSCache"),
+                    Path.Combine(localApp, @"D3DSCache")
+                };
+
+                foreach (string dir in shaderPaths)
+                {
+                    if (!Directory.Exists(dir)) continue;
+                    try
+                    {
+                        DirectoryInfo di = new DirectoryInfo(dir);
+                        foreach (FileInfo fi in di.GetFiles("*", SearchOption.AllDirectories))
+                        {
+                            try
+                            {
+                                long len = fi.Length;
+                                fi.Delete();
+                                totalBytes += len;
+                                filesDeleted++;
+                            }
+                            catch
+                            {
+                                skipped++;
+                            }
+                        }
+                    }
+                    catch { }
+                }
+
+                double freedMb = totalBytes / (1024.0 * 1024.0);
+                string report = string.Format("✅ {0:0.0} MB GPU Shader önbelleği temizlendi ({1} dosya silindi, {2} atlandı).", freedMb, filesDeleted, skipped);
+
+                this.BeginInvoke((MethodInvoker)delegate
+                {
+                    if (btnCleanShaderNow != null)
+                    {
+                        btnCleanShaderNow.Enabled = true;
+                        btnCleanShaderNow.Text = "🎮 GPU Shader Önbelleğini Temizle";
+                    }
+                    if (lblShaderCacheStatus != null)
+                    {
+                        lblShaderCacheStatus.Text = report;
+                        lblShaderCacheStatus.ForeColor = Color.FromArgb(52, 211, 153);
+                    }
+                    ShowQoLToast("🎮 GPU Shader Temizliği", report, "Tamam", null, Color.FromArgb(248, 113, 113), 6, false);
+                });
+            });
+        }
+
+        #endregion
 
         private void BuildBenchmarkView()
         {
@@ -6781,100 +10170,98 @@ namespace ArgonLatencyStudio
                 Dock = DockStyle.Fill,
                 AutoScroll = true,
                 BackColor = Color.FromArgb(13, 16, 23),
-                Padding = new Padding(18),
+                Padding = new Padding(10, 8, 10, 8),
                 Visible = false
             };
             pnlContentHost.Controls.Add(viewBenchmark);
 
             Panel pnlSleepCard = new Panel
             {
-                Location = new Point(18, 14),
-                Size = new Size(480, 265),
-                BackColor = Color.FromArgb(21, 26, 38)
+                Location = new Point(10, 10),
+                Size = new Size(405, 255),
+                BackColor = Color.FromArgb(18, 23, 34)
             };
             viewBenchmark.Controls.Add(pnlSleepCard);
 
             Label lblSleepTitle = new Label
             {
-                Text = "⏱️ KERNEL ZAMANLAYICI & SLEEP(1) JITTER TESTİ",
-                Font = new Font("Segoe UI", 9.2f, FontStyle.Bold),
+                Text = "KERNEL ZAMANLAYICI & SLEEP(1) JITTER TESTİ",
+                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
                 ForeColor = Color.FromArgb(16, 185, 129),
                 AutoSize = true,
-                Location = new Point(16, 14)
+                Location = new Point(12, 12)
             };
             pnlSleepCard.Controls.Add(lblSleepTitle);
 
-            btnRunSleepTest = CreateActionButton(pnlSleepCard, 16, 42, 448, 36, "🧪 25 İterasyonlu Kernel Uyanma & Jitter Testini Başlat", Color.FromArgb(16, 185, 129));
+            btnRunSleepTest = CreateActionButton(pnlSleepCard, 12, 36, 380, 32, "25 İterasyonlu Kernel Uyanma & Jitter Testini Başlat", Color.FromArgb(16, 185, 129));
             btnRunSleepTest.ForeColor = Color.Black;
             btnRunSleepTest.Click += (s, e) => RunKernelSleepDriftBenchmark();
 
             lblSleepTestReport = new Label
             {
                 Text = "25 kez 1ms'lik uyku (Thread.Sleep(1)) çağrısı yaparak işletim sisteminin gerçek uyanma gecikmesini ve sapmasını (jitter) ölçer.\n\n• Standart Windows (15.6ms): ~15.60 ms\n• Argon 0.500ms Modu: ~1.00 - 1.45 ms",
-                Font = new Font("Consolas", 8.5f, FontStyle.Regular),
+                Font = new Font("Consolas", 8.0f, FontStyle.Regular),
                 ForeColor = Color.FromArgb(203, 213, 225),
-                Location = new Point(16, 88),
-                Size = new Size(448, 165)
+                Location = new Point(12, 78),
+                Size = new Size(380, 165)
             };
             pnlSleepCard.Controls.Add(lblSleepTestReport);
 
             Panel pnlPingCard = new Panel
             {
-                Location = new Point(514, 14),
-                Size = new Size(510, 265),
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
-                BackColor = Color.FromArgb(21, 26, 38)
+                Location = new Point(425, 10),
+                Size = new Size(405, 255),
+                BackColor = Color.FromArgb(18, 23, 34)
             };
             viewBenchmark.Controls.Add(pnlPingCard);
 
             Label lblPingTitle = new Label
             {
-                Text = "🌐 ÇOKLU OMURGA PING, JITTER & BUFFERBLOAT ANALİZİ",
-                Font = new Font("Segoe UI", 9.2f, FontStyle.Bold),
+                Text = "ÇOKLU OMURGA PING, JITTER & PAKET KAYBI ANALİZİ",
+                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
                 ForeColor = Color.FromArgb(56, 189, 248),
                 AutoSize = true,
-                Location = new Point(16, 14)
+                Location = new Point(12, 12)
             };
             pnlPingCard.Controls.Add(lblPingTitle);
 
-            btnRunMultiPingTest = CreateActionButton(pnlPingCard, 16, 42, 478, 36, "🌐 Cloudflare (1.1.1.1) & Google (8.8.8.8) Jitter Testi", Color.FromArgb(14, 165, 233));
+            btnRunMultiPingTest = CreateActionButton(pnlPingCard, 12, 36, 380, 32, "Cloudflare (1.1.1.1) & Google (8.8.8.8) Jitter Testi", Color.FromArgb(14, 165, 233));
+            btnRunMultiPingTest.ForeColor = Color.Black;
             btnRunMultiPingTest.Click += (s, e) => RunDetailedMultiServerPingBenchmark();
 
             lblPingTestReport = new Label
             {
                 Text = "Nagle, AFD Fast-Path ve Kesme Moderasyonu ayarlarını açmadan önce ve açtıktan sonra Jitter (paketler arası ms farkı) düşüşünü doğrulayabilirsiniz.",
-                Font = new Font("Consolas", 8.5f, FontStyle.Regular),
+                Font = new Font("Consolas", 8.0f, FontStyle.Regular),
                 ForeColor = Color.FromArgb(203, 213, 225),
-                Location = new Point(16, 88),
-                Size = new Size(478, 165)
+                Location = new Point(12, 78),
+                Size = new Size(380, 165)
             };
             pnlPingCard.Controls.Add(lblPingTestReport);
 
             Panel pnlMouseBench = new Panel
             {
-                Location = new Point(18, 294),
-                Size = new Size(1006, 215),
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
-                BackColor = Color.FromArgb(21, 26, 38)
+                Location = new Point(10, 275),
+                Size = new Size(820, 210),
+                BackColor = Color.FromArgb(18, 23, 34)
             };
             viewBenchmark.Controls.Add(pnlMouseBench);
 
             Label lblMTitle = new Label
             {
-                Text = "🖱️ CANLI FARE SORGU HIZI (POLLING RATE HZ) & OTOMATİK KUYRUK UYUMLULUK ÖLÇER",
-                Font = new Font("Segoe UI", 9.2f, FontStyle.Bold),
+                Text = "CANLI FARE SORGU HIZI (POLLING RATE HZ) & KUYRUK UYUMLULUK ÖLÇER",
+                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
                 ForeColor = Color.FromArgb(251, 191, 36),
                 AutoSize = true,
-                Location = new Point(16, 14)
+                Location = new Point(12, 12)
             };
             pnlMouseBench.Controls.Add(lblMTitle);
 
             pnlMouseTestArea = new Panel
             {
-                Location = new Point(16, 42),
-                Size = new Size(974, 155),
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
-                BackColor = Color.FromArgb(11, 14, 21),
+                Location = new Point(12, 38),
+                Size = new Size(796, 156),
+                BackColor = Color.FromArgb(10, 13, 19),
                 BorderStyle = BorderStyle.FixedSingle,
                 Cursor = Cursors.Cross
             };
@@ -6884,11 +10271,11 @@ namespace ArgonLatencyStudio
             lblMouseHzLive = new Label
             {
                 Text = "Fareyi bu siyah alan içinde hızlıca dairesel hareket ettirin...",
-                Font = new Font("Segoe UI", 13.5f, FontStyle.Bold),
+                Font = new Font("Segoe UI", 12.0f, FontStyle.Bold),
                 ForeColor = Color.FromArgb(52, 211, 153),
                 AutoSize = false,
                 TextAlign = ContentAlignment.MiddleCenter,
-                Size = new Size(950, 38),
+                Size = new Size(772, 36),
                 Location = new Point(12, 32)
             };
             lblMouseHzLive.MouseMove += OnMouseTestAreaMove;
@@ -6897,15 +10284,36 @@ namespace ArgonLatencyStudio
             lblMouseDeltaLive = new Label
             {
                 Text = "Anlık Raporlama Aralığı: -- ms | 1000Hz = 1.00ms, 2000Hz = 0.50ms, 4000Hz = 0.25ms",
-                Font = new Font("Consolas", 9f, FontStyle.Regular),
+                Font = new Font("Consolas", 8.5f, FontStyle.Regular),
                 ForeColor = Color.FromArgb(148, 163, 184),
                 AutoSize = false,
                 TextAlign = ContentAlignment.MiddleCenter,
-                Size = new Size(950, 28),
+                Size = new Size(772, 28),
                 Location = new Point(12, 82)
             };
             lblMouseDeltaLive.MouseMove += OnMouseTestAreaMove;
             pnlMouseTestArea.Controls.Add(lblMouseDeltaLive);
+
+            viewBenchmark.Resize += (s, e) =>
+            {
+                int availW = Math.Max(680, viewBenchmark.ClientSize.Width - 24);
+                int halfW = (availW - 10) / 2;
+                pnlSleepCard.Location = new Point(10, 10);
+                pnlSleepCard.Width = halfW;
+                btnRunSleepTest.Width = halfW - 24;
+                lblSleepTestReport.Width = halfW - 24;
+
+                pnlPingCard.Location = new Point(10 + halfW + 10, 10);
+                pnlPingCard.Width = availW - halfW - 10;
+                btnRunMultiPingTest.Width = pnlPingCard.Width - 24;
+                lblPingTestReport.Width = pnlPingCard.Width - 24;
+
+                pnlMouseBench.Location = new Point(10, 275);
+                pnlMouseBench.Width = availW;
+                pnlMouseTestArea.Width = availW - 24;
+                lblMouseHzLive.Width = pnlMouseTestArea.Width - 24;
+                lblMouseDeltaLive.Width = pnlMouseTestArea.Width - 24;
+            };
         }
 
         private Label lblSettingsSensorDiag;
@@ -6916,7 +10324,8 @@ namespace ArgonLatencyStudio
         private CheckBox chkSetShowGpuCore;
         private CheckBox chkSetShowGpuMemHot;
         private ComboBox cmbSetPollInterval;
-        private CheckBox chkSetFixedWindow;
+        private ComboBox cmbResolutionPreset;
+        private CheckBox chkSetLockResolution;
         private CheckBox chkSetAutoTruthSync;
         private CheckBox chkSetConfirmCritical;
         private CheckBox chkSetRichTooltips;
@@ -6928,7 +10337,7 @@ namespace ArgonLatencyStudio
             {
                 Dock = DockStyle.Fill,
                 BackColor = Color.FromArgb(13, 16, 23),
-                Padding = new Padding(16, 10, 16, 10),
+                Padding = new Padding(10, 8, 10, 8),
                 Visible = false
             };
             pnlContentHost.Controls.Add(viewWinUtil);
@@ -6936,43 +10345,54 @@ namespace ArgonLatencyStudio
             Panel pnlWuBanner = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 88,
-                BackColor = Color.FromArgb(38, 22, 29)
+                Height = 72,
+                BackColor = Color.FromArgb(32, 20, 27)
+            };
+            pnlWuBanner.Paint += (s, e) =>
+            {
+                using (Pen p = new Pen(Color.FromArgb(120, 53, 15), 1))
+                {
+                    e.Graphics.DrawRectangle(p, 0, 0, pnlWuBanner.Width - 1, pnlWuBanner.Height - 1);
+                }
             };
             viewWinUtil.Controls.Add(pnlWuBanner);
 
             Label lblWuTitle = new Label
             {
-                Text = "🛡️ WINUTIL MİMARİ & KRİTİK SİSTEM AYARLARI (ChrisTitusTech/winutil 2026 Güvenli Seçki)",
-                Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
+                Text = "WINUTIL MİMARİ & KRİTİK SİSTEM AYARLARI (ChrisTitusTech/winutil Güvenli Seçki)",
+                Font = new Font("Segoe UI", 8.6f, FontStyle.Bold),
                 ForeColor = Color.FromArgb(251, 191, 36),
                 AutoSize = true,
-                Location = new Point(14, 9)
+                Location = new Point(12, 8)
             };
             pnlWuBanner.Controls.Add(lblWuTitle);
 
             Label lblWuDesc = new Label
             {
-                Text = "⚠️ ÖZEL GÜVENLİK POLİTİKASI: Bu bölümde Debloating, Windows Defender kapatma veya güvenlik duvarı devre dışı bırakma gibi şüpheli işlemler KESİNLİKLE YOKTUR.\n" +
-                       "Buradaki ayarlar DWM MPO, IPv4 Önceliği, Hibernation, Teslim En İyileştirme ve WPBT gibi derin mimari ayarlar olup '⚠️ UYARI' rozetli olanlar onay sistemiyle çalışır.",
-                Font = new Font("Segoe UI", 8.0f, FontStyle.Regular),
+                Text = "GÜVENLİK POLİTİKASI: Windows Defender veya güvenlik duvarına kesinlikle dokunulmaz.\n" +
+                       "DWM MPO, IPv4 Önceliği, Hibernation, Teslim En İyileştirme ve WPBT ayarları onay ve StateVault yedeği ile çalışır.",
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Regular),
                 ForeColor = Color.FromArgb(226, 232, 240),
-                Location = new Point(14, 32),
-                Size = new Size(920, 48)
+                Location = new Point(12, 28),
+                Size = new Size(600, 38)
             };
             pnlWuBanner.Controls.Add(lblWuDesc);
 
-            Button btnCreateRestorePoint = CreateActionButton(pnlWuBanner, 950, 22, 230, 40, "🛡️ Sistem Geri Yükleme Noktası Al", Color.FromArgb(217, 119, 6));
+            Button btnCreateRestorePoint = CreateActionButton(pnlWuBanner, 625, 18, 195, 34, "Sistem Geri Yükleme Noktası Al", Color.FromArgb(217, 119, 6));
             btnCreateRestorePoint.ForeColor = Color.Black;
             btnCreateRestorePoint.Click += (s, e) => CreateWindowsRestorePointInteractive();
             mainToolTip.SetToolTip(btnCreateRestorePoint, "Kritik mimari ayarları uygulamadan önce Windows Sistem Geri Yükleme (System Restore) noktası oluşturur.");
 
             pnlWuBanner.Resize += (s, e) =>
             {
-                int w = Math.Max(900, pnlWuBanner.ClientSize.Width);
-                btnCreateRestorePoint.Location = new Point(w - btnCreateRestorePoint.Width - 14, 22);
-                lblWuDesc.Width = Math.Max(600, btnCreateRestorePoint.Left - 28);
+                int w = Math.Max(640, pnlWuBanner.ClientSize.Width);
+                btnCreateRestorePoint.Location = new Point(w - btnCreateRestorePoint.Width - 12, 18);
+                lblWuDesc.Width = Math.Max(420, btnCreateRestorePoint.Left - 24);
             };
+
+            Panel pnlWuColHdr = CreateTweakTableColumnHeader("WinUtil Mimari & Sistem Politikaları");
+            pnlWuColHdr.Dock = DockStyle.Top;
+            viewWinUtil.Controls.Add(pnlWuColHdr);
 
             flowWinUtilCards = new FlowLayoutPanel
             {
@@ -6980,10 +10400,11 @@ namespace ArgonLatencyStudio
                 AutoScroll = true,
                 FlowDirection = FlowDirection.TopDown,
                 WrapContents = false,
-                Padding = new Padding(0, 8, 0, 8),
+                Padding = new Padding(0, 4, 0, 8),
                 BackColor = Color.FromArgb(13, 16, 23)
             };
             viewWinUtil.Controls.Add(flowWinUtilCards);
+            pnlWuColHdr.SendToBack();
             pnlWuBanner.SendToBack();
             flowWinUtilCards.BringToFront();
 
@@ -6991,14 +10412,14 @@ namespace ArgonLatencyStudio
             {
                 if (tweak.Category != "WINUTIL") continue;
                 var card = new MultiVariationTweakCard(tweak, mainToolTip, OnTweakCardToggled, OnTweakCardHovered);
-                card.Width = Math.Max(780, this.ClientSize.Width - 60);
+                card.Width = 810;
                 flowWinUtilCards.Controls.Add(card);
                 allCards.Add(card);
             }
 
             flowWinUtilCards.Resize += (s, e) =>
             {
-                int targetW = Math.Max(780, flowWinUtilCards.ClientSize.Width - 28);
+                int targetW = Math.Max(520, flowWinUtilCards.ClientSize.Width - 24);
                 foreach (Control c in flowWinUtilCards.Controls)
                 {
                     if (c is MultiVariationTweakCard)
@@ -7017,8 +10438,9 @@ namespace ArgonLatencyStudio
                 MessageBox.Show("Sistem Geri Yükleme Noktası oluşturmak için Yönetici yetkisi gereklidir.", "Yönetici Yetkisi Gerekli", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
-            lblInspectorTitle.Text = "⏳ Windows Sistem Geri Yükleme Noktası oluşturuluyor...";
+            lblInspectorTitle.Text = "Windows Sistem Geri Yükleme Noktası oluşturuluyor...";
             lblInspectorPath.Text = "WMI SystemRestore servisi çağrılıyor, lütfen birkaç saniye bekleyin...";
+            AppendConsoleLog("WMI üzerinden Sistem Geri Yükleme Noktası oluşturuluyor...");
             ThreadPool.QueueUserWorkItem(_ =>
             {
                 try
@@ -7026,8 +10448,9 @@ namespace ArgonLatencyStudio
                     string outText = StateVault.RunCmdCaptureOutput("powershell.exe", "-NoProfile -ExecutionPolicy Bypass -Command \"Checkpoint-Computer -Description 'ArgonLatencyStudio_Backup' -RestorePointType 'MODIFY_SETTINGS'\"");
                     this.BeginInvoke((MethodInvoker)delegate
                     {
-                        lblInspectorTitle.Text = "✅ Windows Sistem Geri Yükleme Noktası ('ArgonLatencyStudio_Backup') başarıyla oluşturuldu.";
+                        lblInspectorTitle.Text = "Windows Sistem Geri Yükleme Noktası ('ArgonLatencyStudio_Backup') başarıyla oluşturuldu.";
                         lblInspectorPath.Text = "Ayrıca Argon kendi StateVault yedeğini de her zaman saklar.";
+                        AppendConsoleLog("Sistem Geri Yükleme Noktası ('ArgonLatencyStudio_Backup') oluşturuldu.");
                         MessageBox.Show("Windows Sistem Geri Yükleme Noktası ('ArgonLatencyStudio_Backup') oluşturma komutu tamamlandı.", "Geri Yükleme Noktası Hazır", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     });
                 }
@@ -7035,7 +10458,7 @@ namespace ArgonLatencyStudio
                 {
                     this.BeginInvoke((MethodInvoker)delegate
                     {
-                        lblInspectorTitle.Text = "⚠️ Geri yükleme noktası uyarısı: " + ex.Message;
+                        lblInspectorTitle.Text = "Geri yükleme noktası uyarısı: " + ex.Message;
                     });
                 }
             });
@@ -7048,120 +10471,284 @@ namespace ArgonLatencyStudio
                 Dock = DockStyle.Fill,
                 AutoScroll = true,
                 BackColor = Color.FromArgb(13, 16, 23),
-                Padding = new Padding(16),
+                Padding = new Padding(10, 8, 10, 8),
                 Visible = false
             };
             pnlContentHost.Controls.Add(viewSettings);
 
-            // LEFT COLUMN: Telemetry Sensors + Behavioral Settings
+            // TOP PANEL: Custom Profile Management (Full Width inside Left Workspace)
+            Panel pnlRightCol = new Panel
+            {
+                Location = new Point(10, 8),
+                Size = new Size(815, 255),
+                BackColor = Color.FromArgb(18, 23, 34)
+            };
+            viewSettings.Controls.Add(pnlRightCol);
+
+            Label lblProfTitle = new Label
+            {
+                Text = "ÖZEL PROFİL YÖNETİMİ (.ARGON KULLANICI PROFİLLERİ & HAZIR REÇETELER)",
+                Font = new Font("Segoe UI", 8.8f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(251, 191, 36),
+                AutoSize = true,
+                Location = new Point(14, 10)
+            };
+            pnlRightCol.Controls.Add(lblProfTitle);
+
+            Label lblNewName = new Label
+            {
+                Text = "Yeni Özel Profil Adı:",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(56, 189, 248),
+                AutoSize = true,
+                Location = new Point(14, 36)
+            };
+            pnlRightCol.Controls.Add(lblNewName);
+
+            txtNewProfileNameInput = new TextBox
+            {
+                Location = new Point(135, 33),
+                Size = new Size(210, 22),
+                BackColor = Color.FromArgb(12, 15, 22),
+                ForeColor = Color.White,
+                BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                Text = "Benim Espor Profilim"
+            };
+            pnlRightCol.Controls.Add(txtNewProfileNameInput);
+
+            Button btnSaveNamedProf = CreateActionButton(pnlRightCol, 352, 31, 145, 26, "Profili Kaydet", Color.FromArgb(16, 185, 129));
+            btnSaveNamedProf.ForeColor = Color.Black;
+            btnSaveNamedProf.Click += (s, e) =>
+            {
+                string name = (txtNewProfileNameInput.Text ?? "").Trim();
+                if (string.IsNullOrEmpty(name))
+                {
+                    MessageBox.Show("Lütfen kaydedilecek profil için bir isim girin.", "Profil Adı Gerekli", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                SaveCurrentStateAsCustomProfile(name);
+            };
+
+            Button btnExportProf = CreateActionButton(pnlRightCol, 504, 31, 145, 26, "Dışa Aktar (.argon)", Color.FromArgb(14, 165, 233));
+            btnExportProf.ForeColor = Color.Black;
+            btnExportProf.Click += (s, e) => ExportCurrentProfileDialog();
+
+            Button btnImportProf = CreateActionButton(pnlRightCol, 656, 31, 145, 26, "İçe Aktar (.argon)", Color.FromArgb(168, 85, 247));
+            btnImportProf.Click += (s, e) => ImportCustomProfileDialog();
+
+            lstCustomProfilesManager = new ListBox
+            {
+                Location = new Point(14, 64),
+                Size = new Size(787, 142),
+                BackColor = Color.FromArgb(12, 15, 22),
+                ForeColor = Color.FromArgb(226, 232, 240),
+                BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Consolas", 8.4f, FontStyle.Regular)
+            };
+            pnlRightCol.Controls.Add(lstCustomProfilesManager);
+
+            Button btnApplySelProf = CreateActionButton(pnlRightCol, 14, 214, 250, 30, "Seçili Profili Sisteme Uygula", Color.FromArgb(16, 185, 129));
+            btnApplySelProf.ForeColor = Color.Black;
+            btnApplySelProf.Click += (s, e) => ApplyProfileFromSettingsListSelection();
+
+            Button btnDeleteSelProf = CreateActionButton(pnlRightCol, 272, 214, 240, 30, "Seçili Kullanıcı Profilini Sil", Color.FromArgb(153, 27, 27));
+            btnDeleteSelProf.Click += (s, e) => DeleteProfileFromSettingsListSelection();
+
+            Button btnOpenVaultFolder = CreateActionButton(pnlRightCol, 520, 214, 281, 30,
+                "Yedek & Profil Klasörünü Aç (AppData)", Color.FromArgb(30, 58, 138));
+            btnOpenVaultFolder.Click += (s, e) =>
+            {
+                try
+                {
+                    string dir = Path.GetDirectoryName(userProfilePath);
+                    if (Directory.Exists(dir)) Process.Start("explorer.exe", dir);
+                }
+                catch { }
+            };
+
+            // BOTTOM PANEL: Telemetry Sensors + Behavioral Settings
             Panel pnlLeftCol = new Panel
             {
-                Location = new Point(16, 12),
-                Size = new Size(585, 625),
-                BackColor = Color.FromArgb(19, 24, 36)
+                Location = new Point(10, 272),
+                Size = new Size(815, 425),
+                BackColor = Color.FromArgb(18, 23, 34)
             };
             viewSettings.Controls.Add(pnlLeftCol);
 
             Label lblSec1 = new Label
             {
-                Text = "🌡️ LİBRE HARDWAREMONITOR SENSÖR & TELEMETRİ AYARLARI",
-                Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
+                Text = "LİBRE HARDWAREMONITOR SENSÖR & CANLI ALGILAMA AYARLARI",
+                Font = new Font("Segoe UI", 8.8f, FontStyle.Bold),
                 ForeColor = Color.FromArgb(52, 211, 153),
                 AutoSize = true,
-                Location = new Point(16, 14)
+                Location = new Point(14, 10)
             };
             pnlLeftCol.Controls.Add(lblSec1);
 
-            chkSetEnableSensors = CreateSettingsCheckBox(pnlLeftCol, 16, 44,
+            chkSetEnableSensors = CreateSettingsCheckBox(pnlLeftCol, 14, 34,
                 "LibreHardwareMonitor Donanım Sensörlerini Etkinleştir (Canlı CPU & GPU Okuma)",
                 appSettings.EnableTelemetrySensors);
 
-            chkSetShowCpu = CreateSettingsCheckBox(pnlLeftCol, 34, 74,
-                "İşlemci (CPU) Sıcaklığı (Core Tctl/Tdie) ve Yük Yüzdesini Üst Barda Göster",
+            chkSetShowCpu = CreateSettingsCheckBox(pnlLeftCol, 14, 58,
+                "İşlemci (CPU) Sıcaklığı (Core Tctl/Tdie) ve Yük Yüzdesini Sağ Panelde Göster",
                 appSettings.ShowCpuSensor);
 
-            chkSetShowGpuCore = CreateSettingsCheckBox(pnlLeftCol, 34, 104,
+            chkSetShowGpuCore = CreateSettingsCheckBox(pnlLeftCol, 14, 82,
                 "Ekran Kartı (GPU) Çekirdek (Core) Sıcaklığı ve Yük Yüzdesini Göster",
                 appSettings.ShowGpuCoreSensor);
 
-            chkSetShowGpuMemHot = CreateSettingsCheckBox(pnlLeftCol, 34, 134,
+            chkSetShowGpuMemHot = CreateSettingsCheckBox(pnlLeftCol, 14, 106,
                 "Ekran Kartı (GPU) Bellek (Memory) ve Hotspot Sıcaklığını Göster",
                 appSettings.ShowGpuMemHotspotSensor);
 
             Label lblPoll = new Label
             {
-                Text = "Sensör Yenileme Hızı (Polling Interval):",
-                Font = new Font("Segoe UI", 8.4f, FontStyle.Bold),
+                Text = "Sensör Yenileme Hızı:",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
                 ForeColor = Color.FromArgb(203, 213, 225),
                 AutoSize = true,
-                Location = new Point(34, 168)
+                Location = new Point(450, 36)
             };
             pnlLeftCol.Controls.Add(lblPoll);
 
             cmbSetPollInterval = new ComboBox
             {
                 DropDownStyle = ComboBoxStyle.DropDownList,
-                Font = new Font("Segoe UI", 8.4f, FontStyle.Bold),
-                BackColor = Color.FromArgb(13, 16, 23),
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                BackColor = Color.FromArgb(12, 15, 22),
                 ForeColor = Color.FromArgb(56, 189, 248),
-                Location = new Point(280, 164),
-                Size = new Size(185, 24)
+                Location = new Point(580, 32),
+                Size = new Size(145, 22)
             };
             cmbSetPollInterval.Items.AddRange(new object[]
             {
-                "500 ms (Anlık / Hızlı)",
-                "1000 ms (1 Saniye - Önerilen)",
-                "2000 ms (2 Saniye - Düşük Yük)"
+                "500 ms (Hızlı)",
+                "1000 ms (Önerilen)",
+                "2000 ms (Düşük Yük)"
             });
             cmbSetPollInterval.SelectedIndex = appSettings.TelemetryPollIntervalMs <= 500 ? 0 : (appSettings.TelemetryPollIntervalMs >= 2000 ? 2 : 1);
             pnlLeftCol.Controls.Add(cmbSetPollInterval);
 
-            Button btnRescanSensors = CreateActionButton(pnlLeftCol, 474, 163, 95, 26, "🔄 Şimdi Oku", Color.FromArgb(14, 165, 233));
+            Button btnRescanSensors = CreateActionButton(pnlLeftCol, 730, 31, 72, 24, "Şimdi Oku", Color.FromArgb(14, 165, 233));
             btnRescanSensors.ForeColor = Color.Black;
             btnRescanSensors.Click += (s, e) => TriggerAsyncHardwareSensorPoll();
 
             lblSettingsSensorDiag = new Label
             {
                 Text = "Sensör durumu hazırlanıyor...",
-                Font = new Font("Consolas", 8.2f, FontStyle.Regular),
+                Font = new Font("Consolas", 7.8f, FontStyle.Regular),
                 ForeColor = Color.FromArgb(148, 163, 184),
-                BackColor = Color.FromArgb(13, 16, 23),
+                BackColor = Color.FromArgb(12, 15, 22),
                 BorderStyle = BorderStyle.FixedSingle,
-                Padding = new Padding(8),
-                Location = new Point(16, 198),
-                Size = new Size(553, 88)
+                Padding = new Padding(6),
+                Location = new Point(14, 134),
+                Size = new Size(787, 62)
             };
             pnlLeftCol.Controls.Add(lblSettingsSensorDiag);
 
-            // Behavioral & Detection Settings Section
-            Label lblSec2 = new Label
+            Label lblLangHdr = new Label
             {
-                Text = "⚙️ PROGRAM DAVRANIŞI, GÖRÜNÜM & CANLI ALGILAMA (DETECTION) MOTORU",
-                Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(56, 189, 248),
-                AutoSize = true,
-                Location = new Point(16, 304)
+                Text = Loc.T("Arayüz Dili / Interface Language:", "Interface Language / Arayüz Dili:"),
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(203, 213, 225),
+                Location = new Point(14, 206),
+                AutoSize = true
             };
-            pnlLeftCol.Controls.Add(lblSec2);
+            pnlLeftCol.Controls.Add(lblLangHdr);
 
-            chkSetFixedWindow = CreateSettingsCheckBox(pnlLeftCol, 16, 336,
-                "Sabit Pencere Boyutu (1240x880 Kilitli Yapı - Buton ve Kartların Kaymasını Önler)",
-                appSettings.FixedWindowLayout);
+            cmbSetLanguage = new ComboBox
+            {
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                BackColor = Color.FromArgb(12, 15, 22),
+                ForeColor = Color.FromArgb(56, 189, 248),
+                Location = new Point(255, 203),
+                Size = new Size(180, 24)
+            };
+            cmbSetLanguage.Items.AddRange(new object[]
+            {
+                "Türkçe (TR)",
+                "English (EN)"
+            });
+            cmbSetLanguage.SelectedIndex = Loc.IsEnglish ? 1 : 0;
+            cmbSetLanguage.SelectedIndexChanged += (s, e) =>
+            {
+                if (syncingSettingsTabUi) return;
+                string newLang = cmbSetLanguage.SelectedIndex == 1 ? "EN" : "TR";
+                if (!string.Equals(appSettings.AppLanguage, newLang, StringComparison.OrdinalIgnoreCase))
+                {
+                    ApplyLanguage(newLang);
+                }
+            };
+            pnlLeftCol.Controls.Add(cmbSetLanguage);
 
-            chkSetAutoTruthSync = CreateSettingsCheckBox(pnlLeftCol, 16, 368,
-                "Gerçek Durum Algılama (Live OS Truth): Açılışta Sistemde Aktif Olan Ayarları Otomatik Eşitle",
+            Label lblResHdr = new Label
+            {
+                Text = Loc.T("Pencere Boyutu / Sabit Çözünürlük:", "Window Size / Fixed Resolution Preset:"),
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(203, 213, 225),
+                Location = new Point(14, 236),
+                AutoSize = true
+            };
+            pnlLeftCol.Controls.Add(lblResHdr);
+
+            cmbResolutionPreset = new ComboBox
+            {
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                BackColor = Color.FromArgb(12, 15, 22),
+                ForeColor = Color.FromArgb(56, 189, 248),
+                Location = new Point(255, 233),
+                Size = new Size(340, 24)
+            };
+            cmbResolutionPreset.Items.AddRange(new object[]
+            {
+                "Standart (Orta Boy: 1380 x 890) [Varsayılan]",
+                "Kompakt (Laptop: 1280 x 820)",
+                "Geniş (2K / 1440p: 1560 x 960)",
+                "Maksimum (4K: 1720 x 1020)"
+            });
+            cmbResolutionPreset.SelectedIndexChanged += (s, e) =>
+            {
+                if (syncingSettingsTabUi) return;
+                int sel = cmbResolutionPreset.SelectedIndex;
+                if (sel == 1) appSettings.WindowResolutionPreset = "COMPACT";
+                else if (sel == 2) appSettings.WindowResolutionPreset = "LARGE";
+                else if (sel == 3) appSettings.WindowResolutionPreset = "EXTRA_LARGE";
+                else appSettings.WindowResolutionPreset = "MEDIUM";
+
+                appSettings.Save(appSettingsPath);
+                ApplyWindowLayoutPolicy();
+                this.CenterToScreen();
+            };
+            pnlLeftCol.Controls.Add(cmbResolutionPreset);
+
+            chkSetLockResolution = CreateSettingsCheckBox(pnlLeftCol, 14, 264,
+                "Sabit Çözünürlük Kilidi (Pencere kenarlarından çekip arayüzü bozmayı engelle)",
+                appSettings.LockFixedResolution);
+            chkSetLockResolution.CheckedChanged += (s, e) =>
+            {
+                if (syncingSettingsTabUi) return;
+                appSettings.LockFixedResolution = chkSetLockResolution.Checked;
+                appSettings.Save(appSettingsPath);
+                ApplyWindowLayoutPolicy();
+            };
+
+            chkSetAutoTruthSync = CreateSettingsCheckBox(pnlLeftCol, 14, 288,
+                "Gerçek Durum Algılama (Live OS Truth): Açılışta Aktif Ayarları Otomatik Eşitle",
                 appSettings.AutoLiveTruthSync);
 
-            chkSetConfirmCritical = CreateSettingsCheckBox(pnlLeftCol, 16, 400,
-                "Kritik ve WinUtil Ayarlarını Açarken Özel Uyarı & Onay Penceresi Göster",
+            chkSetConfirmCritical = CreateSettingsCheckBox(pnlLeftCol, 14, 312,
+                "Kritik ve WinUtil Ayarlarını Açarken Onay Penceresi Göster",
                 appSettings.ConfirmCriticalTweaks);
 
-            chkSetRichTooltips = CreateSettingsCheckBox(pnlLeftCol, 16, 432,
-                "Zenginleştirilmiş Teknik İpuçları (Canlı OS Değeri + Teknik Neden + Kayıt Yolu)",
+            chkSetRichTooltips = CreateSettingsCheckBox(pnlLeftCol, 14, 336,
+                "Zenginleştirilmiş Teknik İpuçları (Canlı OS Değeri + Kayıt Yolu)",
                 appSettings.RichTooltipsEnabled);
 
-            Button btnSyncLiveOsNow = CreateActionButton(pnlLeftCol, 16, 472, 553, 38,
-                "🔍 ŞİMDİ GERÇEK WINDOWS DURUMUNDAN (LIVE OS TRUTH) TÜM ANAHTARLARI EŞİTLE",
+            Button btnSyncLiveOsNow = CreateActionButton(pnlLeftCol, 14, 368, 515, 34,
+                "ŞİMDİ GERÇEK WINDOWS DURUMUNDAN (LIVE OS TRUTH) TÜM ANAHTARLARI EŞİTLE",
                 Color.FromArgb(16, 185, 129));
             btnSyncLiveOsNow.ForeColor = Color.Black;
             btnSyncLiveOsNow.Click += (s, e) =>
@@ -7175,8 +10762,8 @@ namespace ArgonLatencyStudio
                     MessageBoxIcon.Information);
             };
 
-            Button btnResetAppSettings = CreateActionButton(pnlLeftCol, 16, 520, 270, 34,
-                "↩ Program Ayarlarını Varsayılana Döndür", Color.FromArgb(51, 65, 85));
+            Button btnResetAppSettings = CreateActionButton(pnlLeftCol, 538, 342, 263, 34,
+                "Program Ayarlarını Varsayılana Döndür", Color.FromArgb(51, 65, 85));
             btnResetAppSettings.Click += (s, e) =>
             {
                 appSettings = new ArgonAppSettings();
@@ -7187,28 +10774,6 @@ namespace ArgonLatencyStudio
                 TriggerAsyncHardwareSensorPoll();
             };
 
-            Button btnOpenVaultFolder = CreateActionButton(pnlLeftCol, 299, 520, 270, 34,
-                "📂 Yedek & Profil Klasörünü Aç (AppData)", Color.FromArgb(30, 64, 175));
-            btnOpenVaultFolder.Click += (s, e) =>
-            {
-                try
-                {
-                    string dir = Path.GetDirectoryName(userProfilePath);
-                    if (Directory.Exists(dir)) Process.Start("explorer.exe", dir);
-                }
-                catch { }
-            };
-
-            Label lblSetFootNote = new Label
-            {
-                Text = "💡 Not: Program içindeki tüm davranışsal tercihler 'argon_app_settings.txt' dosyasında saklanır.\nSıfırlama (Reset) sonrası bile canlı algılama motoru gerçek kayıt defteri durumunu okuduğu için görsel hata oluşmaz.",
-                Font = new Font("Segoe UI", 7.9f, FontStyle.Italic),
-                ForeColor = Color.FromArgb(148, 163, 184),
-                Location = new Point(16, 566),
-                Size = new Size(553, 46)
-            };
-            pnlLeftCol.Controls.Add(lblSetFootNote);
-
             EventHandler onSettingChanged = (s, e) =>
             {
                 if (syncingSettingsTabUi) return;
@@ -7217,7 +10782,6 @@ namespace ArgonLatencyStudio
                 appSettings.ShowGpuCoreSensor = chkSetShowGpuCore.Checked;
                 appSettings.ShowGpuMemHotspotSensor = chkSetShowGpuMemHot.Checked;
                 appSettings.TelemetryPollIntervalMs = cmbSetPollInterval.SelectedIndex == 0 ? 500 : (cmbSetPollInterval.SelectedIndex == 2 ? 2000 : 1000);
-                appSettings.FixedWindowLayout = chkSetFixedWindow.Checked;
                 appSettings.AutoLiveTruthSync = chkSetAutoTruthSync.Checked;
                 appSettings.ConfirmCriticalTweaks = chkSetConfirmCritical.Checked;
                 appSettings.RichTooltipsEnabled = chkSetRichTooltips.Checked;
@@ -7235,109 +10799,18 @@ namespace ArgonLatencyStudio
             chkSetShowGpuCore.CheckedChanged += onSettingChanged;
             chkSetShowGpuMemHot.CheckedChanged += onSettingChanged;
             cmbSetPollInterval.SelectedIndexChanged += onSettingChanged;
-            chkSetFixedWindow.CheckedChanged += onSettingChanged;
             chkSetAutoTruthSync.CheckedChanged += onSettingChanged;
             chkSetConfirmCritical.CheckedChanged += onSettingChanged;
             chkSetRichTooltips.CheckedChanged += onSettingChanged;
 
-            // RIGHT COLUMN: Custom Profile Management
-            Panel pnlRightCol = new Panel
+            viewSettings.Resize += (s, e) =>
             {
-                Location = new Point(615, 12),
-                Size = new Size(585, 625),
-                BackColor = Color.FromArgb(19, 24, 36)
+                int availW = Math.Max(680, viewSettings.ClientSize.Width - 24);
+                pnlRightCol.Width = availW;
+                lstCustomProfilesManager.Width = availW - 28;
+                pnlLeftCol.Width = availW;
+                lblSettingsSensorDiag.Width = availW - 28;
             };
-            viewSettings.Controls.Add(pnlRightCol);
-
-            Label lblProfTitle = new Label
-            {
-                Text = "💾 ÖZEL PROFİL YÖNETİMİ (KULLANICI PROFİLLERİ & HAZIR REÇETELER)",
-                Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(251, 191, 36),
-                AutoSize = true,
-                Location = new Point(16, 14)
-            };
-            pnlRightCol.Controls.Add(lblProfTitle);
-
-            Label lblProfSub = new Label
-            {
-                Text = "Açık olan ayarlarınızı kendi vereceğiniz bir isimle kaydedebilir, üst bardaki '💾 Profil' açılır menüsünden veya aşağıdaki listeden tek tıkla istediğiniz zaman geçiş yapabilirsiniz.",
-                Font = new Font("Segoe UI", 8.2f, FontStyle.Regular),
-                ForeColor = Color.FromArgb(203, 213, 225),
-                Location = new Point(16, 38),
-                Size = new Size(553, 36)
-            };
-            pnlRightCol.Controls.Add(lblProfSub);
-
-            Label lblNewName = new Label
-            {
-                Text = "Yeni Özel Profil Adı:",
-                Font = new Font("Segoe UI", 8.4f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(56, 189, 248),
-                AutoSize = true,
-                Location = new Point(16, 84)
-            };
-            pnlRightCol.Controls.Add(lblNewName);
-
-            txtNewProfileNameInput = new TextBox
-            {
-                Location = new Point(145, 81),
-                Size = new Size(245, 24),
-                BackColor = Color.FromArgb(13, 16, 23),
-                ForeColor = Color.White,
-                BorderStyle = BorderStyle.FixedSingle,
-                Font = new Font("Segoe UI", 8.8f, FontStyle.Bold),
-                Text = "Benim Espor Profilim"
-            };
-            pnlRightCol.Controls.Add(txtNewProfileNameInput);
-
-            Button btnSaveNamedProf = CreateActionButton(pnlRightCol, 398, 79, 171, 28, "💾 Profili Şimdi Kaydet", Color.FromArgb(16, 185, 129));
-            btnSaveNamedProf.ForeColor = Color.Black;
-            btnSaveNamedProf.Click += (s, e) =>
-            {
-                string name = (txtNewProfileNameInput.Text ?? "").Trim();
-                if (string.IsNullOrEmpty(name))
-                {
-                    MessageBox.Show("Lütfen kaydedilecek profil için bir isim girin.", "Profil Adı Gerekli", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    return;
-                }
-                SaveCurrentStateAsCustomProfile(name);
-            };
-
-            lstCustomProfilesManager = new ListBox
-            {
-                Location = new Point(16, 118),
-                Size = new Size(553, 330),
-                BackColor = Color.FromArgb(13, 16, 23),
-                ForeColor = Color.FromArgb(226, 232, 240),
-                BorderStyle = BorderStyle.FixedSingle,
-                Font = new Font("Consolas", 9.0f, FontStyle.Regular)
-            };
-            pnlRightCol.Controls.Add(lstCustomProfilesManager);
-
-            Button btnApplySelProf = CreateActionButton(pnlRightCol, 16, 460, 270, 38, "✅ Seçili Profili Sisteme Uygula", Color.FromArgb(16, 185, 129));
-            btnApplySelProf.ForeColor = Color.Black;
-            btnApplySelProf.Click += (s, e) => ApplyProfileFromSettingsListSelection();
-
-            Button btnDeleteSelProf = CreateActionButton(pnlRightCol, 299, 460, 270, 38, "🗑️ Seçili Kullanıcı Profilini Sil", Color.FromArgb(185, 28, 28));
-            btnDeleteSelProf.Click += (s, e) => DeleteProfileFromSettingsListSelection();
-
-            Button btnExportProf = CreateActionButton(pnlRightCol, 16, 508, 270, 34, "📤 Mevcut Profili Dışa Aktar (.argon)", Color.FromArgb(14, 165, 233));
-            btnExportProf.ForeColor = Color.Black;
-            btnExportProf.Click += (s, e) => ExportCurrentProfileDialog();
-
-            Button btnImportProf = CreateActionButton(pnlRightCol, 299, 508, 270, 34, "📥 Dosyadan Profil İçe Aktar (.argon)", Color.FromArgb(168, 85, 247));
-            btnImportProf.Click += (s, e) => ImportCustomProfileDialog();
-
-            Label lblProfFoot = new Label
-            {
-                Text = "📌 Hazır Sistem Profilleri ('Kademe 1: Dengeli', 'Kademe 2: Rekabetçi Espor', 'Kademe 3: Turnuva Ekstrem', 'Sadece Ağ & Düşük Ping') silinemez; kendi oluşturduğunuz profilleri istediğiniz gibi güncelleyebilir veya silebilirsiniz.",
-                Font = new Font("Segoe UI", 7.9f, FontStyle.Italic),
-                ForeColor = Color.FromArgb(148, 163, 184),
-                Location = new Point(16, 556),
-                Size = new Size(553, 52)
-            };
-            pnlRightCol.Controls.Add(lblProfFoot);
 
             RefreshProfileSelectorCombo();
         }
@@ -7369,10 +10842,27 @@ namespace ArgonLatencyStudio
                 chkSetShowGpuCore.Checked = appSettings.ShowGpuCoreSensor;
                 chkSetShowGpuMemHot.Checked = appSettings.ShowGpuMemHotspotSensor;
                 cmbSetPollInterval.SelectedIndex = appSettings.TelemetryPollIntervalMs <= 500 ? 0 : (appSettings.TelemetryPollIntervalMs >= 2000 ? 2 : 1);
-                chkSetFixedWindow.Checked = appSettings.FixedWindowLayout;
+
+                if (cmbResolutionPreset != null)
+                {
+                    string p = appSettings.WindowResolutionPreset ?? "MEDIUM";
+                    if (p == "COMPACT") cmbResolutionPreset.SelectedIndex = 1;
+                    else if (p == "LARGE") cmbResolutionPreset.SelectedIndex = 2;
+                    else if (p == "EXTRA_LARGE") cmbResolutionPreset.SelectedIndex = 3;
+                    else cmbResolutionPreset.SelectedIndex = 0; // MEDIUM
+                }
+                if (chkSetLockResolution != null)
+                {
+                    chkSetLockResolution.Checked = appSettings.LockFixedResolution;
+                }
+
                 chkSetAutoTruthSync.Checked = appSettings.AutoLiveTruthSync;
                 chkSetConfirmCritical.Checked = appSettings.ConfirmCriticalTweaks;
                 chkSetRichTooltips.Checked = appSettings.RichTooltipsEnabled;
+                if (cmbSetLanguage != null)
+                {
+                    cmbSetLanguage.SelectedIndex = Loc.IsEnglish ? 1 : 0;
+                }
             }
             finally
             {
@@ -7386,7 +10876,7 @@ namespace ArgonLatencyStudio
             {
                 Dock = DockStyle.Fill,
                 BackColor = Color.FromArgb(13, 16, 23),
-                Padding = new Padding(16, 10, 16, 10),
+                Padding = new Padding(10, 8, 10, 8),
                 Visible = false
             };
             pnlContentHost.Controls.Add(viewGlobalSearch);
@@ -7394,26 +10884,26 @@ namespace ArgonLatencyStudio
             Panel pnlSearchTop = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 42,
-                BackColor = Color.FromArgb(20, 26, 40)
+                Height = 36,
+                BackColor = Color.FromArgb(18, 23, 34)
             };
             viewGlobalSearch.Controls.Add(pnlSearchTop);
 
             lblGlobalSearchHeader = new Label
             {
-                Text = "🔎 TÜM SEKMELERDE GENEL ARAMA SONUÇLARI:",
-                Font = new Font("Segoe UI", 9.2f, FontStyle.Bold),
+                Text = "TÜM SEKMELERDE GENEL ARAMA SONUÇLARI:",
+                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
                 ForeColor = Color.FromArgb(56, 189, 248),
                 AutoSize = true,
-                Location = new Point(14, 11)
+                Location = new Point(12, 9)
             };
             pnlSearchTop.Controls.Add(lblGlobalSearchHeader);
 
-            Button btnClearSearch = CreateActionButton(pnlSearchTop, 980, 7, 180, 28, "✖ Aramayı Temizle & Dön", Color.FromArgb(51, 65, 85));
+            Button btnClearSearch = CreateActionButton(pnlSearchTop, 640, 5, 165, 25, "Aramayı Temizle & Dön", Color.FromArgb(51, 65, 85));
             btnClearSearch.Click += (s, e) => { txtGlobalSearch.Text = ""; };
             pnlSearchTop.Resize += (s, e) =>
             {
-                btnClearSearch.Location = new Point(Math.Max(700, pnlSearchTop.ClientSize.Width - btnClearSearch.Width - 12), 7);
+                btnClearSearch.Location = new Point(Math.Max(520, pnlSearchTop.ClientSize.Width - btnClearSearch.Width - 10), 5);
             };
 
             flowGlobalSearchCards = new FlowLayoutPanel
@@ -7422,7 +10912,7 @@ namespace ArgonLatencyStudio
                 AutoScroll = true,
                 FlowDirection = FlowDirection.TopDown,
                 WrapContents = false,
-                Padding = new Padding(0, 8, 0, 8),
+                Padding = new Padding(0, 6, 0, 8),
                 BackColor = Color.FromArgb(13, 16, 23)
             };
             viewGlobalSearch.Controls.Add(flowGlobalSearchCards);
@@ -7431,7 +10921,7 @@ namespace ArgonLatencyStudio
 
             flowGlobalSearchCards.Resize += (s, e) =>
             {
-                int targetW = Math.Max(780, flowGlobalSearchCards.ClientSize.Width - 28);
+                int targetW = Math.Max(520, flowGlobalSearchCards.ClientSize.Width - 24);
                 foreach (Control c in flowGlobalSearchCards.Controls)
                 {
                     if (c is MultiVariationTweakCard)
@@ -7449,7 +10939,7 @@ namespace ArgonLatencyStudio
             {
                 Dock = DockStyle.Fill,
                 BackColor = Color.FromArgb(13, 16, 23),
-                Padding = new Padding(16),
+                Padding = new Padding(10, 8, 10, 8),
                 Visible = false
             };
             pnlContentHost.Controls.Add(viewSnapshotAudit);
@@ -7457,42 +10947,47 @@ namespace ArgonLatencyStudio
             Panel pnlTopAudit = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 60,
-                BackColor = Color.FromArgb(20, 25, 36)
+                Height = 52,
+                BackColor = Color.FromArgb(18, 23, 34)
             };
             viewSnapshotAudit.Controls.Add(pnlTopAudit);
 
             Label lblAuditSummary = new Label
             {
-                Text = "🛡️ CANLI OS ALGILAMA (LIVE TRUTH) & STATEVAULT YEDEK GÜNLÜĞÜ",
-                Font = new Font("Segoe UI", 9f, FontStyle.Bold),
+                Text = "CANLI OS ALGILAMA (LIVE TRUTH) & STATEVAULT YEDEK GÜNLÜĞÜ",
+                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
                 ForeColor = Color.FromArgb(52, 211, 153),
                 AutoSize = true,
-                Location = new Point(14, 10)
+                Location = new Point(12, 8)
             };
             pnlTopAudit.Controls.Add(lblAuditSummary);
 
             Label lblAuditSub = new Label
             {
-                Text = "Her ayarın açılış öncesi orijinal fabrika değeri, şu anki canlı Windows Kayıt Defteri/Kernel değeri ve doğrulama durumu aşağıda listelenir.",
-                Font = new Font("Segoe UI", 8f, FontStyle.Regular),
+                Text = "Her ayarın açılış öncesi orijinal fabrika değeri, canlı Windows Kayıt Defteri/Kernel değeri ve doğrulama durumu.",
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Regular),
                 ForeColor = Color.FromArgb(148, 163, 184),
                 AutoSize = true,
-                Location = new Point(14, 32)
+                Location = new Point(12, 28)
             };
             pnlTopAudit.Controls.Add(lblAuditSub);
 
-            Button btnSyncFromAudit = CreateActionButton(pnlTopAudit, 650, 13, 225, 32, "🔍 Canlı OS Durumunu Şimdi Eşitle", Color.FromArgb(16, 185, 129));
+            Button btnSyncFromAudit = CreateActionButton(pnlTopAudit, 490, 11, 185, 28, "Canlı OS Durumunu Eşitle", Color.FromArgb(16, 185, 129));
             btnSyncFromAudit.ForeColor = Color.Black;
-            btnSyncFromAudit.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             btnSyncFromAudit.Click += (s, e) => ProbeAllTweaksLiveOsTruthAndOptionallySync(true);
 
-            Button btnRefreshAudit = CreateActionButton(pnlTopAudit, 885, 13, 150, 32, "🔄 Tabloyu Yenile", Color.FromArgb(51, 65, 85));
-            btnRefreshAudit.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            Button btnRefreshAudit = CreateActionButton(pnlTopAudit, 682, 11, 125, 28, "Tabloyu Yenile", Color.FromArgb(51, 65, 85));
             btnRefreshAudit.Click += (s, e) =>
             {
                 ProbeAllTweaksLiveOsTruthAndOptionallySync(false);
                 RefreshSnapshotAuditView();
+            };
+
+            pnlTopAudit.Resize += (s, e) =>
+            {
+                int w = Math.Max(660, pnlTopAudit.ClientSize.Width);
+                btnRefreshAudit.Location = new Point(w - btnRefreshAudit.Width - 10, 11);
+                btnSyncFromAudit.Location = new Point(btnRefreshAudit.Left - btnSyncFromAudit.Width - 6, 11);
             };
 
             lvAuditLog = new ListView
@@ -7501,21 +10996,156 @@ namespace ArgonLatencyStudio
                 View = View.Details,
                 FullRowSelect = true,
                 GridLines = true,
-                BackColor = Color.FromArgb(16, 20, 29),
+                BackColor = Color.FromArgb(14, 18, 26),
                 ForeColor = Color.White,
                 BorderStyle = BorderStyle.FixedSingle,
-                Font = new Font("Consolas", 8.5f, FontStyle.Regular)
+                Font = new Font("Consolas", 8.2f, FontStyle.Regular)
             };
-            lvAuditLog.Columns.Add("İlgili Ayar / Modül", 240);
-            lvAuditLog.Columns.Add("Kayıt Defteri / API Konumu", 310);
-            lvAuditLog.Columns.Add("Açılış Öncesi Orijinal Değer", 185);
-            lvAuditLog.Columns.Add("Canlı Windows (OS) Durumu", 225);
+            lvAuditLog.Columns.Add("İlgili Ayar / Modül", 210);
+            lvAuditLog.Columns.Add("Kayıt Defteri / API Konumu", 245);
+            lvAuditLog.Columns.Add("Orijinal Fabrika Değeri", 155);
+            lvAuditLog.Columns.Add("Canlı Windows (OS) Durumu", 195);
             viewSnapshotAudit.Controls.Add(lvAuditLog);
             pnlTopAudit.SendToBack();
             lvAuditLog.BringToFront();
         }
 
-        private void SwitchActiveTab(int index)
+        public void ApplyLanguage(string newLanguage)
+        {
+            if (string.IsNullOrEmpty(newLanguage)) newLanguage = "TR";
+            Loc.CurrentLanguage = newLanguage.ToUpperInvariant();
+            if (appSettings != null)
+            {
+                appSettings.AppLanguage = Loc.CurrentLanguage;
+                appSettings.Save(appSettingsPath);
+            }
+
+            bool isEn = Loc.IsEnglish;
+
+            // 1. Top Header
+            if (btnLangToggle != null)
+                btnLangToggle.Text = isEn ? "🌐 EN" : "🌐 TR";
+            if (lblProfCaption != null)
+                lblProfCaption.Text = isEn ? "PROFILE:" : "PROFİL:";
+            if (btnQuickSaveProf != null)
+                btnQuickSaveProf.Text = isEn ? "+ Save" : "+ Kaydet";
+            if (chkRevertOnExit != null)
+                chkRevertOnExit.Text = isEn ? "Revert on exit" : "Çıkışta sıfırla";
+            if (chkAutoStart != null)
+                chkAutoStart.Text = isEn ? "Start with Windows" : "Windows ile başlat";
+            if (btnSmartTuneTop != null)
+                btnSmartTuneTop.Text = isEn ? "⚡ Smart Tune" : "⚡ Akıllı Profil";
+            if (btnResetAllTop != null)
+                btnResetAllTop.Text = isEn ? "↺ Reset All" : "↺ Fabrika Sıfırla";
+            if (btnMinimizeTray != null)
+                btnMinimizeTray.Text = isEn ? "– Tray" : "– Tepsiye Küçült";
+            if (lblSearchIcon != null)
+                lblSearchIcon.Text = isEn ? "Search:" : "Ara:";
+            if (btnElevate != null)
+                btnElevate.Text = isEn ? "🛡️ Admin" : "🛡️ Yönetici Aç";
+
+            // 2. Navigation Tabs
+            string[] trTabNames = new string[]
+            {
+                "Donanım", "Ağ", "Timer", "Grafik", "Sistem", "Kernel",
+                "İşlemler", "Otomasyon", "Tanı Test", "Günlük", "Ayarlar"
+            };
+            string[] enTabNames = new string[]
+            {
+                "Hardware", "Network", "Timer", "Graphics", "System", "Kernel",
+                "Processes", "Automation", "Diagnostics", "Event Log", "Settings"
+            };
+            string[] activeTabNames = isEn ? enTabNames : trTabNames;
+            for (int i = 0; i < navButtons.Count && i < activeTabNames.Length; i++)
+            {
+                navButtons[i].Text = activeTabNames[i];
+            }
+            UpdateActiveCountsAndNavBadges();
+            LayoutNavBarButtons();
+
+            // 3. Hardware Profile Top Controls
+            if (lblMatTitle != null)
+                lblMatTitle.Text = isEn ? "HARDWARE PROFILE & OPTIMIZATION LEVEL" : "DONANIM PROFİLİ VE OPTİMİZASYON SEVİYESİ";
+            if (lblCpuPick != null)
+                lblCpuPick.Text = isEn ? "1. Processor (CPU) Architecture:" : "1. İşlemci (CPU) Mimarisi:";
+            if (lblGpuPick != null)
+                lblGpuPick.Text = isEn ? "2. Graphics Card (GPU) Architecture:" : "2. Ekran Kartı (GPU) Mimarisi:";
+            if (lblTierPick != null)
+                lblTierPick.Text = isEn ? "3. Optimization Level:" : "3. Optimizasyon Kademesi:";
+            if (btnTier1 != null) btnTier1.Text = isEn ? "1: Balanced" : "1: Dengeli";
+            if (btnTier2 != null) btnTier2.Text = isEn ? "2: Esports" : "2: Espor";
+            if (btnTier3 != null) btnTier3.Text = isEn ? "3: Extreme" : "3: Ekstrem";
+            if (btnSmartApply != null)
+                btnSmartApply.Text = isEn ? "⚡ APPLY SELECTED PROFILE (ONE-CLICK)" : "⚡ SEÇİLİ PROFİLİ TEK TIKLA UYGULA";
+            if (btnAutoDetectReset != null)
+                btnAutoDetectReset.Text = isEn ? "Auto-Detect Hardware" : "Donanımımı Otomatik Algıla";
+            if (btnQuickRam != null)
+                btnQuickRam.Text = isEn ? "Instant RAM & DNS Purge" : "Anlık RAM & DNS Temizle";
+
+            // 4. Sidebar Network & Telemetry Labels
+            if (grpNetAdapter != null) grpNetAdapter.Text = isEn ? "NETWORK & ADAPTER" : "AĞ ADAPTÖRÜ VE BAĞLANTI";
+            if (btnSideFlush != null) btnSideFlush.Text = isEn ? "Clear" : "Temizle";
+            if (lblHwHdr != null) lblHwHdr.Text = isEn ? "HARDWARE MONITOR" : "DONANIM İZLEME";
+            if (lblSideEventLogHeader != null) lblSideEventLogHeader.Text = isEn ? "SYSTEM EVENT LOG" : "SİSTEM OLAY GÜNLÜĞÜ";
+
+            if (txtNetHostAdmin != null && sidebarRowLabels.ContainsKey(txtNetHostAdmin))
+                sidebarRowLabels[txtNetHostAdmin].Text = isEn ? "System / Auth" : "Sistem / Yetki";
+            if (txtNetAdapter != null && sidebarRowLabels.ContainsKey(txtNetAdapter))
+                sidebarRowLabels[txtNetAdapter].Text = isEn ? "Net Adapter" : "Ağ Adaptörü";
+            if (txtNetLocalIp != null && sidebarRowLabels.ContainsKey(txtNetLocalIp))
+                sidebarRowLabels[txtNetLocalIp].Text = isEn ? "Local IPv4 / Mask" : "Yerel IPv4 / Maske";
+            if (txtNetGateway != null && sidebarRowLabels.ContainsKey(txtNetGateway))
+                sidebarRowLabels[txtNetGateway].Text = isEn ? "Default Gateway" : "Varsayılan Geçit";
+            if (txtNetDns != null && sidebarRowLabels.ContainsKey(txtNetDns))
+                sidebarRowLabels[txtNetDns].Text = isEn ? "DNS Servers" : "DNS Sunucuları";
+            if (txtNetMac != null && sidebarRowLabels.ContainsKey(txtNetMac))
+                sidebarRowLabels[txtNetMac].Text = isEn ? "MAC Address" : "MAC (Fiziksel)";
+            if (txtNetPingLive != null && sidebarRowLabels.ContainsKey(txtNetPingLive))
+                sidebarRowLabels[txtNetPingLive].Text = isEn ? "Live Ping / RTT" : "Canlı Ping / RTT";
+            if (txtHwCpuName != null && sidebarRowLabels.ContainsKey(txtHwCpuName))
+                sidebarRowLabels[txtHwCpuName].Text = isEn ? "Processor (CPU)" : "İşlemci (CPU)";
+            if (txtHwCpuTelemetry != null && sidebarRowLabels.ContainsKey(txtHwCpuTelemetry))
+                sidebarRowLabels[txtHwCpuTelemetry].Text = isEn ? "CPU Temp / Load" : "CPU Sıcaklık / Yük";
+            if (txtHwGpuName != null && sidebarRowLabels.ContainsKey(txtHwGpuName))
+                sidebarRowLabels[txtHwGpuName].Text = isEn ? "Graphics (GPU)" : "Ekran Kartı (GPU)";
+            if (txtHwGpuTelemetry != null && sidebarRowLabels.ContainsKey(txtHwGpuTelemetry))
+                sidebarRowLabels[txtHwGpuTelemetry].Text = isEn ? "GPU Core / Hotspot" : "GPU Core / Hotspot";
+            if (txtHwRamUsage != null && sidebarRowLabels.ContainsKey(txtHwRamUsage))
+                sidebarRowLabels[txtHwRamUsage].Text = isEn ? "System Memory" : "Sistem Belleği";
+            if (txtHwTimerActive != null && sidebarRowLabels.ContainsKey(txtHwTimerActive))
+                sidebarRowLabels[txtHwTimerActive].Text = isEn ? "Active Timer Mode" : "Timer & Aktif Ayar";
+
+            // 5. Table Headers
+            foreach (var l in tweakColHeadersCol1)
+            {
+                int pIdx = l.Text.IndexOf('(');
+                string sec = (pIdx >= 0 && pIdx < l.Text.Length) ? (" " + l.Text.Substring(pIdx)) : "";
+                l.Text = Loc.T("DURUM & DONANIM / SİSTEM AYARI", "STATUS & HARDWARE / SYSTEM TWEAK") + sec;
+            }
+            foreach (var l in tweakColHeadersCol2)
+            {
+                l.Text = Loc.T("UYGULAMA MODU / VARYASYON", "APPLICATION MODE / VARIATION");
+            }
+            foreach (var l in tweakColHeadersCol3)
+            {
+                l.Text = Loc.T("CANLI OS DEĞERİ", "LIVE OS VALUE");
+            }
+
+            // 6. Settings Tab Controls
+            if (cmbSetLanguage != null && cmbSetLanguage.SelectedIndex != (isEn ? 1 : 0))
+            {
+                cmbSetLanguage.SelectedIndex = isEn ? 1 : 0;
+            }
+
+            // 7. Refresh Cards & Telemetry
+            foreach (var card in allCards)
+            {
+                card.RefreshVisualState();
+            }
+            UpdateTelemetryBar();
+        }
+
+        public void SwitchActiveTab(int index)
         {
             currentActiveTabIndex = index;
             if (viewGlobalSearch != null) viewGlobalSearch.Visible = false;
@@ -7526,13 +11156,15 @@ namespace ArgonLatencyStudio
             if (viewWinUtil != null) viewWinUtil.Visible = (index == 4);
             viewExperimental.Visible = (index == 5);
             viewProcesses.Visible = (index == 6);
-            viewBenchmark.Visible = (index == 7);
-            viewSnapshotAudit.Visible = (index == 8);
-            if (viewSettings != null) viewSettings.Visible = (index == 9);
+            if (viewAutomationQoL != null) viewAutomationQoL.Visible = (index == 7);
+            viewBenchmark.Visible = (index == 8);
+            viewSnapshotAudit.Visible = (index == 9);
+            if (viewSettings != null) viewSettings.Visible = (index == 10);
 
             if (index == 6) RefreshProcessTable();
-            if (index == 8) RefreshSnapshotAuditView();
-            if (index == 9)
+            if (index == 7) RefreshAutomationQoLView();
+            if (index == 9) RefreshSnapshotAuditView();
+            if (index == 10)
             {
                 SyncSettingsViewControlsFromModel();
                 RefreshProfileSelectorCombo();
@@ -7547,9 +11179,37 @@ namespace ArgonLatencyStudio
                 }
                 else
                 {
-                    navButtons[i].BackColor = Color.FromArgb(30, 37, 54);
+                    navButtons[i].BackColor = Color.FromArgb(28, 35, 50);
                     navButtons[i].ForeColor = Color.FromArgb(203, 213, 225);
                 }
+            }
+        }
+
+        private void AutoResolveRebootAndReloadState(TweakDefinition t)
+        {
+            if (t == null) return;
+
+            VerifySingleTweakInLiveOs(t);
+
+            if (t.NeedsReboot)
+            {
+                t.RebootSatisfied = !t.IsRebootPending;
+                t.PendingRebootAfterDisable = (!t.IsEnabled && t.BootTimeActiveInOs);
+            }
+            else
+            {
+                t.RebootSatisfied = true;
+                t.PendingRebootAfterDisable = false;
+            }
+
+            if (t.NeedsNetReload)
+            {
+                if (!t.IsEnabled)
+                    t.NetReloadSatisfied = true;
+            }
+            else
+            {
+                t.NetReloadSatisfied = true;
             }
         }
 
@@ -7582,12 +11242,12 @@ namespace ArgonLatencyStudio
                 int previewIdx = Math.Max(0, Math.Min(variationIdx, tweak.Variations.Count - 1));
                 var previewVar = tweak.Variations[previewIdx];
                 string warnMsg = string.Format(
-                    "⚠️ KRİTİK MİMARİ AYAR UYARISI\n" +
+                    "KRİTİK MİMARİ AYAR ONAYI\n" +
                     "══════════════════════════════════════════════════\n" +
                     "Ayar Adı  : {0}\n" +
                     "Seçilen   : Mod {1} - {2}\n" +
                     "Kayıt Yolu: {3}\n\n" +
-                    "📌 ÖNEMLİ BİLGİLENDİRME:\n{4}\n\n" +
+                    "ÖNEMLİ BİLGİLENDİRME:\n{4}\n\n" +
                     "Bu ayarı şimdi uygulamak istiyor musunuz?\n" +
                     "(İstediğiniz zaman tek tıkla kapatarak fabrika varsayılanına geri dönebilirsiniz.)",
                     tweak.Title,
@@ -7598,7 +11258,7 @@ namespace ArgonLatencyStudio
 
                 DialogResult warnDr = MessageBox.Show(
                     warnMsg,
-                    "🛡️ Argon Kritik Ayar Onay Sistemi",
+                    "Argon Kritik Ayar Onay Sistemi",
                     MessageBoxButtons.YesNo,
                     MessageBoxIcon.Warning);
 
@@ -7618,43 +11278,58 @@ namespace ArgonLatencyStudio
                 {
                     int safeIdx = Math.Max(0, Math.Min(variationIdx, tweak.Variations.Count - 1));
                     tweak.SelectedVariationIndex = safeIdx;
-                    tweak.PendingRebootAfterDisable = false;
-                    if (tweak.NeedsReboot)
-                    {
-                        tweak.RebootSatisfied = false;
-                        tweak.ModifiedBootStamp = currentBootStamp;
-                    }
-                    if (tweak.NeedsNetReload) tweak.NetReloadSatisfied = false;
+                    tweak.IsEnabled = true;
                     var chosenVar = tweak.Variations[safeIdx];
                     if (chosenVar.ApplyAction != null)
                         chosenVar.ApplyAction();
                     tweak.CurrentAppliedText = string.Format("Mod {0}: {1}", safeIdx + 1, chosenVar.ShortLabel);
-                    VerifySingleTweakInLiveOs(tweak);
+
+                    AutoResolveRebootAndReloadState(tweak);
                     OnTweakCardHovered(tweak, chosenVar);
                     EnforceFixedCombinationsAndConflicts(tweak);
+
+                    bannerDismissedBySession = false;
+                    string statusMsg = tweak.IsVerifiedInOs ? ("Doğrulandı: " + tweak.VerifiedSystemValue) : "Uygulandı";
+                    if (tweak.NeedsReboot)
+                    {
+                        if (tweak.IsRebootPending)
+                            statusMsg += " [Kayıt Defterine Yazıldı - Windows Kernel İçin Restart Bekliyor]";
+                        else
+                            statusMsg += " [OS Zaten Bu Modla Açıldı - Restart Gereksiz]";
+                    }
+                    AppendConsoleLog(string.Format("AKTİF -> {0} [Mod {1}: {2}] ({3})",
+                        tweak.Title, safeIdx + 1, chosenVar.ShortLabel, statusMsg));
                 }
                 else
                 {
-                    tweak.RebootSatisfied = false;
-                    tweak.NetReloadSatisfied = false;
+                    bannerDismissedBySession = false;
+                    tweak.IsEnabled = false;
                     tweak.IsVerifiedInOs = false;
                     tweak.VerifiedSystemValue = "";
                     if (tweak.RevertAction != null)
                         tweak.RevertAction();
                     tweak.CurrentAppliedText = "Pasif (Orijinal)";
-                    // Re-probe live OS state immediately after reverting so visual state reflects true OS reality!
-                    VerifySingleTweakInLiveOs(tweak);
-                    UpdateRebootAndReloadBannerVisibility();
+
+                    AutoResolveRebootAndReloadState(tweak);
+
+                    string revStatus = tweak.IsRebootPending
+                        ? "Orijinale Çekildi [Kernel İçin Restart Bekliyor]"
+                        : (tweak.CapturedOriginalSummary ?? "Standart (Anında Aktif)");
+                    AppendConsoleLog(string.Format("VARSAYILANA DÖNDÜ -> {0} ({1})",
+                        tweak.Title, revStatus));
                 }
             }
             catch (Exception ex)
             {
-                lblInspectorTitle.Text = "⚠️ Uygulama Uyarısı: " + ex.Message;
+                lblInspectorTitle.Text = "Uygulama Uyarısı: " + ex.Message;
+                AppendConsoleLog("HATA -> " + tweak.Title + ": " + ex.Message);
             }
 
             foreach (var c in allCards) if (c.Tweak == tweak) c.RefreshVisualState();
             UpdateActiveCountsAndNavBadges();
+            UpdateRebootAndReloadBannerVisibility();
             RefreshSnapshotAuditView();
+            UpdateTelemetryBar();
             if (!isLoadingProfile) SaveUserProfileState();
         }
 
@@ -7666,19 +11341,19 @@ namespace ArgonLatencyStudio
             {
                 verifyTag = tweak.IsVerifiedInOs
                     ? ("✓ Sistemde Doğrulandı (" + tweak.VerifiedSystemValue + ")")
-                    : "⚠️ Doğrulanamadı";
+                    : "! Doğrulanamadı";
             }
             else if (tweak.IsDetectedActiveInOs)
             {
-                verifyTag = "🔍 Sistemde Zaten Aktif Algılandı (" + tweak.LiveOsRawSummary + ")";
+                verifyTag = "● Sistemde Zaten Aktif Algılandı (" + tweak.LiveOsRawSummary + ")";
             }
             else
             {
                 verifyTag = "Varsayılanda (" + tweak.CapturedOriginalSummary + ")";
             }
-            lblInspectorTitle.Text = string.Format("🔍 {0} — [{1}]", tweak.Title, variation.DetailedTitle);
-            lblInspectorPath.Text = string.Format("💡 Amacı: {0}  |  Canlı OS: {1}",
-                variation.TechnicalReason, verifyTag);
+            lblInspectorTitle.Text = string.Format("{0} — [{1}]", tweak.Title, variation.DetailedTitle);
+            lblInspectorPath.Text = string.Format("Hedef: {0}  |  Parametre: {1}  |  Canlı OS: {2}",
+                tweak.TargetPathOrApi, variation.ExactParameters, verifyTag);
         }
 
         /// <summary>
@@ -7723,9 +11398,25 @@ namespace ArgonLatencyStudio
                     }
                     else if (liveActive && t.IsEnabled && t.DetectedVariationInOs >= 0 && t.DetectedVariationInOs < t.Variations.Count)
                     {
-                        t.SelectedVariationIndex = t.DetectedVariationInOs;
+                        if (t.SelectedVariationIndex != t.DetectedVariationInOs)
+                        {
+                            t.SelectedVariationIndex = t.DetectedVariationInOs;
+                            syncedCount++;
+                        }
                     }
                 }
+
+                // Canlı OS'ta doğrulanmış olan ayarların boot durumunu da gerçek OS değerine eşitle
+                if (t.IsVerifiedInOs && (t.DetectedVariationInOs < 0 || t.DetectedVariationInOs == t.SelectedVariationIndex))
+                {
+                    t.BootTimeActiveInOs = true;
+                    if (t.DetectedVariationInOs >= 0) t.BootTimeVariationInOs = t.DetectedVariationInOs;
+                    t.RebootSatisfied = true;
+                    t.NetReloadSatisfied = true;
+                }
+
+                // Her bir ayar için Live OS truth ve restart/reload gereksinimini hatasız ve otomatik çözümle
+                AutoResolveRebootAndReloadState(t);
             }
 
             foreach (var c in allCards)
@@ -7740,9 +11431,48 @@ namespace ArgonLatencyStudio
 
             if (lblInspectorTitle != null && syncUiTogglesToOsTruth)
             {
-                lblInspectorTitle.Text = string.Format("🔍 GERÇEK WINDOWS DURUMU (LIVE OS TRUTH) ALGILANDI: Sistemde {0} ayar aktif bulundu ({1} anahtar eşitlendi).", detectedInOsCount, syncedCount);
-                lblInspectorPath.Text = "Tüm kartların durumu bayraklardan bağımsız olarak doğrudan Kayıt Defteri, Güç Planı ve Kernel üzerinden türetildi.";
+                lblInspectorTitle.Text = string.Format("GERÇEK WINDOWS DURUMU (LIVE OS TRUTH) ALGILANDI: Sistemde {0} ayar aktif bulundu ({1} anahtar eşitlendi).", detectedInOsCount, syncedCount);
+                lblInspectorPath.Text = "Tüm satırların durumu bayraklardan bağımsız olarak doğrudan Kayıt Defteri, Güç Planı ve Kernel üzerinden türetildi.";
             }
+            AppendConsoleLog(string.Format("Canlı OS Denetimi tamamlandı: {0} aktif ayar algılandı ({1} eşitlendi).", detectedInOsCount, syncedCount));
+        }
+
+        /// <summary>
+        /// Arka planda periyodik olarak çalışan, kullanıcıdan manuel buton tıklaması beklemeden
+        /// sistem durumunu sessizce denetleyen ve arayüzü sürekli güncel tutan otomatik OS doğrulama motoru.
+        /// </summary>
+        private void AutoSyncLiveOsTruthInBackground()
+        {
+            if (isLoadingProfile) return;
+            try
+            {
+                bool visualRefreshNeeded = false;
+                foreach (var t in allTweaks)
+                {
+                    bool wasActive = t.IsDetectedActiveInOs;
+                    int wasVar = t.DetectedVariationInOs;
+                    bool wasVerified = t.IsVerifiedInOs;
+                    bool wasRebootSat = t.RebootSatisfied;
+                    bool wasPendingReboot = t.PendingRebootAfterDisable;
+
+                    AutoResolveRebootAndReloadState(t);
+
+                    if (wasActive != t.IsDetectedActiveInOs || wasVar != t.DetectedVariationInOs ||
+                        wasVerified != t.IsVerifiedInOs || wasRebootSat != t.RebootSatisfied ||
+                        wasPendingReboot != t.PendingRebootAfterDisable)
+                    {
+                        visualRefreshNeeded = true;
+                    }
+                }
+
+                if (visualRefreshNeeded)
+                {
+                    foreach (var c in allCards) c.RefreshVisualState();
+                    UpdateActiveCountsAndNavBadges();
+                    UpdateRebootAndReloadBannerVisibility();
+                }
+            }
+            catch { }
         }
 
         #region Custom Named Profile Manager (Save, Load, Delete, Export, Import)
@@ -8170,7 +11900,7 @@ namespace ArgonLatencyStudio
             try
             {
                 List<string> lines = new List<string>();
-                lines.Add("PROFVER|38");
+                lines.Add("PROFVER|40");
                 lines.Add("BOOTSTAMP|" + currentBootStamp);
                 lines.Add("CPU|" + (int)selectedCpuProfile);
                 lines.Add("GPU|" + (int)selectedGpuProfile);
@@ -8186,8 +11916,9 @@ namespace ArgonLatencyStudio
                         lines.Add(keptLine);
                         continue;
                     }
-                    lines.Add(string.Format("TWEAK|{0}|{1}|{2}|{3}|{4}|{5}",
-                        t.Id, t.IsEnabled, t.SelectedVariationIndex, t.RebootSatisfied, t.NetReloadSatisfied, t.ModifiedBootStamp ?? currentBootStamp));
+                    lines.Add(string.Format("TWEAK|{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}",
+                        t.Id, t.IsEnabled, t.SelectedVariationIndex, t.RebootSatisfied, t.NetReloadSatisfied,
+                        t.ModifiedBootStamp ?? currentBootStamp, t.BootTimeActiveInOs, t.BootTimeVariationInOs));
                 }
 
                 StateVault.WriteAllLinesAtomic(userProfilePath, lines.ToArray());
@@ -8206,17 +11937,13 @@ namespace ArgonLatencyStudio
                 int verifiedCount = 0;
                 bool isVer37OrNewer = false;
                 bool isVer38OrNewer = false;
-                string profileSavedBootStamp = "";
                 string[] lines = File.ReadAllLines(userProfilePath, Encoding.UTF8);
                 foreach (string l in lines)
                 {
                     if (l == null) continue;
                     if (l.StartsWith("PROFVER|37")) isVer37OrNewer = true;
-                    if (l.StartsWith("PROFVER|38")) { isVer37OrNewer = true; isVer38OrNewer = true; }
-                    if (l.StartsWith("BOOTSTAMP|")) profileSavedBootStamp = l.Substring("BOOTSTAMP|".Length).Trim();
+                    if (l.StartsWith("PROFVER|38") || l.StartsWith("PROFVER|40")) { isVer37OrNewer = true; isVer38OrNewer = true; }
                 }
-
-                bool pcRebootedSinceSave = !isVer38OrNewer || (!string.IsNullOrEmpty(profileSavedBootStamp) && profileSavedBootStamp != currentBootStamp);
 
                 foreach (string line in lines)
                 {
@@ -8283,6 +12010,8 @@ namespace ArgonLatencyStudio
                             bool savedRebootSat = false;
                             bool savedNetSat = false;
                             string savedModBoot = "";
+                            bool savedBootActive = false;
+                            int savedBootVar = -1;
                             if (parts.Length >= 6)
                             {
                                 bool.TryParse(parts[4], out savedRebootSat);
@@ -8292,6 +12021,11 @@ namespace ArgonLatencyStudio
                             {
                                 savedModBoot = parts[6];
                             }
+                            if (parts.Length >= 9)
+                            {
+                                bool.TryParse(parts[7], out savedBootActive);
+                                int.TryParse(parts[8], out savedBootVar);
+                            }
 
                             TweakDefinition t = FindTweak(id);
                             if (t != null)
@@ -8300,12 +12034,18 @@ namespace ArgonLatencyStudio
                                 t.SelectedVariationIndex = safeIdx;
                                 t.PendingRebootAfterDisable = false;
 
+                                // Canlı OS durumunu doğrudan tara; dosyadaki eski/bayat boot değişkenleriyle ASLA ezme!
+                                VerifySingleTweakInLiveOs(t);
+                                if (t.IsDetectedActiveInOs)
+                                {
+                                    t.BootTimeActiveInOs = true;
+                                    t.BootTimeVariationInOs = t.DetectedVariationInOs;
+                                    t.BootTimeRawValue = t.VerifiedSystemValue;
+                                }
+
                                 if (enabled && (!t.RequiresAdmin || isAdmin))
                                 {
                                     t.IsEnabled = true;
-                                    // Check if the registry/OS setting was already written before this boot!
-                                    bool alreadyInOsBeforeApply = VerifySingleTweakInLiveOs(t);
-
                                     try
                                     {
                                         if (t.Variations[safeIdx].ApplyAction != null)
@@ -8315,45 +12055,31 @@ namespace ArgonLatencyStudio
                                     }
                                     catch { }
 
-                                    bool verifiedNow = VerifySingleTweakInLiveOs(t);
-                                    if (verifiedNow) verifiedCount++;
+                                    // Canlı OS ile doğrula: sistem zaten bu varyasyonda ise restart/reload gereksinimini hemen tatmin et
+                                    VerifySingleTweakInLiveOs(t);
+                                    if (t.IsDetectedActiveInOs && (t.DetectedVariationInOs < 0 || t.DetectedVariationInOs == safeIdx))
+                                    {
+                                        t.BootTimeActiveInOs = true;
+                                        t.BootTimeVariationInOs = safeIdx;
+                                        t.RebootSatisfied = true;
+                                        t.NetReloadSatisfied = true;
+                                    }
 
-                                    // Determine if Reboot or NetReload requirement is already satisfied!
-                                    bool bootChangedForThisTweak = (!string.IsNullOrEmpty(savedModBoot) && savedModBoot != currentBootStamp) || pcRebootedSinceSave;
-                                    if (t.NeedsReboot)
-                                    {
-                                        if (savedRebootSat || (bootChangedForThisTweak && (alreadyInOsBeforeApply || verifiedNow)))
-                                        {
-                                            t.RebootSatisfied = true;
-                                            t.ModifiedBootStamp = currentBootStamp;
-                                        }
-                                        else
-                                        {
-                                            t.RebootSatisfied = false;
-                                            t.ModifiedBootStamp = string.IsNullOrEmpty(savedModBoot) ? currentBootStamp : savedModBoot;
-                                        }
-                                    }
-                                    if (t.NeedsNetReload)
-                                    {
-                                        if (savedNetSat || (bootChangedForThisTweak && (alreadyInOsBeforeApply || verifiedNow)))
-                                            t.NetReloadSatisfied = true;
-                                        else
-                                            t.NetReloadSatisfied = false;
-                                    }
+                                    AutoResolveRebootAndReloadState(t);
+                                    if (t.IsVerifiedInOs) verifiedCount++;
                                 }
                                 else
                                 {
                                     if (enabled && t.RequiresAdmin && !isAdmin)
                                         preservedProfileTweakLines[t.Id] = line;
                                     t.IsEnabled = false;
-                                    t.RebootSatisfied = false;
-                                    t.NetReloadSatisfied = false;
                                     t.IsVerifiedInOs = false;
                                     t.VerifiedSystemValue = "";
                                     if (t.Id == "LAT_FILTERKEYS")
                                     {
                                         try { if (t.RevertAction != null) t.RevertAction(); } catch { }
                                     }
+                                    AutoResolveRebootAndReloadState(t);
                                 }
                             }
                         }
@@ -8456,20 +12182,27 @@ namespace ArgonLatencyStudio
 
             lblInspectorTitle.Text = "✅ TÜM AYARLAR İLK HALİNE DÖNDÜRÜLDÜ (Canlı OS Doğrulaması İle %100 Fabrika Durumu Teyit Edildi)";
             lblInspectorPath.Text = "StateVault: Tüm Kayıt Defteri, Netsh, Güç Planı, Fare/Klavye ve Süreç ayarları fabrika yedeğine döndürüldü ve canlı denetlendi.";
+            AppendConsoleLog("Fabrika Sıfırlama (StateVault Rollback): Tüm ayarlar ilk haline döndürüldü ve canlı OS ile teyit edildi.");
         }
 
         private void PromptAndRestartComputerNow()
         {
             SaveUserProfileState();
             int pendingReboot = 0;
+            List<string> pendingNames = new List<string>();
             foreach (var t in allTweaks)
             {
-                if ((t.IsEnabled && t.NeedsReboot && !t.RebootSatisfied) || (!t.IsEnabled && t.PendingRebootAfterDisable))
+                AutoResolveRebootAndReloadState(t);
+                if (t.IsRebootPending)
+                {
                     pendingReboot++;
+                    pendingNames.Add(t.Title);
+                }
             }
 
+            string tweakListText = pendingNames.Count > 0 ? ("\n\nBekleyen Ayarlar:\n• " + string.Join("\n• ", pendingNames.ToArray())) : "";
             string msg = pendingReboot > 0
-                ? string.Format("Açık olan tüm ayarlarınız ve profiliniz kaydedildi.\n\nRestart bekleyen {0} sistem ayarının Windows çekirdeğinde tam devreye girmesi için bilgisayarı şimdi yeniden başlatmak istiyor musunuz?\n\n(Bilgisayar yeniden açıldığında bu ayarlar otomatik olarak '✓ Doğrulandı (Restart Aktif)' durumuna geçecektir.)", pendingReboot)
+                ? string.Format("Açık olan tüm ayarlarınız ve profiliniz kaydedildi.\n\nWindows çekirdeğinde devreye girmek için yeniden başlatma bekleyen {0} sistem ayarı bulunuyor:{1}\n\nBilgisayarı şimdi yeniden başlatmak istiyor musunuz?\n\n(Bilgisayar yeniden açıldığında bu ayarlar otomatik olarak '✓ Doğrulandı' durumuna geçecektir.)", pendingReboot, tweakListText)
                 : "Açık olan tüm ayarlarınız kaydedildi.\n\nBilgisayarı şimdi yeniden başlatmak istiyor musunuz?";
 
             DialogResult dr = MessageBox.Show(
@@ -8652,8 +12385,26 @@ namespace ArgonLatencyStudio
                     {
                         double ms = curR / 10000.0;
                         ok = (ms <= 1.05 && timerLockActive);
-                        val = string.Format("{0:0.000} ms", ms);
-                        if (ok) detectedMod = (desiredTimerUnit == 10000 ? 1 : (desiredTimerUnit == 5040 ? 2 : 0));
+                        double reqMs = desiredTimerUnit / 10000.0;
+                        int reqHz = (int)Math.Round(10000000.0 / desiredTimerUnit);
+
+                        if (timerLockActive)
+                        {
+                            if (Math.Abs(ms - reqMs) < 0.003)
+                            {
+                                val = string.Format("{0:0.000} ms ({1} Hz)", reqMs, reqHz);
+                            }
+                            else
+                            {
+                                val = string.Format("{0:0.000} ms [OS: {1:0.000}]", reqMs, ms);
+                            }
+                            detectedMod = (desiredTimerUnit == 10000 ? 1 : (desiredTimerUnit == 5040 ? 2 : 0));
+                        }
+                        else
+                        {
+                            val = string.Format("{0:0.000} ms", ms);
+                            detectedMod = 0;
+                        }
                     }
                 }
                 else if (id == "LAT_QUANTUM")
@@ -8955,7 +12706,8 @@ namespace ArgonLatencyStudio
 
             foreach (var t in allTweaks)
             {
-                bool ok = VerifySingleTweakInLiveOs(t);
+                AutoResolveRebootAndReloadState(t);
+                bool ok = t.IsVerifiedInOs;
                 if (!t.IsEnabled)
                 {
                     t.IsVerifiedInOs = false;
@@ -8969,8 +12721,8 @@ namespace ArgonLatencyStudio
                 }
                 activeTotal++;
                 if (ok) verifiedTotal++;
-                if (t.NeedsReboot && !t.RebootSatisfied) rebootWaiting++;
-                if (t.NeedsNetReload && !t.NetReloadSatisfied) netReloadWaiting++;
+                if (t.IsRebootPending) rebootWaiting++;
+                if (t.IsNetReloadPending) netReloadWaiting++;
 
                 details.AppendLine(string.Format("{0} {1}  -->  [{2}]",
                     ok ? "✓" : "⚠️",
@@ -9379,28 +13131,57 @@ namespace ArgonLatencyStudio
                 else if (t.Category == "EXPERIMENTAL") expActive++;
             }
 
+            int pendingRebootCount = 0;
+            int pendingNetReloadCount = 0;
+            foreach (var t in allTweaks)
+            {
+                if (t.IsRebootPending) pendingRebootCount++;
+                else if (t.IsNetReloadPending) pendingNetReloadCount++;
+            }
+
+            if (lblLiveSystemStatusPill != null)
+            {
+                if (pendingRebootCount > 0)
+                {
+                    lblLiveSystemStatusPill.Text = string.Format(Loc.T("⚠️ {0} / {1} Aktif ({2} Restart Bekliyor)", "⚠️ {0} / {1} Active ({2} Restart Pending)"), totalActive, allTweaks.Count, pendingRebootCount);
+                    lblLiveSystemStatusPill.ForeColor = Color.FromArgb(251, 191, 36);
+                }
+                else if (pendingNetReloadCount > 0)
+                {
+                    lblLiveSystemStatusPill.Text = string.Format(Loc.T("⚡ {0} / {1} Aktif ({2} Ağ Yenileme)", "⚡ {0} / {1} Active ({2} Net Reload)"), totalActive, allTweaks.Count, pendingNetReloadCount);
+                    lblLiveSystemStatusPill.ForeColor = Color.FromArgb(56, 189, 248);
+                }
+                else
+                {
+                    lblLiveSystemStatusPill.Text = string.Format(Loc.T("● Sistem: {0} / {1} Ayar Aktif", "● System: {0} / {1} Tweaks Active"), totalActive, allTweaks.Count);
+                    lblLiveSystemStatusPill.ForeColor = totalActive > 0 ? Color.FromArgb(52, 211, 153) : Color.FromArgb(148, 163, 184);
+                }
+            }
+
             if (lblTopActiveCount != null)
             {
-                lblTopActiveCount.Text = string.Format("🛡️ Aktif: {0} / {1}", totalActive, allTweaks.Count);
+                lblTopActiveCount.Text = string.Format(Loc.T("Aktif: {0} / {1}", "Active: {0} / {1}"), totalActive, allTweaks.Count);
                 lblTopActiveCount.ForeColor = totalActive > 0 ? Color.FromArgb(52, 211, 153) : Color.FromArgb(168, 85, 247);
-                ReflowTelemetryHeaderBadges();
             }
 
             if (navButtons.Count >= 6)
             {
-                navButtons[0].Text = string.Format("🤖 Donanım ({0})", hwActive);
-                navButtons[1].Text = string.Format("🌐 Network ({0}/{1})", netActive, netTotal);
-                navButtons[2].Text = string.Format("⏱️ Latency ({0}/{1})", latActive, latTotal);
-                navButtons[3].Text = string.Format("🚀 FPS & GPU ({0}/{1})", fpsActive, fpsTotal);
-                navButtons[4].Text = string.Format("🛡️ WinUtil ({0}/{1})", wuActive, wuTotal);
-                navButtons[5].Text = string.Format("🧪 Deneysel ({0}/{1})", expActive, expTotal);
-
-                int navX = 10;
-                foreach (var btn in navButtons)
+                navButtons[0].Text = string.Format(Loc.T("Donanım ({0})", "Hardware ({0})"), hwActive);
+                navButtons[1].Text = string.Format(Loc.T("Ağ ({0}/{1})", "Network ({0}/{1})"), netActive, netTotal);
+                navButtons[2].Text = string.Format("Timer ({0}/{1})", latActive, latTotal);
+                navButtons[3].Text = string.Format(Loc.T("Grafik ({0}/{1})", "Graphics ({0}/{1})"), fpsActive, fpsTotal);
+                navButtons[4].Text = string.Format(Loc.T("Sistem ({0}/{1})", "System ({0}/{1})"), wuActive, wuTotal);
+                navButtons[5].Text = string.Format("Kernel ({0}/{1})", expActive, expTotal);
+                if (navButtons.Count >= 11)
                 {
-                    btn.Location = new Point(navX, 7);
-                    navX += btn.PreferredSize.Width + 3;
+                    navButtons[6].Text = Loc.T("İşlemler", "Processes");
+                    navButtons[7].Text = Loc.T("Otomasyon", "Automation");
+                    navButtons[8].Text = Loc.T("Tanı Test", "Diagnostics");
+                    navButtons[9].Text = Loc.T("Günlük", "Event Log");
+                    navButtons[10].Text = Loc.T("Ayarlar", "Settings");
                 }
+
+                LayoutNavBarButtons();
             }
         }
 
@@ -9415,7 +13196,7 @@ namespace ArgonLatencyStudio
                     Control home;
                     if (cardHomeContainers.TryGetValue(card, out home) && home != null && card.Parent != home)
                     {
-                        card.Width = Math.Max(780, home.ClientSize.Width - 36);
+                        card.Width = Math.Max(520, home.ClientSize.Width - 26);
                         home.Controls.Add(card);
                     }
                     card.Visible = true;
@@ -9433,13 +13214,14 @@ namespace ArgonLatencyStudio
             if (viewWinUtil != null) viewWinUtil.Visible = false;
             viewExperimental.Visible = false;
             viewProcesses.Visible = false;
+            if (viewAutomationQoL != null) viewAutomationQoL.Visible = false;
             viewBenchmark.Visible = false;
             viewSnapshotAudit.Visible = false;
             if (viewSettings != null) viewSettings.Visible = false;
             if (viewGlobalSearch != null) viewGlobalSearch.Visible = true;
 
             int matchCount = 0;
-            int targetW = flowGlobalSearchCards != null ? Math.Max(780, flowGlobalSearchCards.ClientSize.Width - 28) : 1140;
+            int targetW = flowGlobalSearchCards != null ? Math.Max(520, flowGlobalSearchCards.ClientSize.Width - 24) : 810;
 
             if (flowGlobalSearchCards != null) flowGlobalSearchCards.SuspendLayout();
             try
@@ -9492,7 +13274,7 @@ namespace ArgonLatencyStudio
 
             if (lblGlobalSearchHeader != null)
             {
-                lblGlobalSearchHeader.Text = string.Format("🔎 TÜM SEKMELERDE GENEL ARAMA SONUÇLARI ('{0}' için {1} / {2} ayar bulundu):",
+                lblGlobalSearchHeader.Text = string.Format("TÜM SEKMELERDE GENEL ARAMA SONUÇLARI ('{0}' için {1} / {2} ayar bulundu):",
                     query.Trim(), matchCount, allCards.Count);
             }
         }
@@ -10196,6 +13978,12 @@ namespace ArgonLatencyStudio
                 RunAutoGameWatchdogPass();
             }
 
+            // Otomatik canlı OS doğrulama & arka plan senkronizasyon pulsü (Her 10 saniyede bir sessizce kontrol eder)
+            if (tickCounter % 20 == 0)
+            {
+                AutoSyncLiveOsTruthInBackground();
+            }
+
             TweakDefinition memEngine = FindTweak("FPS_MEMORY_ENGINE");
             if (tickCounter % 60 == 0 && autoStandbyCleanerActive && memEngine != null && memEngine.IsEnabled)
             {
@@ -10205,6 +13993,9 @@ namespace ArgonLatencyStudio
                     ExecuteSmartRamAndStandbyPurge(true);
                 }
             }
+
+            // Otomasyon & QoL Periyodik Kontrol Motoru (Güç, Kripto/Rutin Alarmlar, Oyun Notları, RAM Eşiği)
+            ProcessQoLAutomationTick();
         }
 
         private void TriggerAsyncHardwareSensorPoll()
@@ -10269,14 +14060,62 @@ namespace ArgonLatencyStudio
 
         private void UpdateTelemetryBar()
         {
+            double curTimerMsVal = 15.625;
             try
             {
                 uint minR, maxR, curR;
                 if (NativeMethods.NtQueryTimerResolution(out minR, out maxR, out curR) == 0)
                 {
                     double ms = curR / 10000.0;
-                    lblTopTimer.Text = string.Format("⏱ Timer: {0:0.000} ms ({1:0} Hz)", ms, 1000.0 / ms);
-                    lblTopTimer.ForeColor = ms <= 1.05 ? Color.FromArgb(52, 211, 153) : Color.FromArgb(251, 191, 36);
+                    curTimerMsVal = ms;
+                    if (lblTopTimer != null)
+                    {
+                        if (timerLockActive)
+                        {
+                            double reqMs = desiredTimerUnit / 10000.0;
+                            int reqHz = (int)Math.Round(10000000.0 / desiredTimerUnit);
+                            if (Math.Abs(ms - reqMs) < 0.003)
+                                lblTopTimer.Text = string.Format("Timer: {0:0.000} ms ({1} Hz)", reqMs, reqHz);
+                            else
+                                lblTopTimer.Text = string.Format("Timer: {0:0.000} ms [OS: {1:0.000}]", reqMs, ms);
+                        }
+                        else
+                        {
+                            lblTopTimer.Text = string.Format("Timer: {0:0.000} ms ({1:0} Hz)", ms, 1000.0 / Math.Max(0.1, ms));
+                        }
+                        lblTopTimer.ForeColor = ms <= 1.05 ? Color.FromArgb(52, 211, 153) : Color.FromArgb(251, 191, 36);
+                    }
+                }
+            }
+            catch { }
+
+            try
+            {
+                int activeCount = 0;
+                foreach (var t in allTweaks) if (t.IsEnabled) activeCount++;
+                if (txtHwTimerActive != null)
+                {
+                    if (timerLockActive)
+                    {
+                        double reqMs = desiredTimerUnit / 10000.0;
+                        int reqHz = (int)Math.Round(10000000.0 / desiredTimerUnit);
+                        if (Math.Abs(curTimerMsVal - reqMs) < 0.003)
+                        {
+                            txtHwTimerActive.Text = string.Format("{0:0.000} ms ({1} Hz) | {2}: {3}/{4}",
+                                reqMs, reqHz, Loc.T("Aktif", "Active"), activeCount, allTweaks.Count);
+                        }
+                        else
+                        {
+                            txtHwTimerActive.Text = string.Format("{0:0.000} ms ({1} Hz) [OS: {2:0.000}] | {3}: {4}/{5}",
+                                reqMs, reqHz, curTimerMsVal, Loc.T("Aktif", "Active"), activeCount, allTweaks.Count);
+                        }
+                    }
+                    else
+                    {
+                        txtHwTimerActive.Text = string.Format("{0:0.000} ms ({1:0} Hz) | {2}: {3}/{4}",
+                            curTimerMsVal, 1000.0 / Math.Max(0.1, curTimerMsVal), Loc.T("Aktif", "Active"), activeCount, allTweaks.Count);
+                    }
+                    txtHwTimerActive.ForeColor = curTimerMsVal <= 1.05 ? Color.FromArgb(52, 211, 153) : Color.FromArgb(56, 189, 248);
                 }
             }
             catch { }
@@ -10288,7 +14127,32 @@ namespace ArgonLatencyStudio
                 {
                     double totalGb = mem.ullTotalPhys / (1024.0 * 1024.0 * 1024.0);
                     double availGb = mem.ullAvailPhys / (1024.0 * 1024.0 * 1024.0);
-                    lblTopRam.Text = string.Format("🧠 RAM: %{0} ({1:0.0}/{2:0.0} GB)", mem.dwMemoryLoad, totalGb - availGb, totalGb);
+                    string ramStr = string.Format("%{0} Kullanım ({1:0.0} / {2:0.0} GB)", mem.dwMemoryLoad, totalGb - availGb, totalGb);
+                    if (lblTopRam != null) lblTopRam.Text = "RAM: " + ramStr;
+                    if (txtHwRamUsage != null) txtHwRamUsage.Text = ramStr;
+                }
+            }
+            catch { }
+
+            try
+            {
+                if (tickCounter % 6 == 0)
+                {
+                    foreach (NetworkInterface ni in NetworkInterface.GetAllNetworkInterfaces())
+                    {
+                        if (ni.OperationalStatus == OperationalStatus.Up &&
+                            ni.NetworkInterfaceType != NetworkInterfaceType.Loopback &&
+                            ni.NetworkInterfaceType != NetworkInterfaceType.Tunnel)
+                        {
+                            IPv4InterfaceStatistics st = ni.GetIPv4Statistics();
+                            if (lblNetTrafficStats != null)
+                            {
+                                lblNetTrafficStats.Text = string.Format("Gönderilen: {0:0.0} MB | Alınan: {1:0.0} MB",
+                                    st.BytesSent / (1024.0 * 1024.0), st.BytesReceived / (1024.0 * 1024.0));
+                            }
+                            break;
+                        }
+                    }
                 }
             }
             catch { }
@@ -10297,21 +14161,30 @@ namespace ArgonLatencyStudio
             {
                 if (sensorEngine != null && appSettings != null && appSettings.EnableTelemetrySensors)
                 {
-                    if (lblTopCpuSensor != null && appSettings.ShowCpuSensor)
+                    if (appSettings.ShowCpuSensor)
                     {
-                        string tempStr = sensorEngine.CpuPackageTemp >= 0 ? string.Format("{0:0}°C", sensorEngine.CpuPackageTemp) : (isAdmin ? "--°C" : "Yönetici Gerekli");
-                        string loadStr = sensorEngine.CpuTotalLoad >= 0 ? string.Format("%{0:0}", sensorEngine.CpuTotalLoad) : "%--";
-                        lblTopCpuSensor.Text = string.Format("🔥 CPU: {0} | Yük {1}", tempStr, loadStr);
-                        lblTopCpuSensor.ForeColor = sensorEngine.CpuPackageTemp >= 80 ? Color.FromArgb(248, 113, 113) : Color.FromArgb(251, 146, 60);
+                        string tempStr = sensorEngine.CpuPackageTemp >= 0 ? string.Format("{0:0.0} °C", sensorEngine.CpuPackageTemp) : (isAdmin ? "Sensör Bekleniyor" : "Yönetici Gerekli");
+                        string loadStr = sensorEngine.CpuTotalLoad >= 0 ? string.Format("%{0:0.0}", sensorEngine.CpuTotalLoad) : "%--";
+                        string cpuLine = string.Format("Sıcaklık: {0} | Yük: {1}", tempStr, loadStr);
+                        if (lblTopCpuSensor != null) lblTopCpuSensor.Text = cpuLine;
+                        if (txtHwCpuTelemetry != null)
+                        {
+                            txtHwCpuTelemetry.Text = cpuLine;
+                            txtHwCpuTelemetry.ForeColor = sensorEngine.CpuPackageTemp >= 82 ? Color.FromArgb(248, 113, 113) : Color.FromArgb(251, 146, 60);
+                        }
+                    }
+                    else if (txtHwCpuTelemetry != null)
+                    {
+                        txtHwCpuTelemetry.Text = "Ayarlardan Kapatıldı";
                     }
 
-                    if (lblTopGpuSensor != null && (appSettings.ShowGpuCoreSensor || appSettings.ShowGpuMemHotspotSensor))
+                    if (appSettings.ShowGpuCoreSensor || appSettings.ShowGpuMemHotspotSensor)
                     {
                         List<string> gpuParts = new List<string>();
                         if (appSettings.ShowGpuCoreSensor)
                         {
                             string cTemp = sensorEngine.GpuCoreTemp >= 0 ? string.Format("Core {0:0}°C", sensorEngine.GpuCoreTemp) : "Core --°C";
-                            string cLoad = sensorEngine.GpuCoreLoad >= 0 ? string.Format("Yük %{0:0}", sensorEngine.GpuCoreLoad) : "";
+                            string cLoad = sensorEngine.GpuCoreLoad >= 0 ? string.Format("%{0:0}", sensorEngine.GpuCoreLoad) : "";
                             gpuParts.Add(string.IsNullOrEmpty(cLoad) ? cTemp : (cTemp + " (" + cLoad + ")"));
                         }
                         if (appSettings.ShowGpuMemHotspotSensor)
@@ -10321,8 +14194,21 @@ namespace ArgonLatencyStudio
                             if (sensorEngine.GpuHotspotTemp >= 0)
                                 gpuParts.Add(string.Format("Hot {0:0}°C", sensorEngine.GpuHotspotTemp));
                         }
-                        lblTopGpuSensor.Text = "🎮 GPU: " + (gpuParts.Count > 0 ? string.Join(" | ", gpuParts.ToArray()) : "Okunuyor...");
-                        lblTopGpuSensor.ForeColor = sensorEngine.GpuHotspotTemp >= 90 ? Color.FromArgb(248, 113, 113) : Color.FromArgb(52, 211, 153);
+                        if (sensorEngine.GpuMemUsedMb > 0)
+                        {
+                            gpuParts.Add(string.Format("VRAM {0:0}MB", sensorEngine.GpuMemUsedMb));
+                        }
+                        string gpuLine = gpuParts.Count > 0 ? string.Join(" | ", gpuParts.ToArray()) : "Okunuyor...";
+                        if (lblTopGpuSensor != null) lblTopGpuSensor.Text = gpuLine;
+                        if (txtHwGpuTelemetry != null)
+                        {
+                            txtHwGpuTelemetry.Text = gpuLine;
+                            txtHwGpuTelemetry.ForeColor = sensorEngine.GpuHotspotTemp >= 90 ? Color.FromArgb(248, 113, 113) : Color.FromArgb(52, 211, 153);
+                        }
+                    }
+                    else if (txtHwGpuTelemetry != null)
+                    {
+                        txtHwGpuTelemetry.Text = "Ayarlardan Kapatıldı";
                     }
 
                     if (lblSettingsSensorDiag != null)
@@ -10343,7 +14229,11 @@ namespace ArgonLatencyStudio
                             Math.Max(0, sensorEngine.GpuMemTotalMb));
                     }
                 }
-                ReflowTelemetryHeaderBadges();
+                else
+                {
+                    if (txtHwCpuTelemetry != null) txtHwCpuTelemetry.Text = "Sensör Motoru Devre Dışı";
+                    if (txtHwGpuTelemetry != null) txtHwGpuTelemetry.Text = "Sensör Motoru Devre Dışı";
+                }
             }
             catch { }
         }
@@ -10356,14 +14246,25 @@ namespace ArgonLatencyStudio
                 {
                     using (Ping p = new Ping())
                     {
-                        var r = p.Send("1.1.1.1", 1000);
-                        long rtt = (r != null && r.Status == IPStatus.Success) ? r.RoundtripTime : -1;
+                        var r1 = p.Send("1.1.1.1", 1000);
+                        long rtt1 = (r1 != null && r1.Status == IPStatus.Success) ? r1.RoundtripTime : -1;
+                        var r2 = p.Send("8.8.8.8", 1000);
+                        long rtt2 = (r2 != null && r2.Status == IPStatus.Success) ? r2.RoundtripTime : -1;
+
                         this.BeginInvoke((MethodInvoker)delegate
                         {
-                            if (rtt >= 0)
-                                lblTopPing.Text = string.Format("🌐 Ping (1.1.1.1): {0} ms", rtt);
+                            if (rtt1 >= 0 || rtt2 >= 0)
+                            {
+                                string s1 = rtt1 >= 0 ? ("1.1.1.1: " + rtt1 + " ms") : "1.1.1.1: --";
+                                string s2 = rtt2 >= 0 ? ("8.8.8.8: " + rtt2 + " ms") : "8.8.8.8: --";
+                                if (lblTopPing != null) lblTopPing.Text = s1;
+                                if (txtNetPingLive != null) txtNetPingLive.Text = s1 + "  |  " + s2;
+                            }
                             else
-                                lblTopPing.Text = "🌐 Ping: Ölçülemedi";
+                            {
+                                if (lblTopPing != null) lblTopPing.Text = "Ping: Ölçülemedi";
+                                if (txtNetPingLive != null) txtNetPingLive.Text = "ICMP Yanıtı Yok";
+                            }
                         });
                     }
                 }

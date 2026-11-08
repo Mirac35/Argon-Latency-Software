@@ -11,15 +11,26 @@ if not exist %CSC% (
 
 if not exist "bin\Release" mkdir "bin\Release"
 if exist "lib\*.dll" (
-    copy /Y "lib\*.dll" "bin\Release\" >nul
+    copy /Y "lib\*.dll" "bin\Release\" >nul 2>&1
 )
 if exist "app.ico" (
-    copy /Y "app.ico" "bin\Release\" >nul
+    copy /Y "app.ico" "bin\Release\" >nul 2>&1
+)
+
+set OUT_EXE=bin\Release\Argon_UltraLowLatency_v4.0.exe
+
+:: If the target EXE is locked by a running instance, rename it aside so CSC can write a fresh binary
+if exist "%OUT_EXE%.old" del /f /q "%OUT_EXE%.old" >nul 2>&1
+if exist "%OUT_EXE%" (
+    del /f /q "%OUT_EXE%" >nul 2>&1
+    if exist "%OUT_EXE%" (
+        move /y "%OUT_EXE%" "%OUT_EXE%.old" >nul 2>&1
+    )
 )
 
 echo.
-echo Compiling src\ArgonLatencyStudio.cs to bin\Release\ArgonLatencyStudio.exe...
-%CSC% /target:winexe /optimize+ /platform:x64 /win32icon:"app.ico" /r:"lib\LibreHardwareMonitorLib.dll" /out:"bin\Release\ArgonLatencyStudio.exe" "src\ArgonLatencyStudio.cs"
+echo Compiling src\ArgonLatencyStudio.cs to %OUT_EXE%...
+%CSC% /target:winexe /optimize+ /platform:x64 /win32icon:"app.ico" /r:"lib\LibreHardwareMonitorLib.dll" /out:"%OUT_EXE%" "src\ArgonLatencyStudio.cs"
 
 if %ERRORLEVEL% NEQ 0 (
     echo.
@@ -27,11 +38,7 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b %ERRORLEVEL%
 )
 
-copy /Y "bin\Release\ArgonLatencyStudio.exe" "bin\Release\Argon_UltraLowLatency_v4.0.exe" >nul 2>&1
-copy /Y "bin\Release\ArgonLatencyStudio.exe" "bin\Release\Argon_UltraLowLatency_v3.8.exe" >nul 2>&1
-
 echo.
 echo [SUCCESS] Build completed with 0 errors!
-echo Executable: %~dp0bin\Release\ArgonLatencyStudio.exe
-echo Executable: %~dp0bin\Release\Argon_UltraLowLatency_v4.0.exe
+echo Executable: %~dp0%OUT_EXE%
 endlocal

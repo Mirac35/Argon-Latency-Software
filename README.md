@@ -1,121 +1,92 @@
-# ⚡ Argon Düşük Gecikme & TCP Optimizer Studio (v4.0 - 2026 Edition)
+# Argon Latency Studio v4.0
 
-[![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%20Windows%2011-0078D6?logo=windows)](https://microsoft.com)
-[![Dil](https://img.shields.io/badge/Dil-C%23%205.0%20%2F%20.NET%204.0+-239120?logo=c-sharp)](https://docs.microsoft.com/dotnet/csharp/)
-[![Canlı-OS-Doğrulama](https://img.shields.io/badge/Do%C4%9Frulama-Ger%C3%A7ek%20Durum%20(Live%20OS%20Truth)-10B981)](#-1-ger%C3%A7ek-durumdan-t%C3%BCretilen-alg%C4%B1lama-motoru-live-os-truth)
-[![Güvenlik](https://img.shields.io/badge/G%C3%BCvenlik-S%C4%B1f%C4%B1r%20Debloat%20%2F%20Defender%20Korumal%C4%B1-blue)](#-g%C3%BCvenlik-ve-sistem-b%C3%BCt%C3%BCnl%C3%BC%C4%9F%C3%BC-garantisi)
-[![Lisans: MIT](https://img.shields.io/badge/Lisans-MIT-yellow.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%20Windows%2011%20x64-0078D6?logo=windows)](https://microsoft.com)
+[![Runtime](https://img.shields.io/badge/Runtime-.NET%20Framework%204.8%20%7C%20C%23-239120?logo=c-sharp)](https://docs.microsoft.com/dotnet/csharp/)
+[![Doğrulama](https://img.shields.io/badge/Do%C4%9Frulama-Live%20OS%20Truth%20%26%20StateVault-10B981)](#-mimari-ve-temel-yetenekler)
+[![Dil Desteği](https://img.shields.io/badge/Dil-T%C3%BCrk%C3%A7e%20%7C%20English-blue)](#-aray%C3%BCz-ve-kullan%C4%B1c%C4%B1-deneyimi)
+[![Lisans](https://img.shields.io/badge/Lisans-MIT-yellow.svg)](LICENSE)
 
-**Argon Latency Studio v4.0**, rekabetçi espor oyunları (*Path of Exile 2, CS2, Valorant, Apex Legends, Fortnite, League of Legends*) ve düşük gecikmeli P2P / WebRTC ağ protokolleri (*HaxBall* vb.) için 2026 standartlarında baştan aşağı yenilenmiş, **canlı işletim sistemi algılamalı (Live OS Truth)**, **LibreHardwareMonitor telemetrili** ve **kademeli donanım duyarlı** sistem/ağ optimizasyon stüdyosudur.
+**Argon Latency Studio**, Windows işletim sistemlerinde gecikme hassasiyeti yüksek rekabetçi oyunlar ve düşük gecikmeli ağ senaryoları için geliştirilmiş açık kaynaklı bir performans, telemetri ve sistem optimizasyon stüdyosudur.
 
-PoE 2 ve CS2 gibi yoğun işlemci ve girdi hassasiyeti gerektiren modern oyunlarda yapılan testlerde **%3 - %5 net ortalama FPS artışı** ve belirgin **%1 / %0.1 Low kare süresi (frame-time) kararlılığı** sağlar.
+Uygulama; arka planı belirsiz toplu kayıt defteri betikleri yerine, her bir sistem ayarını özgün Windows API'leri üzerinden denetleyen, donanım mimarisine duyarlı çalışan ve **StateVault** mekanizmasıyla işlemsel olarak geri alınabilir kılan doğrulanabilir bir altyapı sunar.
 
----
-
-## 🌟 2026 Sürümüyle Gelen Yenilikler (v4.0)
-
-### 1. 🔍 Gerçek Durumdan Türetilen Algılama Motoru (Live OS Truth)
-Eski sürümlerdeki kayıtlı bayraklara dayalı sistem tamamen kaldırıldı. Artık arayüzdeki hiçbir ayar soyut bayraklara güvenmez:
-* **Canlı OS Sorgulaması:** Windows Kayıt Defteri (Registry), Güç Planı (`powrprof.dll`), Win32 SPI (`user32.dll`) ve Çekirdek Zamanlayıcısı (`ntdll.dll`) anlık olarak taranır.
-* **Sıfırlama Sonrası Sıfır Hata:** "Makine Varsayılanlarına Döndür" (Reset) yapıldığında veya dışarıdan bir ayar değiştirildiğinde, gerçek sistem durumu anında tespit edilir ve arayüzle senkronize olur; **görsel bug'lar (visual bugs) tamamen engellenir**.
-* **Tek Tıkla Gerçek Durumu Eşitleme:** Üst bardaki `🔄 Gerçek Durumu Algıla` butonuyla, sistemde halihazırda aktif olan tüm ayarlar tek tıkla arayüz anahtarlarına yansıtılır.
-
-### 2. 🌡️ LibreHardwareMonitor Canlı Donanım Telemetrisi
-Sisteminizi zorlamadan, arka planda sıfır gecikmeyle donanım sağlığını takip eden entegre telemetri motoru:
-* **İşlemci (CPU):** Canlı Sıcaklık (`Core Tctl/Tdie`) ve Toplam Yük (`%`).
-* **Ekran Kartı (GPU):** **Core Sıcaklığı**, **Memory (VRAM) Sıcaklığı**, **Hotspot Sıcaklığı**, **GPU Çekirdek Yükü (`%`)** ve **VRAM Kullanımı (MB)**.
-* **Özelleştirilebilir:** İstenilen sensör `⚙️ Ayarlar` sekmesinden kapatılabilir veya yoklama sıklığı (500ms / 1s / 2s) ayarlanabilir.
-
-### 3. 📐 Sabit, Kompakt ve Profesyonel Arayüz Düzeni
-* Varsayılan olarak **1240x880 sabit geometri** (`FormBorderStyle.FixedSingle`, `MaximizeBox = false`) ile çalışır. Elementlerin veya kartların pencere boyutu nedeniyle kayması, üst üste binmesi kesinlikle engellenmiştir.
-* Esnek pencere tercih eden kullanıcılar için `⚙️ Ayarlar` üzerinden boyutlandırılabilir mod açılıp kapatılabilir.
-
-### 4. 🔎 Tüm Sekmelerde Gerçek Genel Arama (Global Search)
-* Hangi sekmede olursanız olun arama kutusuna yazmaya başladığınız anda **Donanım, Network, Latency, FPS, WinUtil ve Deneysel** dahil tüm sekmelerdeki 45 ayar aynı anda taranır.
-* Başlık, açıklama, teknik neden, kayıt defteri konumu ve alt mod isimleri tek bir birleşik sonuç ekranında toplanır; arama temizlendiğinde tüm kartlar kendi sekmelerine döner.
-
-### 5. 💾 İsimlendirilebilir Özel Profil Yönetimi (Named Profiles)
-* Hazır espor profillerinin yanı sıra kendi açık ayarlarınızı istediğiniz isimle (`.argon` formatında) kaydedebilirsiniz.
-* Üst bardaki **💾 Profil** açılır menüsünden tek tıkla profiller arasında geçiş yapabilir, profilleri silebilir veya başka bilgisayarlara dışa/içe aktarabilirsiniz.
-
-### 6. 🛡️ ChrisTitusTech/winutil Güvenli Mimari Seçkisi & Kritik Onay Sistemi
-* [ChrisTitusTech/winutil](https://github.com/ChrisTitusTech/winutil) projesinden seçilen 7 adet güvenli, yüksek etkili mimari ayar:
-  * `WU_MPO_CONTROL`: DWM Multiplane Overlay (MPO) Titreme & Stutter Kalkanı
-  * `WU_IPV4_TEREDO`: IPv4 Önceliklendirme & Teredo Gecikme Kalkanı
-  * `WU_DELIVERY_OPT`: Windows Update P2P Arka Plan Yükleme Kalkanı
-  * `WU_HIBERNATION`: Hazırda Bekletme (`hiberfil.sys`) & Hızlı Başlatma Kontrolü
-  * `WU_WPBT_COMPANION`: BIOS WPBT Enjeksiyon Kalkanı & Ağ Üzerinden Cihaz Meta Verisi Engelleme
-  * `WU_UX_PRO_TOOLS`: Görev Çubuğundan "Görevi Sonlandır" & Yapışkan Tuş Kalkanı
-  * `WU_GAMEMODE_STORAGE`: Otomatik Oyun Modu & Disk Akıllı Depolama Tarama Kalkanı
-* **Güvenlik Politikası:** Kesinlikle hiçbir debloating yapılmaz; Windows Defender, güvenlik duvarı veya kritik sistem bileşenleri asla kapatılmaz.
-* **Kritik Onay & Geri Yükleme:** Kritik ayarlar uygulanmadan önce teknik onay penceresi açılır ve tek tıkla **Windows Sistem Geri Yükleme Noktası** (`System Restore Point`) oluşturulabilir.
+> **Gözlemlenen Performans:** Test ortamlarında (ör. *Path of Exile*, *Counter-Strike 2*) termal değerler korunarak %3 – %5 aralığında ortalama FPS iyileşmesi ve %1 / %0.1 Low kare süresi (frame-time) tutarlılığı raporlanmıştır. Bu değerler referans niteliğinde olup donanım kombinasyonuna ve işletim sistemi sürümüne göre farklılık gösterebilir.
 
 ---
 
-## 🏛️ Argon Modül Haritası (10 Standart Sekme)
+## 🔬 Mimari ve Temel Yetenekler
 
-| Sekme | İkon | Modül Sayısı | Açıklama |
-| :--- | :---: | :---: | :--- |
-| **Donanım Matrisi** | 🤖 | 5 | AMD Ryzen/X3D, Intel Core/Hibrit P+E, NVIDIA GeForce, AMD Radeon ve Intel Arc mimari optimizasyonları |
-| **Network & TCP** | 🌐 | 12 | Çift katmanlı Nagle iptali, Winsock AFD Fast-Path, RTO 300ms, TCP 1323, NIC IntMod=0, DSCP QoS |
-| **Latency & Kernel** | ⏱️ | 9 | 0.500ms (2000Hz) Kernel Timer kilidi, Win32 Quantum, C-States, 1:1 Raw Mouse, DataQueueSize, Sessiz FilterKeys |
-| **FPS & GPU** | 🚀 | 9 | EcoQoS Arka Plan Kafesi, audiodg.exe Çekirdek 0 İzolasyonu, FSO & DXGI Independent Flip, HAGS, Canlı Servis Askıya Alma |
-| **WinUtil & Kritik** | 🛡️ | 7 | MPO kontrolü, IPv4 önceliği, P2P yükleme engelleme, WPBT kalkanı, Hibernation ve Oyun Modu kilitleri |
-| **Deneysel Motor** | 🧪 | 8 | SerializeTimer, Sentetik Mikro-Sinyal (Anti-C1E), SMT İzolasyonu, TCP Cubic/BBR, SvcHost Split |
-| **Süreç & Çekirdek** | 🎯 | - | Çalışan oyun ve uygulamalara canlı CPU önceliği (High Priority), Çekirdek Maskeleme (Affinity) ve EcoQoS kalkanı |
-| **Benchmark & Test** | 📊 | - | 25 iterasyonlu Kernel Sleep(1) Jitter Testi, Cloudflare/Google Çift Ping Analizi, 8000Hz Canlı Fare Polling Testi |
-| **Yedek & Canlı OS** | 🔍 | - | StateVault tam geri yükleme günlüğü ve her ayarın açılış öncesi/sonrası gerçek Windows değerleri tablosu |
-| **Program Ayarları** | ⚙️ | - | Telemetri sensör anahtarları, sabit pencere kilidi, zengin tooltip yönetimi, özel profil kaydetme ve içe/dışa aktarma |
+### 1. Gerçek Sistem Durumu Doğrulaması (Live OS Truth) & StateVault
+* **Okuma ve Doğrulama:** Arayüz soyut durum bayraklarına değil; Windows Kayıt Defteri, Güç Politikası (`powrprof.dll`), Win32 SPI parametreleri ve NT Çekirdek API'leri üzerinden canlı okunan değerlere dayanır.
+* **Deterministik Geri Alma:** İlk çalıştırmada işletim sisteminin fabrika parametreleri yakalanır (`StateVault`). "Fabrika Ayarlarına Dön" işlemiyle tüm parametreler doğrulanarak orijinal durumuna geri döndürülür.
 
----
+### 2. NT Çekirdek Zamanlayıcısı (Kernel Timer Resolution Engine)
+* **Yüksek Çözünürlüklü Modlar:** 0.500 ms (Ultra Düşük Gecikme), 0.504 ms (AMD Ryzen P-State senkronu) ve 1.000 ms (Fare / HID senkron modu) seçenekleri.
+* **Çoklu Süreç İzolasyonu:** Harici bir sürecin işletim sistemi genelinde daha düşük çözünürlük talep ettiği senaryolar tespit edilir; uygulanan hedef değer ile aktif işletim sistemi minimumu bağımsız olarak raporlanır.
 
-## 📁 Proje Dizin Yapısı
+### 3. Donanım Duyarlı Matris & LibreHardwareMonitor Telemetrisi
+* **Mimariler:** AMD Ryzen / X3D (EPP & PBO dengesi), Intel Hibrit P+E (performans çekirdeği optimizasyonu), AMD Radeon (ULPS ve derin uyku denetimi) ve NVIDIA GeForce profil desteği.
+* **Sensör İzleme:** Entegre `LibreHardwareMonitorLib` ile CPU çekirdek sıcaklığı, GPU çekirdek/hotspot sıcaklıkları, GPU yükü ve bellek (VRAM) kullanımının gerçek zamanlı takibi.
 
-```
-Argon-Latency-Software/
-├── .gitignore               # Visual Studio, C# ve kullanıcı profil hariç tutma kuralları
-├── LICENSE                  # MIT Açık Kaynak Lisansı
-├── README.md                # Kapsamlı Dokümantasyon & Kullanıcı Kılavuzu
-├── app.manifest             # Windows 10/11 Yüksek DPI ve Yönetici Uyumluluk Dosyası
-├── ArgonLatencyStudio.csproj# MSBuild C# Proje Dosyası
-├── ArgonLatencyStudio.sln   # Visual Studio Çözüm Dosyası
-├── build.bat                # Hızlı yerleşik derleyici betiği (csc.exe)
-├── lib/                     # LibreHardwareMonitorLib ve donanım kütüphaneleri
-│   ├── LibreHardwareMonitorLib.dll
-│   ├── HidSharp.dll
-│   ├── BlackSharp.Core.dll
-│   ├── DiskInfoToolkit.dll
-│   ├── RAMSPDToolkit-NDD.dll
-│   └── System.*.dll
-└── src/
-    └── ArgonLatencyStudio.cs # Tam teşekküllü, sıfır visual-bug C# kaynak kodu (~10.300 satır)
-```
+### 4. Ağ ve TCP/IP Yığın Yönetimi
+* Nagle algoritması denetimi (TCP_NODELAY), Winsock AFD Fast-Path, RTO optimizasyonu, DSCP/QoS etiketlemesi ve ağ bağdaştırıcısı kesme dengelemesi (Interrupt Moderation).
+* Canlı ağ trafiği, DNS önbellek yönetimi ve çift yönlü ICMP/RTT ölçümü.
+
+### 5. Otomasyon & Yaşam Kalitesi (QoL)
+* **Akıllı Güç Zamanlayıcısı:** Geri sayım veya belirli saatte kapatma, yeniden başlatma, uyku veya oturum kilitleme. Aktif ağ indirmeleri algılandığında işlemi otomatik erteleme koruması.
+* **Periyodik Kripto & Rutin Alarmları:** 4 saatlik mum kapanışları, günlük/haftalık kapanışlar veya özel periyotlar için sesli (WAV/MP3) ve masaüstü bildirimleri.
+* **Oyun İçi Not Kalkanı:** Belirlenen oyun süreçleri (`.exe`) başlatıldığında sessiz masaüstü bilgi kartları sunma.
+* **Bellek & Standby List Otomasyonu:** Yapılandırılabilir eşik değerleri (%10, %15, %20 veya serbest değer) üzerinden otomatik arka plan bellek optimizasyonu.
+
+### 6. Arayüz ve Çoklu Dil Desteği
+* Dinamik Türkçe ve İngilizce dil desteği (üst çubuktan veya ayarlardan anlık geçiş).
+* Arayüz taşmalarını önleyen sabit geometri seçenekleri (Kompakt 1280x820, Standart 1380x890, Geniş 1560x960).
+* Başlık, açıklama, teknik gerekçe ve kayıt anahtarlarını kapsayan birleşik genel arama (Global Search).
+* Headless test ve otomatik UI doğrulama için `--render-ui` komut satırı desteği.
 
 ---
 
-## 🔨 Derleme & Kaynaktan Çalıştırma
+## 📋 Modül Yapısı (11 Sekme)
 
-### Yöntem 1: Tek Tıkla Derleme (Önerilen)
-Harici bir SDK veya Visual Studio kurulumuna ihtiyaç duymadan, Windows ile gelen yerleşik derleyici ile derlemek için:
+| Sekme | Kapsam ve Açıklama |
+| :--- | :--- |
+| **Donanım (Hardware)** | AMD CPU, Intel CPU, AMD GPU ve NVIDIA GPU mimari optimizasyon matrisi. |
+| **Ağ (Network)** | TCPACKFrequency, TCPNoDelay, NetAdapter offload ayarları ve Winsock yapılandırması. |
+| **Timer** | NT Timer resolution, Win32 Quantum, C-States, çekirdek park etme ve HID kuyruk boyutu. |
+| **Grafik (Graphics)** | DWM Multiplane Overlay (MPO), FSO, DXGI flip modeli ve EcoQoS yapılandırması. |
+| **Sistem (System)** | Güvenli ChrisTitusTech/winutil türevi sistem ayarları, hazırda bekletme ve IPv4 önceliklendirmesi. |
+| **Kernel** | Sentetik darbe thread'i (Anti-C1E), SMT mantıksal çekirdek izolasyonu ve TCP congestion sağlayıcıları. |
+| **İşlemler (Processes)** | Çalışan süreçlerin CPU önceliği, çekirdek ataması (Affinity) ve bellek izlemesi. |
+| **Otomasyon (Automation)** | Güç zamanlayıcısı, periyodik kripto/rutin alarmları, oyun notları ve bellek otomasyonu. |
+| **Tanı Test (Diagnostics)** | 25 iterasyonlu NT Sleep kararlılık analizi, çift hedefli Ping RTT testi ve HID yoklama ölçümü. |
+| **Günlük (Event Log)** | İşlem günlüğü, oturum bildirimleri ve StateVault durum denetim kayıtları. |
+| **Ayarlar (Settings)** | Sensör yoklama sıklığı, pencere geometrisi, özel profil yönetimi (`.argon`) ve dil seçimi. |
+
+---
+
+## 🛠️ Derleme ve Çalıştırma
+
+Proje, harici bir paket yöneticisi gerektirmeksizin Windows üzerinde standart Microsoft .NET Framework derleyicisi ile derlenebilir:
+
 ```cmd
 build.bat
 ```
-Betik, `lib/` klasöründeki bağımlılıkları otomatik kopyalar ve doğrudan `bin\Release\ArgonLatencyStudio.exe` dosyasını üretir.
 
-### Yöntem 2: Visual Studio (2019 / 2022)
-1. `ArgonLatencyStudio.sln` çözüm dosyasını açın.
-2. Üst araç çubuğundan **Release | x64** yapılandırmasını seçin.
-3. `Ctrl + Shift + B` tuşlarına basarak derleyin.
+Derleme işlemi sonrasında çalıştırılabilir dosya doğrudan üretilir:
+`bin\Release\Argon_UltraLowLatency_v4.0.exe`
+
+Visual Studio kullanıcıları `ArgonLatencyStudio.sln` çözümünü açarak **Release | x64** hedefiyle derleyebilir.
 
 ---
 
-## ⚠️ Güvenlik ve Sistem Bütünlüğü Garantisi
+## 🛡️ Güvenlik ve Sistem Bütünlüğü
 
-* **Hız Aşırtma / Voltaj Riski Yok:** Program donanım voltajlarını veya saat hızlarını değiştirmez. Yalnızca resmi Microsoft Windows çekirdek API'leri ve sürücü standartları üzerinden çalışır.
-* **Sıfır Debloat & Sıfır Şüpheli Kod:** Windows Defender, SmartScreen veya güvenlik duvarı gibi koruma katmanlarına asla dokunulmaz.
-* **İşlemsel StateVault ile %100 Geri Alınabilirlik:** İlk açılışta sisteminizin fabrika değerleri öğrenilir. Üst bardaki **"Makine Varsayılanlarına Döndür"** butonuna basıldığında tüm ayarlar canlı OS seviyesinde denetlenerek %100 orijinal haline döndürülür.
+* **Donanım Koruması:** Donanım saat frekansları veya voltaj parametreleri değiştirilmez.
+* **Güvenlik Katmanlarına Müdahale Edilmez:** Windows Defender, SmartScreen veya güvenlik duvarı gibi kritik sistem servisleri devre dışı bırakılmaz.
+* **Tam Geri Alınabilirlik:** Yapılan her değişiklik `StateVault` günlüğünde kayıt altına alınır ve istenildiği anda fabrika değerlerine döndürülebilir.
 
 ---
 
 ## 📄 Lisans
-Bu proje [MIT Lisansı](LICENSE) kapsamında açık kaynak olarak lisanslanmıştır.
+
+Bu proje [MIT Lisansı](LICENSE) kapsamında sunulmaktadır.
