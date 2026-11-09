@@ -652,6 +652,42 @@ namespace ArgonLatencyStudio
                 return !NetReloadSatisfied;
             }
         }
+
+        // Customizable Machine Variables & Safety Lock Architecture
+        public CustomParamConfig CustomParam = null;
+        public bool HasCustomParam
+        {
+            get { return CustomParam != null; }
+        }
+    }
+
+    public class CustomParamConfig
+    {
+        public string ParameterName;
+        public string DisplayLabel;
+        public int MinValue;
+        public int MaxValue;
+        public int DefaultValue;
+        public int CurrentCustomValue;
+        public string Unit;
+        public string TechnicalDescription;
+        public string SafetyWarningTitle;
+        public string SafetyWarningExplanation;
+        public string RegeditTargetPath;
+        public string GoogleSearchQuery;
+        public int[] PresetQuickChips;
+        public string[] PresetChipLabels;
+        public Func<int> ReadCurrentValueFunc;
+        public Action<int> ApplyCustomAction;
+
+        public CustomParamConfig()
+        {
+            CurrentCustomValue = 0;
+            MinValue = 0;
+            MaxValue = 1000;
+            DefaultValue = 100;
+            Unit = "";
+        }
     }
 
     public static class Loc
@@ -2263,6 +2299,7 @@ namespace ArgonLatencyStudio
         private ComboBox cmbVariations;
         private Label lblLiveStateBadge;
         private Button btnInfoInspect;
+        private Button btnGearConfig;
         private bool syncingRowControls = false;
         private bool isMouseHovered = false;
 
@@ -2383,6 +2420,14 @@ namespace ArgonLatencyStudio
             {
                 if (syncingRowControls || cmbVariations.SelectedIndex < 0) return;
                 int idx = cmbVariations.SelectedIndex;
+                if (Tweak.HasCustomParam && idx == Tweak.Variations.Count - 1)
+                {
+                    if (Tweak.CustomParam.CurrentCustomValue == 0)
+                    {
+                        ShowCustomParameterModal();
+                        return;
+                    }
+                }
                 Tweak.SelectedVariationIndex = idx;
                 Tweak.IsEnabled = true;
                 if (onStateChanged != null)
@@ -2424,6 +2469,40 @@ namespace ArgonLatencyStudio
             btnInfoInspect.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
             btnInfoInspect.Click += (s, e) => ShowTechnicalSpecDialog();
             this.Controls.Add(btnInfoInspect);
+
+            // 7. Machine-Specific Customizable Parameter Button [⚙]
+            if (Tweak.HasCustomParam)
+            {
+                btnGearConfig = new Button
+                {
+                    Text = "⚙",
+                    Font = new Font("Segoe UI Symbol", 8.2f, FontStyle.Regular),
+                    FlatStyle = FlatStyle.Flat,
+                    BackColor = Color.FromArgb(20, 26, 38),
+                    ForeColor = Color.FromArgb(56, 189, 248),
+                    Size = new Size(22, 22),
+                    Cursor = Cursors.Hand
+                };
+                btnGearConfig.FlatAppearance.BorderSize = 1;
+                btnGearConfig.FlatAppearance.BorderColor = Color.FromArgb(45, 68, 98);
+                btnGearConfig.Click += (s, e) => ShowCustomParameterModal();
+                btnGearConfig.MouseEnter += (s, e) =>
+                {
+                    btnGearConfig.BackColor = Color.FromArgb(28, 42, 62);
+                    btnGearConfig.ForeColor = Color.FromArgb(125, 211, 252);
+                    btnGearConfig.FlatAppearance.BorderColor = Color.FromArgb(56, 189, 248);
+                };
+                btnGearConfig.MouseLeave += (s, e) =>
+                {
+                    btnGearConfig.BackColor = Color.FromArgb(20, 26, 38);
+                    btnGearConfig.ForeColor = Color.FromArgb(56, 189, 248);
+                    btnGearConfig.FlatAppearance.BorderColor = Color.FromArgb(45, 68, 98);
+                };
+                this.Controls.Add(btnGearConfig);
+                sharedToolTip.SetToolTip(btnGearConfig, Loc.T("Makineye özel parametre belirle [⚙]", "Configure machine-specific parameter [⚙]"));
+            }
+
+            UpdateCustomVariationLabel();
 
             string cardTip = BuildCardTooltip();
             sharedToolTip.SetToolTip(this, cardTip);
@@ -2490,6 +2569,13 @@ namespace ArgonLatencyStudio
             {
                 rightX -= btnInfoInspect.Width;
                 btnInfoInspect.Location = new Point(rightX, 7);
+                rightX -= 4;
+            }
+
+            if (btnGearConfig != null)
+            {
+                rightX -= btnGearConfig.Width;
+                btnGearConfig.Location = new Point(rightX, 7);
                 rightX -= 5;
             }
 
@@ -2532,6 +2618,14 @@ namespace ArgonLatencyStudio
             sb.AppendLine("• Canlı OS      : " + (string.IsNullOrEmpty(Tweak.LiveOsRawSummary) ? (Tweak.IsVerifiedInOs ? ("Doğrulandı (" + Tweak.VerifiedSystemValue + ")") : "Varsayılanda") : Tweak.LiveOsRawSummary));
             if (Tweak.RequiresCautionConfirmation && !string.IsNullOrEmpty(Tweak.CautionWarningText))
                 sb.AppendLine("• Uyarı Notu    : " + Tweak.CautionWarningText);
+            if (Tweak.HasCustomParam)
+            {
+                sb.AppendLine(string.Format("• Makine Parametresi: {0} = {1} {2} (En Az {3} {2})",
+                    Tweak.CustomParam.DisplayLabel,
+                    Tweak.CustomParam.CurrentCustomValue > 0 ? Tweak.CustomParam.CurrentCustomValue.ToString() : "Varsayılan",
+                    Tweak.CustomParam.Unit,
+                    Tweak.CustomParam.MinValue));
+            }
             sb.AppendLine();
             sb.AppendLine("Varyasyon Parametreleri:");
             for (int i = 0; i < Tweak.Variations.Count; i++)
@@ -2560,6 +2654,58 @@ namespace ArgonLatencyStudio
             }
         }
 
+        public void UpdateCustomVariationLabel()
+        {
+            if (Tweak == null || Tweak.CustomParam == null || cmbVariations == null) return;
+            int customIdx = Tweak.Variations.Count - 1;
+            if (customIdx >= 0 && customIdx < cmbVariations.Items.Count)
+            {
+                int curVal = Tweak.CustomParam.CurrentCustomValue;
+                string label = curVal > 0
+                    ? string.Format(Loc.T("Mod {0}: Özel ({1} {2}) [⚙]", "Mode {0}: Custom ({1} {2}) [⚙]"), customIdx + 1, curVal, Tweak.CustomParam.Unit)
+                    : string.Format(Loc.T("Mod {0}: Özel Değer... [⚙]", "Mode {0}: Custom Value... [⚙]"), customIdx + 1);
+
+                syncingRowControls = true;
+                try
+                {
+                    cmbVariations.Items[customIdx] = label;
+                }
+                finally
+                {
+                    syncingRowControls = false;
+                }
+            }
+        }
+
+        public void ShowCustomParameterModal()
+        {
+            if (Tweak == null || Tweak.CustomParam == null) return;
+            int oldIdx = Tweak.SelectedVariationIndex;
+            using (CustomParameterDialog dlg = new CustomParameterDialog(Tweak))
+            {
+                Form parentForm = this.FindForm();
+                if (dlg.ShowDialog(parentForm) == DialogResult.OK)
+                {
+                    int customIdx = Tweak.Variations.Count - 1;
+                    Tweak.SelectedVariationIndex = customIdx;
+                    Tweak.IsEnabled = true;
+                    UpdateCustomVariationLabel();
+                    RefreshVisualState();
+                    if (onStateChanged != null)
+                        onStateChanged(Tweak, true, customIdx);
+                }
+                else
+                {
+                    if (cmbVariations != null && cmbVariations.SelectedIndex != oldIdx)
+                    {
+                        syncingRowControls = true;
+                        cmbVariations.SelectedIndex = Math.Max(0, Math.Min(oldIdx, cmbVariations.Items.Count - 1));
+                        syncingRowControls = false;
+                    }
+                }
+            }
+        }
+
         public void RefreshVisualState()
         {
             syncingRowControls = true;
@@ -2578,6 +2724,8 @@ namespace ArgonLatencyStudio
             {
                 syncingRowControls = false;
             }
+
+            UpdateCustomVariationLabel();
 
             this.BackColor = Tweak.IsEnabled
                 ? Color.FromArgb(17, 29, 39)
@@ -2655,6 +2803,592 @@ namespace ArgonLatencyStudio
             this.Invalidate(false);
         }
     }
+
+    #region Guidance Helpers & Safety Lock Dialogs
+
+    public static class GuidanceHelpers
+    {
+        public static void OpenRegeditAtKey(string fullKeyPath)
+        {
+            if (string.IsNullOrEmpty(fullKeyPath))
+            {
+                try { Process.Start("regedit.exe"); } catch { }
+                return;
+            }
+
+            try
+            {
+                string rootPrefix = "Computer";
+                using (RegistryKey rk = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Applets\Regedit", true))
+                {
+                    if (rk != null)
+                    {
+                        object cur = rk.GetValue("LastKey");
+                        if (cur != null)
+                        {
+                            string s = cur.ToString();
+                            int slashIdx = s.IndexOf('\\');
+                            if (slashIdx > 0)
+                            {
+                                rootPrefix = s.Substring(0, slashIdx);
+                            }
+                        }
+                        else if (System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName.Equals("tr", StringComparison.OrdinalIgnoreCase))
+                        {
+                            rootPrefix = "Bilgisayar";
+                        }
+
+                        string formattedKey = fullKeyPath;
+                        if (!formattedKey.StartsWith("HKEY_", StringComparison.OrdinalIgnoreCase))
+                        {
+                            if (formattedKey.StartsWith("HKLM\\", StringComparison.OrdinalIgnoreCase))
+                                formattedKey = "HKEY_LOCAL_MACHINE\\" + formattedKey.Substring(5);
+                            else if (formattedKey.StartsWith("HKCU\\", StringComparison.OrdinalIgnoreCase))
+                                formattedKey = "HKEY_CURRENT_USER\\" + formattedKey.Substring(5);
+                        }
+
+                        rk.SetValue("LastKey", rootPrefix + "\\" + formattedKey);
+                    }
+                }
+                Process.Start("regedit.exe");
+            }
+            catch
+            {
+                try { Process.Start("regedit.exe"); } catch { }
+            }
+        }
+
+        public static void OpenGoogleSearch(string query)
+        {
+            if (string.IsNullOrEmpty(query)) return;
+            try
+            {
+                string url = "https://www.google.com/search?q=" + Uri.EscapeDataString(query);
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = url,
+                    UseShellExecute = true
+                });
+            }
+            catch { }
+        }
+    }
+
+    public class SecurityLockGuidanceDialog : Form
+    {
+        public SecurityLockGuidanceDialog(TweakDefinition tweak, CustomParamConfig cfg, int attemptedValue)
+        {
+            this.Text = Loc.T("Argon Kesin Güvenlik Kilidi", "Argon Strict Security Lock");
+            this.Size = new Size(590, 520);
+            this.FormBorderStyle = FormBorderStyle.FixedDialog;
+            this.MaximizeBox = false;
+            this.MinimizeBox = false;
+            this.ShowInTaskbar = false;
+            this.StartPosition = FormStartPosition.CenterParent;
+            this.BackColor = Color.FromArgb(16, 20, 28);
+            this.ForeColor = Color.FromArgb(226, 232, 240);
+
+            // Header Panel (Danger / Alert theme)
+            Panel pnlHeader = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 65,
+                BackColor = Color.FromArgb(42, 16, 22),
+                Padding = new Padding(16, 10, 16, 10)
+            };
+            pnlHeader.Paint += (s, e) =>
+            {
+                using (Pen p = new Pen(Color.FromArgb(239, 68, 68), 2))
+                {
+                    e.Graphics.DrawLine(p, 0, pnlHeader.Height - 1, pnlHeader.Width, pnlHeader.Height - 1);
+                }
+            };
+
+            Label lblAlertTitle = new Label
+            {
+                Text = "🔒 " + (cfg.SafetyWarningTitle ?? Loc.T("GÜVENLİK KİLİDİ DEVREYE GİRDİ", "SECURITY LOCK ACTIVATED")),
+                Font = new Font("Segoe UI", 10.5f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(248, 113, 113),
+                AutoSize = true,
+                Location = new Point(14, 10)
+            };
+            pnlHeader.Controls.Add(lblAlertTitle);
+
+            Label lblAlertSub = new Label
+            {
+                Text = string.Format(Loc.T(
+                    "Girilen Değer ({0} {1}), Kabul Edilebilir En Düşük Sınırın ({2} {1}) Altındadır!",
+                    "Entered Value ({0} {1}) Is Below Minimum Safe Limit ({2} {1})!"),
+                    attemptedValue, cfg.Unit, cfg.MinValue),
+                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(254, 202, 202),
+                AutoSize = true,
+                Location = new Point(14, 34)
+            };
+            pnlHeader.Controls.Add(lblAlertSub);
+            this.Controls.Add(pnlHeader);
+
+            // Content Area (Middle)
+            Panel pnlBody = new Panel
+            {
+                Location = new Point(16, 75),
+                Size = new Size(542, 330),
+                BackColor = Color.Transparent
+            };
+
+            Label lblWhyHeader = new Label
+            {
+                Text = Loc.T("Teknik İnceleme ve Neden Engellendiği:", "Technical Inspection & Why It Is Blocked:"),
+                Font = new Font("Segoe UI", 8.8f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(251, 191, 36),
+                Location = new Point(0, 0),
+                AutoSize = true
+            };
+            pnlBody.Controls.Add(lblWhyHeader);
+
+            TextBox txtExplanation = new TextBox
+            {
+                Multiline = true,
+                ReadOnly = true,
+                ScrollBars = ScrollBars.Vertical,
+                BackColor = Color.FromArgb(22, 17, 24),
+                ForeColor = Color.FromArgb(241, 245, 249),
+                Font = new Font("Segoe UI", 8.5f, FontStyle.Regular),
+                BorderStyle = BorderStyle.FixedSingle,
+                Location = new Point(0, 24),
+                Size = new Size(542, 215),
+                Text = cfg.SafetyWarningExplanation ?? ""
+            };
+            pnlBody.Controls.Add(txtExplanation);
+
+            Label lblGuidanceNotice = new Label
+            {
+                Text = Loc.T(
+                    "⚠️ Argon bu değişikliği kesinlikle uygulamaz. Kendi riskinizle harici olarak yapmak isterseniz:",
+                    "⚠️ Argon will never apply this change. If you wish to configure externally at your own risk:"),
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(203, 213, 225),
+                Location = new Point(0, 246),
+                Size = new Size(542, 32)
+            };
+            pnlBody.Controls.Add(lblGuidanceNotice);
+
+            Label lblTargetPath = new Label
+            {
+                Text = Loc.T("Kayıt Defteri Hedefi: ", "Registry Target: ") + cfg.RegeditTargetPath,
+                Font = new Font("Consolas", 7.8f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(148, 163, 184),
+                Location = new Point(0, 280),
+                Size = new Size(542, 20),
+                AutoEllipsis = true
+            };
+            pnlBody.Controls.Add(lblTargetPath);
+
+            this.Controls.Add(pnlBody);
+
+            // Bottom Button Bar
+            Panel pnlBottom = new Panel
+            {
+                Dock = DockStyle.Bottom,
+                Height = 60,
+                BackColor = Color.FromArgb(20, 25, 36)
+            };
+            pnlBottom.Paint += (s, e) =>
+            {
+                using (Pen p = new Pen(Color.FromArgb(30, 41, 59), 1))
+                {
+                    e.Graphics.DrawLine(p, 0, 0, pnlBottom.Width, 0);
+                }
+            };
+
+            Button btnRegedit = new Button
+            {
+                Text = Loc.T("📂 Kayıt Defterinde Aç (Regedit)", "📂 Open in Registry (Regedit)"),
+                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(56, 189, 248),
+                BackColor = Color.FromArgb(18, 30, 46),
+                FlatStyle = FlatStyle.Flat,
+                Size = new Size(205, 34),
+                Location = new Point(16, 13),
+                Cursor = Cursors.Hand
+            };
+            btnRegedit.FlatAppearance.BorderSize = 1;
+            btnRegedit.FlatAppearance.BorderColor = Color.FromArgb(56, 189, 248);
+            btnRegedit.Click += (s, e) => GuidanceHelpers.OpenRegeditAtKey(cfg.RegeditTargetPath);
+            pnlBottom.Controls.Add(btnRegedit);
+
+            Button btnGoogle = new Button
+            {
+                Text = Loc.T("🌐 Google'da Ara", "🌐 Search Google"),
+                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(167, 139, 250),
+                BackColor = Color.FromArgb(28, 22, 44),
+                FlatStyle = FlatStyle.Flat,
+                Size = new Size(160, 34),
+                Location = new Point(228, 13),
+                Cursor = Cursors.Hand
+            };
+            btnGoogle.FlatAppearance.BorderSize = 1;
+            btnGoogle.FlatAppearance.BorderColor = Color.FromArgb(167, 139, 250);
+            btnGoogle.Click += (s, e) => GuidanceHelpers.OpenGoogleSearch(cfg.GoogleSearchQuery);
+            pnlBottom.Controls.Add(btnGoogle);
+
+            Button btnClose = new Button
+            {
+                Text = Loc.T("Anladım, Kapat", "Understood, Close"),
+                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(226, 232, 240),
+                BackColor = Color.FromArgb(30, 41, 59),
+                FlatStyle = FlatStyle.Flat,
+                Size = new Size(130, 34),
+                Location = new Point(428, 13),
+                Cursor = Cursors.Hand,
+                DialogResult = DialogResult.OK
+            };
+            btnClose.FlatAppearance.BorderSize = 1;
+            btnClose.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnClose.Click += (s, e) => this.Close();
+            pnlBottom.Controls.Add(btnClose);
+
+            this.Controls.Add(pnlBottom);
+        }
+    }
+
+    public class CustomParameterDialog : Form
+    {
+        private TweakDefinition tweak;
+        private CustomParamConfig cfg;
+        private NumericUpDown numValue;
+
+        public CustomParameterDialog(TweakDefinition tweak)
+        {
+            this.tweak = tweak;
+            this.cfg = tweak.CustomParam;
+
+            this.Text = Loc.T("Argon Makineye Özel Parametre Ayarı", "Argon Machine-Specific Parameter Config");
+            this.Size = new Size(590, 490);
+            this.FormBorderStyle = FormBorderStyle.FixedDialog;
+            this.MaximizeBox = false;
+            this.MinimizeBox = false;
+            this.ShowInTaskbar = false;
+            this.StartPosition = FormStartPosition.CenterParent;
+            this.BackColor = Color.FromArgb(15, 20, 28);
+            this.ForeColor = Color.FromArgb(226, 232, 240);
+
+            // Header Panel
+            Panel pnlHeader = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 60,
+                BackColor = Color.FromArgb(20, 28, 42),
+                Padding = new Padding(16, 8, 16, 8)
+            };
+            pnlHeader.Paint += (s, e) =>
+            {
+                using (Pen p = new Pen(Color.FromArgb(56, 189, 248), 1))
+                {
+                    e.Graphics.DrawLine(p, 0, pnlHeader.Height - 1, pnlHeader.Width, pnlHeader.Height - 1);
+                }
+            };
+
+            Label lblTitle = new Label
+            {
+                Text = "⚙ " + tweak.Title,
+                Font = new Font("Segoe UI", 10.5f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(56, 189, 248),
+                AutoSize = true,
+                Location = new Point(14, 8)
+            };
+            pnlHeader.Controls.Add(lblTitle);
+
+            Label lblSub = new Label
+            {
+                Text = cfg.DisplayLabel + " — " + (tweak.TargetPathOrApi ?? "Kernel / Win32 API"),
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(148, 163, 184),
+                AutoSize = true,
+                Location = new Point(14, 32)
+            };
+            pnlHeader.Controls.Add(lblSub);
+            this.Controls.Add(pnlHeader);
+
+            // Body Panel
+            Panel pnlBody = new Panel
+            {
+                Location = new Point(16, 70),
+                Size = new Size(542, 335),
+                BackColor = Color.Transparent
+            };
+
+            int currentLiveVal = cfg.ReadCurrentValueFunc != null ? cfg.ReadCurrentValueFunc() : cfg.DefaultValue;
+
+            Label lblRegPath = new Label
+            {
+                Text = Loc.T("Sistem Hedefi (Kayıt Defteri):", "System Target (Registry):") + " " + (cfg.RegeditTargetPath ?? ""),
+                Font = new Font("Consolas", 8.2f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(125, 211, 252),
+                Location = new Point(0, 4),
+                Size = new Size(542, 18),
+                AutoEllipsis = true
+            };
+            pnlBody.Controls.Add(lblRegPath);
+
+            Label lblLiveTruth = new Label
+            {
+                Text = string.Format(Loc.T("Windows'taki Canlı Değer: {0} {1}", "Current Windows Value: {0} {1}"), currentLiveVal, cfg.Unit),
+                Font = new Font("Segoe UI", 8.8f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(52, 211, 153),
+                Location = new Point(0, 26),
+                Size = new Size(542, 20)
+            };
+            pnlBody.Controls.Add(lblLiveTruth);
+
+            Label lblDesc = new Label
+            {
+                Text = cfg.TechnicalDescription ?? "",
+                Font = new Font("Segoe UI", 8.4f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(203, 213, 225),
+                Location = new Point(0, 52),
+                Size = new Size(542, 42)
+            };
+            pnlBody.Controls.Add(lblDesc);
+
+            // Security Floor Badge Panel
+            Panel pnlBadge = new Panel
+            {
+                Location = new Point(0, 100),
+                Size = new Size(542, 34),
+                BackColor = Color.FromArgb(32, 26, 18)
+            };
+            pnlBadge.Paint += (s, e) =>
+            {
+                using (Pen p = new Pen(Color.FromArgb(245, 158, 11), 1))
+                {
+                    e.Graphics.DrawRectangle(p, 0, 0, pnlBadge.Width - 1, pnlBadge.Height - 1);
+                }
+            };
+
+            Label lblBadge = new Label
+            {
+                Text = string.Format(Loc.T(
+                    "🛡️ Kesin Güvenlik Tabanı: En Az {0} {1} ({0} altı değerler donanım bütünlüğü için engellenir)",
+                    "🛡️ Strict Security Floor: Minimum {0} {1} (Values below {0} are blocked for stability)"),
+                    cfg.MinValue, cfg.Unit),
+                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(251, 191, 36),
+                AutoSize = true,
+                Location = new Point(10, 8)
+            };
+            pnlBadge.Controls.Add(lblBadge);
+            pnlBody.Controls.Add(pnlBadge);
+
+            // Numeric Input Section
+            Label lblInputPrompt = new Label
+            {
+                Text = Loc.T("Makineye Özel Değer Belirleyin:", "Specify Machine-Specific Value:"),
+                Font = new Font("Segoe UI", 9.0f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(226, 232, 240),
+                Location = new Point(0, 148),
+                AutoSize = true
+            };
+            pnlBody.Controls.Add(lblInputPrompt);
+
+            numValue = new NumericUpDown
+            {
+                Minimum = 0,
+                Maximum = cfg.MaxValue,
+                Value = Math.Max(0, Math.Min(cfg.MaxValue, cfg.CurrentCustomValue > 0 ? cfg.CurrentCustomValue : currentLiveVal)),
+                Font = new Font("Consolas", 13.5f, FontStyle.Bold),
+                BackColor = Color.FromArgb(24, 32, 46),
+                ForeColor = Color.FromArgb(56, 189, 248),
+                Location = new Point(0, 172),
+                Size = new Size(130, 32)
+            };
+            pnlBody.Controls.Add(numValue);
+
+            Label lblUnit = new Label
+            {
+                Text = cfg.Unit,
+                Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(148, 163, 184),
+                Location = new Point(136, 178),
+                AutoSize = true
+            };
+            pnlBody.Controls.Add(lblUnit);
+
+            // Quick Preset Chips
+            if (cfg.PresetQuickChips != null && cfg.PresetQuickChips.Length > 0)
+            {
+                Label lblChipsCaption = new Label
+                {
+                    Text = Loc.T("Hızlı Seçim Önerileri:", "Quick Preset Suggestions:"),
+                    Font = new Font("Segoe UI", 8.2f, FontStyle.Regular),
+                    ForeColor = Color.FromArgb(148, 163, 184),
+                    Location = new Point(0, 215),
+                    AutoSize = true
+                };
+                pnlBody.Controls.Add(lblChipsCaption);
+
+                int chipX = 0;
+                for (int i = 0; i < cfg.PresetQuickChips.Length; i++)
+                {
+                    int valChip = cfg.PresetQuickChips[i];
+                    string chipText = (cfg.PresetChipLabels != null && i < cfg.PresetChipLabels.Length)
+                        ? cfg.PresetChipLabels[i]
+                        : (valChip.ToString() + " " + cfg.Unit);
+
+                    Button btnChip = new Button
+                    {
+                        Text = chipText,
+                        Font = new Font("Segoe UI", 8.0f, FontStyle.Regular),
+                        ForeColor = Color.FromArgb(203, 213, 225),
+                        BackColor = Color.FromArgb(22, 29, 41),
+                        FlatStyle = FlatStyle.Flat,
+                        AutoSize = true,
+                        Height = 26,
+                        Location = new Point(chipX, 236),
+                        Cursor = Cursors.Hand
+                    };
+                    btnChip.FlatAppearance.BorderSize = 1;
+                    btnChip.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+                    btnChip.Click += (s, e) =>
+                    {
+                        numValue.Value = valChip;
+                    };
+                    pnlBody.Controls.Add(btnChip);
+                    chipX += btnChip.PreferredSize.Width + 8;
+                }
+            }
+
+            // Info Link to Security Guidance
+            Button btnWhySecurity = new Button
+            {
+                Text = Loc.T("ℹ️ Neden Güvenlik Kilidi Var? / Manuel Regedit Rehberi", "ℹ️ Why Security Lock? / Manual Regedit Guide"),
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Underline),
+                ForeColor = Color.FromArgb(248, 113, 113),
+                BackColor = Color.Transparent,
+                FlatStyle = FlatStyle.Flat,
+                Size = new Size(542, 28),
+                Location = new Point(0, 282),
+                TextAlign = ContentAlignment.MiddleLeft,
+                Cursor = Cursors.Hand
+            };
+            btnWhySecurity.FlatAppearance.BorderSize = 0;
+            btnWhySecurity.Click += (s, e) =>
+            {
+                using (SecurityLockGuidanceDialog lockDlg = new SecurityLockGuidanceDialog(tweak, cfg, (int)numValue.Value))
+                {
+                    lockDlg.ShowDialog(this);
+                }
+            };
+            pnlBody.Controls.Add(btnWhySecurity);
+
+            this.Controls.Add(pnlBody);
+
+            // Bottom Action Bar
+            Panel pnlBottom = new Panel
+            {
+                Dock = DockStyle.Bottom,
+                Height = 60,
+                BackColor = Color.FromArgb(20, 25, 36)
+            };
+            pnlBottom.Paint += (s, e) =>
+            {
+                using (Pen p = new Pen(Color.FromArgb(30, 41, 59), 1))
+                {
+                    e.Graphics.DrawLine(p, 0, 0, pnlBottom.Width, 0);
+                }
+            };
+
+            Button btnRegedit = new Button
+            {
+                Text = Loc.T("📂 Regedit", "📂 Regedit"),
+                Font = new Font("Segoe UI", 8.5f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(56, 189, 248),
+                BackColor = Color.FromArgb(18, 28, 40),
+                FlatStyle = FlatStyle.Flat,
+                Size = new Size(100, 34),
+                Location = new Point(16, 13),
+                Cursor = Cursors.Hand
+            };
+            btnRegedit.FlatAppearance.BorderSize = 1;
+            btnRegedit.FlatAppearance.BorderColor = Color.FromArgb(45, 68, 98);
+            btnRegedit.Click += (s, e) => GuidanceHelpers.OpenRegeditAtKey(cfg.RegeditTargetPath);
+            pnlBottom.Controls.Add(btnRegedit);
+
+            Button btnGoogle = new Button
+            {
+                Text = Loc.T("🌐 Google", "🌐 Google"),
+                Font = new Font("Segoe UI", 8.5f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(167, 139, 250),
+                BackColor = Color.FromArgb(26, 20, 38),
+                FlatStyle = FlatStyle.Flat,
+                Size = new Size(100, 34),
+                Location = new Point(122, 13),
+                Cursor = Cursors.Hand
+            };
+            btnGoogle.FlatAppearance.BorderSize = 1;
+            btnGoogle.FlatAppearance.BorderColor = Color.FromArgb(68, 51, 98);
+            btnGoogle.Click += (s, e) => GuidanceHelpers.OpenGoogleSearch(cfg.GoogleSearchQuery);
+            pnlBottom.Controls.Add(btnGoogle);
+
+            Button btnApply = new Button
+            {
+                Text = Loc.T("✓ Uygula & Kaydet", "✓ Apply & Save"),
+                Font = new Font("Segoe UI", 9.0f, FontStyle.Bold),
+                ForeColor = Color.White,
+                BackColor = Color.FromArgb(16, 185, 129),
+                FlatStyle = FlatStyle.Flat,
+                Size = new Size(140, 34),
+                Location = new Point(310, 13),
+                Cursor = Cursors.Hand
+            };
+            btnApply.FlatAppearance.BorderSize = 0;
+            btnApply.Click += (s, e) =>
+            {
+                int val = (int)numValue.Value;
+                if (val < cfg.MinValue)
+                {
+                    // Trigger Strict Security Lock!
+                    using (SecurityLockGuidanceDialog lockDlg = new SecurityLockGuidanceDialog(tweak, cfg, val))
+                    {
+                        lockDlg.ShowDialog(this);
+                    }
+                    return;
+                }
+
+                cfg.CurrentCustomValue = val;
+                if (cfg.ApplyCustomAction != null)
+                {
+                    cfg.ApplyCustomAction(val);
+                }
+                this.DialogResult = DialogResult.OK;
+                this.Close();
+            };
+            pnlBottom.Controls.Add(btnApply);
+
+            Button btnCancel = new Button
+            {
+                Text = Loc.T("İptal", "Cancel"),
+                Font = new Font("Segoe UI", 8.5f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(203, 213, 225),
+                BackColor = Color.FromArgb(30, 41, 59),
+                FlatStyle = FlatStyle.Flat,
+                Size = new Size(95, 34),
+                Location = new Point(458, 13),
+                Cursor = Cursors.Hand,
+                DialogResult = DialogResult.Cancel
+            };
+            btnCancel.FlatAppearance.BorderSize = 1;
+            btnCancel.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnCancel.Click += (s, e) => this.Close();
+            pnlBottom.Controls.Add(btnCancel);
+
+            this.Controls.Add(pnlBottom);
+        }
+    }
+
+    #endregion
 
     #endregion
 
@@ -3644,6 +4378,62 @@ namespace ArgonLatencyStudio
                     vault.SetRegistryTracked(net04.Title, "HKLM", tcpParams, "TcpMaxDataRetransmissions", 5, RegistryValueKind.DWord);
                     StateVault.RunHiddenCmd("netsh", "int tcp set global initialRto=1500 maxsynretransmissions=3 nonsackrttresiliency=enabled");
                 }));
+
+            net04.CustomParam = new CustomParamConfig
+            {
+                ParameterName = "InitialRTO",
+                DisplayLabel = Loc.T("TCP İlk Kayıp Paket Telafi Süresi (RTO)", "TCP Initial Retransmission Timeout (RTO)"),
+                MinValue = 300,
+                MaxValue = 3000,
+                DefaultValue = 3000,
+                CurrentCustomValue = 300,
+                Unit = "ms",
+                TechnicalDescription = Loc.T(
+                    "TCP bağlantılarında paket kaybı yaşandığında sistemin yeniden iletim başlatmadan önce beklediği asgari süredir.",
+                    "Minimum time the Windows TCP stack waits before retransmitting a lost packet."),
+                SafetyWarningTitle = Loc.T("GÜVENLİK KİLİDİ: 300ms Altı Değerler Engellendi", "SAFETY LOCK: Values Below 300ms Are Blocked"),
+                SafetyWarningExplanation = Loc.T(
+                    "Neden 300ms Altına İzin Verilmiyor?\n\n" +
+                    "1. TCP/IP PROTOKOL STANDARDI:\n" +
+                    "Windows TCP/IP çekirdeği (netsh) initialRto için kesin alt sınır olarak 300ms kuralını uygular.\n\n" +
+                    "2. PAKET DÖNGÜSÜ VE TIKANIKLIK:\n" +
+                    "300ms'nin altındaki değerler, en ufak bir rota gecikmesinde henüz yolda olan paketlerin mükerrer olarak tekrar gönderilmesine (SYN/ACK fırtınası) ve bağlantının çökmesine neden olur.",
+                    "Why Are Values Below 300ms Blocked?\n\n" +
+                    "1. TCP/IP PROTOCOL MANDATE:\n" +
+                    "Windows TCP/IP stack strictly enforces a 300ms floor for initialRto via netsh.\n\n" +
+                    "2. RETRANSMISSION FLOOD & PACKET LOSS:\n" +
+                    "Values under 300ms trigger false retransmissions for packets still in flight, causing congestion collapses and dropped connections."),
+                RegeditTargetPath = @"HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters",
+                GoogleSearchQuery = Loc.T("TCP Initial RTO netsh ayarı", "TCP Initial RTO netsh setting"),
+                PresetQuickChips = new int[] { 300, 500, 1000, 3000 },
+                PresetChipLabels = new string[] {
+                    Loc.T("300ms (Espor)", "300ms (Esports)"),
+                    Loc.T("500ms (Hızlı)", "500ms (Fast)"),
+                    Loc.T("1000ms (Dengeli)", "1000ms (Balanced)"),
+                    Loc.T("3000ms (Varsayılan)", "3000ms (Default)")
+                },
+                ReadCurrentValueFunc = () =>
+                {
+                    return 300;
+                },
+                ApplyCustomAction = (customVal) =>
+                {
+                    vault.NetshModified = true;
+                    vault.SetRegistryTracked(net04.Title, "HKLM", tcpParams, "TcpMaxDataRetransmissions", customVal <= 500 ? 3 : 5, RegistryValueKind.DWord);
+                    StateVault.RunHiddenCmd("netsh", string.Format("int tcp set global initialRto={0} maxsynretransmissions=2 nonsackrttresiliency=disabled", customVal));
+                }
+            };
+            net04.Variations.Add(new TweakVariation(
+                "Özel RTO [⚙] (Kullanıcı Tanımlı)",
+                "Makineye Özel TCP Kayıp Paket Telafi Süresi",
+                "Kullanıcının belirlediği özel RTO süresini (en az 300ms) uygular.",
+                "initialRto=Özel ms",
+                () =>
+                {
+                    int v = net04.CustomParam.CurrentCustomValue >= 300 ? net04.CustomParam.CurrentCustomValue : 300;
+                    net04.CustomParam.ApplyCustomAction(v);
+                }));
+
             allTweaks.Add(net04);
 
             // NET-05: MaxUserPort, TcpTimedWaitDelay & DefaultTTL
@@ -3957,6 +4747,64 @@ namespace ArgonLatencyStudio
                     vault.SetRegistryTracked(net09.Title, "HKLM", activeNicClassSubKey, "*ReceiveBuffers", "1024", RegistryValueKind.String);
                     vault.SetRegistryTracked(net09.Title, "HKLM", activeNicClassSubKey, "*TransmitBuffers", "1024", RegistryValueKind.String);
                 }));
+
+            net09.CustomParam = new CustomParamConfig
+            {
+                ParameterName = "ReceiveBuffers",
+                DisplayLabel = Loc.T("Ağ Kartı Paket Tamponu (Ring Buffer)", "Network Card Packet Buffer (Ring Buffer)"),
+                MinValue = 64,
+                MaxValue = 4096,
+                DefaultValue = 512,
+                CurrentCustomValue = 512,
+                Unit = Loc.T("Paket", "Packets"),
+                TechnicalDescription = Loc.T(
+                    "Ağ kartı donanımının gelen ve giden paketleri bellek üzerinde tuttuğu tampon havuzu boyutudur.",
+                    "Ring buffer size where the network adapter holds incoming and outgoing packets in host memory."),
+                SafetyWarningTitle = Loc.T("GÜVENLİK KİLİDİ: 64 Altı Değerler Engellendi", "SAFETY LOCK: Values Below 64 Are Blocked"),
+                SafetyWarningExplanation = Loc.T(
+                    "Neden 64'ün Altına İzin Verilmiyor?\n\n" +
+                    "1. DÜŞÜK TAMPON TAŞMASI:\n" +
+                    "Modern 100Mbit / 1Gbit+ ağ kartlarında 64'ün altındaki tamponlar anlık veri patlamalarında hemen dolar.\n\n" +
+                    "2. PAKET KAYBI (PACKET LOSS):\n" +
+                    "Tampon taştığında yeni gelen paketler düşürülür (drop edilir), bu da online oyunlarda ani paket kaybına ve takılmaya yol açar.",
+                    "Why Are Values Below 64 Blocked?\n\n" +
+                    "1. BUFFER OVERFLOW UNDER LOAD:\n" +
+                    "On modern 100Mbit / 1Gbps+ NICs, buffers under 64 fill instantly during burst traffic.\n\n" +
+                    "2. PACKET DROPS & JITTER:\n" +
+                    "Overflowing ring buffers force the NIC hardware to drop packets, causing packet loss and game stutter."),
+                RegeditTargetPath = activeNicClassSubKey,
+                GoogleSearchQuery = Loc.T("Ağ Kartı Interrupt Moderation Receive Buffers ayarı", "Network Adapter Receive Buffers Interrupt Moderation setting"),
+                PresetQuickChips = new int[] { 64, 128, 512, 1024 },
+                PresetChipLabels = new string[] {
+                    Loc.T("64 (Taban Sınır)", "64 (Safe Floor)"),
+                    Loc.T("128 (Ultra Düşük)", "128 (Ultra Low)"),
+                    Loc.T("512 (Önerilen)", "512 (Recommended)"),
+                    Loc.T("1024 (Fiber/Yayın)", "1024 (Fiber/Stream)")
+                },
+                ReadCurrentValueFunc = () =>
+                {
+                    string rb = vault.ReadRegistryDisplay("HKLM", activeNicClassSubKey, "*ReceiveBuffers", "512");
+                    int v;
+                    return int.TryParse(rb, out v) ? v : 512;
+                },
+                ApplyCustomAction = (customVal) =>
+                {
+                    vault.SetRegistryTracked(net09.Title, "HKLM", activeNicClassSubKey, "*InterruptModeration", "0", RegistryValueKind.String);
+                    vault.SetRegistryTracked(net09.Title, "HKLM", activeNicClassSubKey, "*ReceiveBuffers", customVal.ToString(), RegistryValueKind.String);
+                    vault.SetRegistryTracked(net09.Title, "HKLM", activeNicClassSubKey, "*TransmitBuffers", customVal.ToString(), RegistryValueKind.String);
+                }
+            };
+            net09.Variations.Add(new TweakVariation(
+                "Özel Tampon [⚙] (Kullanıcı Tanımlı)",
+                "Makineye Özel Ağ Kartı Ring Buffer Tamponu",
+                "Kullanıcının belirlediği özel tampon boyutunu (en az 64 paket) uygular.",
+                "ReceiveBuffers=Özel, TransmitBuffers=Özel",
+                () =>
+                {
+                    int v = net09.CustomParam.CurrentCustomValue >= 64 ? net09.CustomParam.CurrentCustomValue : 512;
+                    net09.CustomParam.ApplyCustomAction(v);
+                }));
+
             allTweaks.Add(net09);
 
             // NET-10: NIC Flow Control, EEE/Green Ethernet & Hardware Offloads
@@ -4506,7 +5354,7 @@ namespace ArgonLatencyStudio
                 HardwareTag = "ALL",
                 BadgeText = "FARE & KLAVYE KUYRUĞU",
                 BadgeColor = colLat,
-                RequiresAdmin = false,
+                RequiresAdmin = true,
                 NeedsReboot = true,
                 Title = "Fare ve Klavye Girdi Kuyruğu Boyutu (HID Tamponu)",
                 SummaryDescription = "Fare ve klavyeden gelen sinyallerin Windows içinde sırada beklediği tampon kutusunu küçülterek daha taze girdi alınmasını sağlar.",
@@ -4529,10 +5377,10 @@ namespace ArgonLatencyStudio
                 }
             };
             lat06.Variations.Add(new TweakVariation(
-                "Yazışma Dostu + 1000Hz Optimal (Kuyruk=24)",
-                "Sohbet Ederken Harf Tekrarlamayan Rahat Klavye + 24 Paket Kuyruk",
-                "Sürekli yazılı iletişim kuranlar için harflerin arka arkaya fazladan basılmasını önler (Delay=1) ve 1000Hz fare/klavye için ideal 24 kuyruk boyutunu ayarlar.",
-                "KeyboardDelay=1 (Rahat Yazım), KeyboardSpeed=31, DataQueueSize=24",
+                "Espor Dengeli + 1000Hz (Kuyruk=40)",
+                "Sohbet Ederken Harf Tekrarlamayan Rahat Klavye + 40 Paket Kuyruk",
+                "Sürekli yazılı iletişim kuranlar için harflerin arka arkaya fazladan basılmasını önler (Delay=1) ve 1000Hz fare/klavye için ideal 40 kuyruk boyutunu ayarlar.",
+                "KeyboardDelay=1 (Rahat Yazım), KeyboardSpeed=31, DataQueueSize=40",
                 () =>
                 {
                     vault.KeyboardSpiModified = true;
@@ -4542,16 +5390,16 @@ namespace ArgonLatencyStudio
                     vault.SetRegistryTracked(lat06.Title, "HKCU", @"Control Panel\Keyboard", "KeyboardSpeed", "31", RegistryValueKind.String);
                     if (isAdmin)
                     {
-                        vault.SetRegistryTracked(lat06.Title, "HKLM", mouParams, "MouseDataQueueSize", 24, RegistryValueKind.DWord);
-                        vault.SetRegistryTracked(lat06.Title, "HKLM", kbdParams, "KeyboardDataQueueSize", 24, RegistryValueKind.DWord);
+                        vault.SetRegistryTracked(lat06.Title, "HKLM", mouParams, "MouseDataQueueSize", 40, RegistryValueKind.DWord);
+                        vault.SetRegistryTracked(lat06.Title, "HKLM", kbdParams, "KeyboardDataQueueSize", 40, RegistryValueKind.DWord);
                     }
                     vault.SaveJournal();
                 }));
             lat06.Variations.Add(new TweakVariation(
-                "Agresif Espor (Kuyruk=16 + Hızlı Tekrar)",
-                "En Düşük Girdi Tamponu (16 Paket) + Hızlı Tuş Tekrarı",
-                "1000Hz fareler için en düşük tampon boyutunu (16) ve hızlı klavye tekrarını uygular.",
-                "KeyboardDelay=0, KeyboardSpeed=31, DataQueueSize=16",
+                "Espor Taban Sınırı (Kuyruk=32 + Hızlı Tekrar)",
+                "Kesin Taban Sınır (32 Paket) + Hızlı Tuş Tekrarı",
+                "1000Hz fareler için izin verilen en düşük güvenli tampon boyutunu (32) ve hızlı klavye tekrarını uygular. 32 altı değerler takılmaya yol açtığı için bu mod kesin güvenlik sınırıdır.",
+                "KeyboardDelay=0, KeyboardSpeed=31, DataQueueSize=32",
                 () =>
                 {
                     vault.KeyboardSpiModified = true;
@@ -4559,16 +5407,16 @@ namespace ArgonLatencyStudio
                     NativeMethods.SystemParametersInfo(NativeMethods.SPI_SETKEYBOARDSPEED, 31, IntPtr.Zero, NativeMethods.SPIF_SENDCHANGE);
                     if (isAdmin)
                     {
-                        vault.SetRegistryTracked(lat06.Title, "HKLM", mouParams, "MouseDataQueueSize", 16, RegistryValueKind.DWord);
-                        vault.SetRegistryTracked(lat06.Title, "HKLM", kbdParams, "KeyboardDataQueueSize", 16, RegistryValueKind.DWord);
+                        vault.SetRegistryTracked(lat06.Title, "HKLM", mouParams, "MouseDataQueueSize", 32, RegistryValueKind.DWord);
+                        vault.SetRegistryTracked(lat06.Title, "HKLM", kbdParams, "KeyboardDataQueueSize", 32, RegistryValueKind.DWord);
                     }
                     vault.SaveJournal();
                 }));
             lat06.Variations.Add(new TweakVariation(
-                "4000Hz / 8000Hz Fare Korumalı (Kuyruk=50)",
-                "Yüksek Hz (4K/8K) Oyuncu Fareleri İçin Takılma Önleyici Mod",
-                "4000Hz ve 8000Hz farelerde imleç atlamasını önleyen genişletilmiş 50 paketlik tampon ve rahat yazışma ayarı.",
-                "KeyboardDelay=1, KeyboardSpeed=31, MouseDataQueueSize=50",
+                "4000Hz / 8000Hz Fare Korumalı (Kuyruk=64)",
+                "Yüksek Hz (4K/8K) Oyuncu Fareleri İçin Genişletilmiş Tampon Modu",
+                "4000Hz ve 8000Hz farelerde imleç atlamasını ve tampon taşmasını önleyen genişletilmiş 64 paketlik güvenli tampon ve rahat yazışma ayarı.",
+                "KeyboardDelay=1, KeyboardSpeed=31, MouseDataQueueSize=64",
                 () =>
                 {
                     vault.KeyboardSpiModified = true;
@@ -4576,11 +5424,83 @@ namespace ArgonLatencyStudio
                     NativeMethods.SystemParametersInfo(NativeMethods.SPI_SETKEYBOARDSPEED, 31, IntPtr.Zero, NativeMethods.SPIF_SENDCHANGE);
                     if (isAdmin)
                     {
-                        vault.SetRegistryTracked(lat06.Title, "HKLM", mouParams, "MouseDataQueueSize", 50, RegistryValueKind.DWord);
-                        vault.SetRegistryTracked(lat06.Title, "HKLM", kbdParams, "KeyboardDataQueueSize", 32, RegistryValueKind.DWord);
+                        vault.SetRegistryTracked(lat06.Title, "HKLM", mouParams, "MouseDataQueueSize", 64, RegistryValueKind.DWord);
+                        vault.SetRegistryTracked(lat06.Title, "HKLM", kbdParams, "KeyboardDataQueueSize", 40, RegistryValueKind.DWord);
                     }
                     vault.SaveJournal();
                 }));
+
+            lat06.CustomParam = new CustomParamConfig
+            {
+                ParameterName = "MouseDataQueueSize",
+                DisplayLabel = Loc.T("Fare ve Klavye Tampon Boyutu", "Mouse & Keyboard Buffer Queue Size"),
+                MinValue = 32,
+                MaxValue = 300,
+                DefaultValue = 100,
+                CurrentCustomValue = 40,
+                Unit = Loc.T("Paket", "Packets"),
+                TechnicalDescription = Loc.T(
+                    "Fare ve klavye donanımından gelen HID paketlerinin Windows çekirdeğinde sırada bekletildiği tampon boyutudur. Düşük değerler gecikmeyi azaltırken, 32'nin altı değerler anlık CPU yükünde girdi kaybına yol açar.",
+                    "Buffer queue size where HID mouse & keyboard packets wait in Windows kernel. Lower values reduce latency, but values under 32 cause input packet drops during CPU spikes."),
+                SafetyWarningTitle = Loc.T("KESİN GÜVENLİK KİLİDİ: 32 Altı Değerler Engellendi", "STRICT SAFETY LOCK: Values Below 32 Are Blocked"),
+                SafetyWarningExplanation = Loc.T(
+                    "Neden 32'nin Altına İzin Verilmiyor?\n\n" +
+                    "1. YÜKSEK RAPORLAMA HIZI (1000Hz - 8000Hz):\n" +
+                    "Modern oyuncu fareleri saniyede 1.000 ila 8.000 veri paketi gönderir.\n\n" +
+                    "2. TAMPON TAŞMASI (BUFFER OVERFLOW):\n" +
+                    "Kuyruk boyutu 32'nin altına (örn. 8, 16 veya 24) düşürüldüğünde, oyun içinde anlık bir CPU dalgalanması veya FPS düşüşü yaşandığı anda mouclass.sys tamponu mikrosaniyeler içinde taşar.\n\n" +
+                    "3. GİRDİ KAYBI VE TAKILMA (STUTTER):\n" +
+                    "Taşan paketler Windows çekirdeği tarafından doğrudan atılır. Bu da farenin anlık donmasına, tıklamaların algılanmamasına ve takılmaya neden olur.\n\n" +
+                    "Argon Latency Studio, rekabetçi bütünlüğü ve donanım kararlılığını korumak için 32 altındaki değerleri kesinlikle uygulamaz.",
+                    "Why Are Values Below 32 Blocked?\n\n" +
+                    "1. HIGH POLLING RATES (1000Hz - 8000Hz):\n" +
+                    "Modern gaming mice generate 1,000 to 8,000 packets per second.\n\n" +
+                    "2. BUFFER OVERRUN HAZARD:\n" +
+                    "When queue size is set below 32 (e.g. 8, 16, or 24), any momentary CPU spike or frame drop causes mouclass.sys buffer overrun within microseconds.\n\n" +
+                    "3. DROPPED INPUTS & STUTTER:\n" +
+                    "Overflowing packets are discarded by Windows kernel, resulting in cursor freeze, missed clicks, and input stutter.\n\n" +
+                    "Argon Latency Studio strictly forbids applying values below 32 to guarantee hardware stability."),
+                RegeditTargetPath = @"HKLM\SYSTEM\CurrentControlSet\Services\mouclass\Parameters",
+                GoogleSearchQuery = Loc.T("Mouse - Keyboard Queue size ayarlama", "Mouse Keyboard Queue size registry setting"),
+                PresetQuickChips = new int[] { 32, 40, 64, 100 },
+                PresetChipLabels = new string[] {
+                    Loc.T("32 (Espor Tabanı)", "32 (Esports Floor)"),
+                    Loc.T("40 (Önerilen)", "40 (Recommended)"),
+                    Loc.T("64 (4K/8K Hz)", "64 (4K/8K Hz)"),
+                    Loc.T("100 (Fabrika)", "100 (Default)")
+                },
+                ReadCurrentValueFunc = () =>
+                {
+                    string mq = vault.ReadRegistryDisplay("HKLM", mouParams, "MouseDataQueueSize", "100");
+                    int v;
+                    return int.TryParse(mq, out v) ? v : 100;
+                },
+                ApplyCustomAction = (customVal) =>
+                {
+                    vault.KeyboardSpiModified = true;
+                    NativeMethods.SystemParametersInfo(NativeMethods.SPI_SETKEYBOARDDELAY, 1, IntPtr.Zero, NativeMethods.SPIF_SENDCHANGE);
+                    NativeMethods.SystemParametersInfo(NativeMethods.SPI_SETKEYBOARDSPEED, 31, IntPtr.Zero, NativeMethods.SPIF_SENDCHANGE);
+                    vault.SetRegistryTracked(lat06.Title, "HKCU", @"Control Panel\Keyboard", "KeyboardDelay", "1", RegistryValueKind.String);
+                    vault.SetRegistryTracked(lat06.Title, "HKCU", @"Control Panel\Keyboard", "KeyboardSpeed", "31", RegistryValueKind.String);
+                    if (isAdmin)
+                    {
+                        vault.SetRegistryTracked(lat06.Title, "HKLM", mouParams, "MouseDataQueueSize", customVal, RegistryValueKind.DWord);
+                        vault.SetRegistryTracked(lat06.Title, "HKLM", kbdParams, "KeyboardDataQueueSize", Math.Max(32, customVal), RegistryValueKind.DWord);
+                    }
+                    vault.SaveJournal();
+                }
+            };
+            lat06.Variations.Add(new TweakVariation(
+                "Özel Değer [⚙] (Kullanıcı Tanımlı)",
+                "Makineye Özel Kullanıcı Tanımlı Tampon Boyutu",
+                "Kullanıcının belirlediği özel kuyruk boyutunu (en az 32 paket) uygular.",
+                "MouseDataQueueSize=Özel (>=32), KeyboardDataQueueSize=Özel",
+                () =>
+                {
+                    int v = lat06.CustomParam.CurrentCustomValue >= 32 ? lat06.CustomParam.CurrentCustomValue : 40;
+                    lat06.CustomParam.ApplyCustomAction(v);
+                }));
+
             allTweaks.Add(lat06);
 
             // LAT-07: USB Selective Suspend & PCIe ASPM
@@ -11919,6 +12839,11 @@ namespace ArgonLatencyStudio
                     lines.Add(string.Format("TWEAK|{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}",
                         t.Id, t.IsEnabled, t.SelectedVariationIndex, t.RebootSatisfied, t.NetReloadSatisfied,
                         t.ModifiedBootStamp ?? currentBootStamp, t.BootTimeActiveInOs, t.BootTimeVariationInOs));
+
+                    if (t.CustomParam != null && t.CustomParam.CurrentCustomValue > 0)
+                    {
+                        lines.Add(string.Format("CUSTOMVAL|{0}|{1}", t.Id, t.CustomParam.CurrentCustomValue));
+                    }
                 }
 
                 StateVault.WriteAllLinesAtomic(userProfilePath, lines.ToArray());
@@ -12084,6 +13009,19 @@ namespace ArgonLatencyStudio
                             }
                         }
                     }
+                    else if (parts[0] == "CUSTOMVAL" && parts.Length >= 3)
+                    {
+                        string id = parts[1];
+                        int cVal;
+                        if (int.TryParse(parts[2], out cVal))
+                        {
+                            TweakDefinition t = FindTweak(id);
+                            if (t != null && t.CustomParam != null)
+                            {
+                                t.CustomParam.CurrentCustomValue = cVal;
+                            }
+                        }
+                    }
                 }
 
                 // Auto-enable the 2 new Zero-Reboot Safe FPS Gems on first upgrade to v3.8 if FPS tweaks were active!
@@ -12110,7 +13048,11 @@ namespace ArgonLatencyStudio
                 }
 
                 RefreshHardwareMatrixCards();
-                foreach (var c in allCards) c.RefreshVisualState();
+                foreach (var c in allCards)
+                {
+                    c.UpdateCustomVariationLabel();
+                    c.RefreshVisualState();
+                }
                 UpdateActiveCountsAndNavBadges();
                 UpdateRebootAndReloadBannerVisibility();
                 RefreshSnapshotAuditView();
@@ -12352,7 +13294,19 @@ namespace ArgonLatencyStudio
                     string rb = vault.ReadRegistryDisplay("HKLM", activeNicClassSubKey, "*ReceiveBuffers", "");
                     ok = (im == "0");
                     val = ok ? ("IntMod=0, Buf=" + (string.IsNullOrEmpty(rb) ? "512" : rb)) : "";
-                    if (ok) detectedMod = (rb == "128" ? 1 : (rb == "1024" ? 2 : 0));
+                    if (ok)
+                    {
+                        if (rb == "512") detectedMod = 0;
+                        else if (rb == "128") detectedMod = 1;
+                        else if (rb == "1024") detectedMod = 2;
+                        else
+                        {
+                            detectedMod = 3;
+                            int rbVal;
+                            if (int.TryParse(rb, out rbVal) && t.CustomParam != null)
+                                t.CustomParam.CurrentCustomValue = rbVal;
+                        }
+                    }
                 }
                 else if (id == "NET_NIC_OFFLOAD")
                 {
@@ -12455,11 +13409,18 @@ namespace ArgonLatencyStudio
                     int kDelay;
                     NativeMethods.SystemParametersInfo(NativeMethods.SPI_GETKEYBOARDDELAY, 0, out kDelay, 0);
                     string mq = vault.ReadRegistryDisplay("HKLM", @"SYSTEM\CurrentControlSet\Services\mouclass\Parameters", "MouseDataQueueSize", "");
-                    ok = (mq == "24" || mq == "16" || mq == "50");
+                    int mqVal;
+                    int.TryParse(mq, out mqVal);
+                    ok = (mqVal >= 32 && mqVal <= 300);
                     val = string.Format("Kuyruk={0}, Delay={1}", string.IsNullOrEmpty(mq) ? "Varsayılan" : mq, kDelay);
-                    if (mq == "24") detectedMod = 0;
-                    else if (mq == "16") detectedMod = 1;
-                    else if (mq == "50") detectedMod = 2;
+                    if (mq == "40") detectedMod = 0;
+                    else if (mq == "32") detectedMod = 1;
+                    else if (mq == "64") detectedMod = 2;
+                    else if (ok)
+                    {
+                        detectedMod = 3;
+                        if (t.CustomParam != null) t.CustomParam.CurrentCustomValue = mqVal;
+                    }
                 }
                 else if (id == "LAT_USB_PCIE")
                 {
@@ -13933,16 +14894,18 @@ namespace ArgonLatencyStudio
                     lblMouseHzLive.Text = string.Format("Anlık: {0:0} Hz   |   Ortalama: {1:0} Hz   |   Tepe: {2:0} Hz", hz, avg, peak);
                     lblMouseDeltaLive.Text = string.Format("Raporlama Gecikmesi: {0:0.00} ms", deltaMs);
 
-                    // Automatic conflict protection if 2000Hz+ mouse detected while Queue=16 is set!
+                    // Automatic conflict protection if 2000Hz+ mouse detected while Queue is set to low value (32)
                     if (avg >= 1750)
                     {
                         TweakDefinition hid = FindTweak("LAT_HID_QUEUE");
-                        if (hid != null && hid.IsEnabled && hid.SelectedVariationIndex == 1)
+                        if (hid != null && hid.IsEnabled && (hid.SelectedVariationIndex == 1 || (hid.CustomParam != null && hid.CustomParam.CurrentCustomValue > 0 && hid.CustomParam.CurrentCustomValue < 50)))
                         {
-                            hid.SelectedVariationIndex = 2; // Switch from 16 to 50 (4K/8K Safe Queue)
+                            hid.SelectedVariationIndex = 2; // Switch to 64 (4K/8K Safe Queue)
                             hid.Variations[2].ApplyAction();
                             foreach (var c in allCards) if (c.Tweak == hid) c.RefreshVisualState();
-                            lblInspectorTitle.Text = "🔗 2000Hz+ Yüksek Polling Fare Algılandı: HID Kuyruğu Taşma Koruması İçin Mod 3 (Queue=50) Yapıldı!";
+                            lblInspectorTitle.Text = Loc.T(
+                                "🔗 2000Hz+ Yüksek Polling Fare Algılandı: HID Kuyruğu Taşma Koruması İçin Mod 3 (Kuyruk=64) Yapıldı!",
+                                "🔗 2000Hz+ High Polling Mouse Detected: Upgraded to Mode 3 (Queue=64) to prevent overflow!");
                         }
                     }
                 }

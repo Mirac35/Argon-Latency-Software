@@ -32,13 +32,19 @@ Uygulama; arka planı belirsiz toplu kayıt defteri betikleri yerine, her bir si
 * Nagle algoritması denetimi (TCP_NODELAY), Winsock AFD Fast-Path, RTO optimizasyonu, DSCP/QoS etiketlemesi ve ağ bağdaştırıcısı kesme dengelemesi (Interrupt Moderation).
 * Canlı ağ trafiği, DNS önbellek yönetimi ve çift yönlü ICMP/RTT ölçümü.
 
-### 5. Otomasyon & Yaşam Kalitesi (QoL)
+### 5. Makineye Özel Parametre Mimarisi & Kesin HID Güvenlik Kilidi
+* **Kullanıcı Tanımlı Değişkenler:** Sabit ön ayar modlarının yanında kullanıcının kendi donanımına ve bağlantısına özel değer girmesine imkan tanıyan `[⚙]` modal ayar paneli ve `NumericUpDown` mimarisi.
+* **Kesin Güvenlik Sınırı (HID Buffer Guard):** `MouseDataQueueSize` ve `KeyboardDataQueueSize` ayarlarında 32'nin altındaki değerler kesinlikle engellenir ve uygulanmaz. Bu kural, 1000Hz – 8000Hz espor farelerinde anlık CPU yükünde oluşabilecek tampon taşmasını (buffer overrun), imleç takılmasını ve girdi kaybını önler.
+* **Engelleme ve Rehberlik Deneyimi:** Güvenlik tabanı altındaki değerlerde teknik gerekçeli güvenlik penceresi açılır; doğrudan `HKLM\SYSTEM\CurrentControlSet\Services\mouclass\Parameters` yolunu açan `Kayıt Defterinde Aç (Regedit)` ve `"Mouse - Keyboard Queue size ayarlama"` sorgusunu açan `Google'da Ara` butonları sunulur.
+* **Genişletilmiş Ağ Parametreleri:** TCP İlk Kayıp Paket Telafi Süresi (`NET_RTO`, 300ms protokol tabanı korumalı) ve Ağ Kartı Rx/Tx Ring Buffers (`NET_NIC_INT`, 64 paket taban korumalı) ayarları da aynı güvenlik ve yönlendirme mimarisiyle donatılmıştır.
+
+### 6. Otomasyon & Yaşam Kalitesi (QoL)
 * **Akıllı Güç Zamanlayıcısı:** Geri sayım veya belirli saatte kapatma, yeniden başlatma, uyku veya oturum kilitleme. Aktif ağ indirmeleri algılandığında işlemi otomatik erteleme koruması.
 * **Periyodik Kripto & Rutin Alarmları:** 4 saatlik mum kapanışları, günlük/haftalık kapanışlar veya özel periyotlar için sesli (WAV/MP3) ve masaüstü bildirimleri.
 * **Oyun İçi Not Kalkanı:** Belirlenen oyun süreçleri (`.exe`) başlatıldığında sessiz masaüstü bilgi kartları sunma.
 * **Bellek & Standby List Otomasyonu:** Yapılandırılabilir eşik değerleri (%10, %15, %20 veya serbest değer) üzerinden otomatik arka plan bellek optimizasyonu.
 
-### 6. Arayüz ve Çoklu Dil Desteği
+### 7. Arayüz ve Çoklu Dil Desteği
 * Dinamik Türkçe ve İngilizce dil desteği (üst çubuktan veya ayarlardan anlık geçiş).
 * Arayüz taşmalarını önleyen sabit geometri seçenekleri (Kompakt 1280x820, Standart 1380x890, Geniş 1560x960).
 * Başlık, açıklama, teknik gerekçe ve kayıt anahtarlarını kapsayan birleşik genel arama (Global Search).
