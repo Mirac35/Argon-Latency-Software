@@ -187,6 +187,12 @@ namespace ArgonLatencyStudio
         public static extern uint PowerReadACValueIndex(IntPtr RootPowerKey, ref Guid SchemeGuid, ref Guid SubGroupOfPowerSettingsGuid, ref Guid PowerSettingGuid, out uint AcValueIndex);
 
         [DllImport("powrprof.dll")]
+        public static extern uint PowerReadDCValueIndex(IntPtr RootPowerKey, ref Guid SchemeGuid, ref Guid SubGroupOfPowerSettingsGuid, ref Guid PowerSettingGuid, out uint DcValueIndex);
+
+        [DllImport("powrprof.dll", CharSet = CharSet.Unicode)]
+        public static extern uint PowerReadFriendlyName(IntPtr RootPowerKey, ref Guid SchemeGuid, IntPtr SubGroupOfPowerSettingsGuid, IntPtr PowerSettingGuid, StringBuilder Buffer, ref uint BufferSize);
+
+        [DllImport("powrprof.dll")]
         public static extern uint PowerDeleteScheme(IntPtr RootPowerKey, ref Guid SchemeGuid);
 
         [DllImport("kernel32.dll")]
@@ -258,6 +264,23 @@ namespace ArgonLatencyStudio
         [DllImport("user32.dll")]
         public static extern IntPtr GetForegroundWindow();
 
+        [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+        public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+
+        [DllImport("user32.dll")]
+        public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct RECT
+        {
+            public int Left;
+            public int Top;
+            public int Right;
+            public int Bottom;
+            public int Width { get { return Right - Left; } }
+            public int Height { get { return Bottom - Top; } }
+        }
+
         [DllImport("user32.dll")]
         public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 
@@ -272,6 +295,64 @@ namespace ArgonLatencyStudio
 
         [DllImport("dwmapi.dll")]
         public static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
+
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        public struct UNSIGNED_RATIO
+        {
+            public uint uiNumerator;
+            public uint uiDenominator;
+        }
+
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        public struct DWM_TIMING_INFO
+        {
+            public uint cbSize;
+            public UNSIGNED_RATIO rateRefresh;
+            public ulong qpcRefreshPeriod;
+            public UNSIGNED_RATIO rateCompose;
+            public ulong qpcVBlank;
+            public ulong cRefresh;
+            public uint cDXRefresh;
+            public ulong qpcCompose;
+            public ulong cFrame;
+            public uint cDXPresent;
+            public ulong cRefreshFrame;
+            public ulong cFrameSubmitted;
+            public uint cDXPresentSubmitted;
+            public ulong cFrameConfirmed;
+            public uint cDXPresentConfirmed;
+            public ulong cRefreshConfirmed;
+            public uint cDXRefreshConfirmed;
+            public ulong cFramesLate;
+            public uint cFramesOutstanding;
+            public ulong cFrameDisplayed;
+            public ulong qpcFrameDisplayed;
+            public ulong cRefreshFrameDisplayed;
+            public ulong cFrameComplete;
+            public ulong qpcFrameComplete;
+            public ulong cFramePending;
+            public ulong qpcFramePending;
+            public ulong cFramesDisplayed;
+            public ulong cFramesComplete;
+            public ulong cFramesPending;
+            public ulong cFramesAvailable;
+            public ulong cFramesDropped;
+            public ulong cFramesMissed;
+            public ulong cRefreshNextDisplayed;
+            public ulong cRefreshNextPresented;
+            public ulong cRefreshesDisplayed;
+            public ulong cRefreshesPresented;
+            public ulong cRefreshStarted;
+            public ulong cPixelsReceived;
+            public ulong cPixelsDrawn;
+            public ulong cBuffersEmpty;
+        }
+
+        [DllImport("dwmapi.dll")]
+        public static extern int DwmGetCompositionTimingInfo(IntPtr hwnd, ref DWM_TIMING_INFO timingInfo);
+
+        [DllImport("dwmapi.dll")]
+        public static extern int DwmFlush();
 
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
         public class MEMORYSTATUSEX
@@ -344,6 +425,201 @@ namespace ArgonLatencyStudio
         public const uint SPIF_SENDCHANGE = 0x02;
         public const uint FKF_FILTERKEYSON = 0x00000001;
         public const uint FKF_AVAILABLE = 0x00000002;
+
+        // Real Windows OS Version (bypasses .NET 4.8 manifest virtualization)
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        public struct RTL_OSVERSIONINFOEXW
+        {
+            public uint dwOSVersionInfoSize;
+            public uint dwMajorVersion;
+            public uint dwMinorVersion;
+            public uint dwBuildNumber;
+            public uint dwPlatformId;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
+            public string szCSDVersion;
+            public ushort wServicePackMajor;
+            public ushort wServicePackMinor;
+            public ushort wSuiteMask;
+            public byte wProductType;
+            public byte wReserved;
+        }
+
+        [DllImport("ntdll.dll", SetLastError = true)]
+        public static extern int RtlGetVersion(ref RTL_OSVERSIONINFOEXW lpVersionInformation);
+
+        public static void GetRealOsVersionInfo(out int major, out int minor, out int build, out int ubr, out string displayVersion)
+        {
+            major = Environment.OSVersion.Version.Major;
+            minor = Environment.OSVersion.Version.Minor;
+            build = Environment.OSVersion.Version.Build;
+            ubr = 0;
+            displayVersion = "";
+            try
+            {
+                RTL_OSVERSIONINFOEXW vi = new RTL_OSVERSIONINFOEXW();
+                vi.dwOSVersionInfoSize = (uint)Marshal.SizeOf(typeof(RTL_OSVERSIONINFOEXW));
+                if (RtlGetVersion(ref vi) == 0)
+                {
+                    major = (int)vi.dwMajorVersion;
+                    minor = (int)vi.dwMinorVersion;
+                    build = (int)vi.dwBuildNumber;
+                }
+            }
+            catch { }
+
+            try
+            {
+                using (RegistryKey cv = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion", false))
+                {
+                    if (cv != null)
+                    {
+                        object dv = cv.GetValue("DisplayVersion", null);
+                        if (dv != null) displayVersion = Convert.ToString(dv);
+                        object ubrObj = cv.GetValue("UBR", null);
+                        if (ubrObj != null) ubr = Convert.ToInt32(ubrObj);
+                    }
+                }
+            }
+            catch { }
+        }
+
+        public const int GWL_STYLE = -16;
+        public const int GWL_EXSTYLE = -20;
+        public const uint WS_POPUP = 0x80000000;
+        public const uint WS_CAPTION = 0x00C00000;
+        public const uint WS_THICKFRAME = 0x00040000;
+        public const int DWMWA_CLOAKED = 14;
+
+        [DllImport("user32.dll", EntryPoint = "GetWindowLong")]
+        private static extern int GetWindowLong32(IntPtr hWnd, int nIndex);
+
+        [DllImport("user32.dll", EntryPoint = "GetWindowLongPtr")]
+        private static extern IntPtr GetWindowLongPtr64(IntPtr hWnd, int nIndex);
+
+        public static uint GetWindowStyleSafe(IntPtr hWnd, int nIndex)
+        {
+            if (hWnd == IntPtr.Zero) return 0;
+            try
+            {
+                if (IntPtr.Size == 8)
+                    return unchecked((uint)GetWindowLongPtr64(hWnd, nIndex).ToInt64());
+                return unchecked((uint)GetWindowLong32(hWnd, nIndex));
+            }
+            catch { return 0; }
+        }
+
+        [DllImport("dwmapi.dll")]
+        public static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out int pvAttribute, int cbAttribute);
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        public struct DEVMODEW
+        {
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+            public string dmDeviceName;
+            public ushort dmSpecVersion;
+            public ushort dmDriverVersion;
+            public ushort dmSize;
+            public ushort dmDriverExtra;
+            public uint dmFields;
+            public int dmPositionX;
+            public int dmPositionY;
+            public uint dmDisplayOrientation;
+            public uint dmDisplayFixedOutput;
+            public short dmColor;
+            public short dmDuplex;
+            public short dmYResolution;
+            public short dmTTOption;
+            public short dmCollate;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+            public string dmFormName;
+            public ushort dmLogPixels;
+            public uint dmBitsPerPel;
+            public uint dmPelsWidth;
+            public uint dmPelsHeight;
+            public uint dmDisplayFlags;
+            public uint dmDisplayFrequency;
+            public uint dmICMMethod;
+            public uint dmICMIntent;
+            public uint dmMediaType;
+            public uint dmDitherType;
+            public uint dmReserved1;
+            public uint dmReserved2;
+            public uint dmPanningWidth;
+            public uint dmPanningHeight;
+        }
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        public static extern bool EnumDisplaySettingsEx(string lpszDeviceName, int iModeNum, ref DEVMODEW lpDevMode, uint dwFlags);
+
+        public static bool QueryDisplayModeMetrics(string deviceName, out uint width, out uint height, out uint hz, out uint bpp)
+        {
+            width = 0; height = 0; hz = 0; bpp = 0;
+            try
+            {
+                DEVMODEW dm = new DEVMODEW();
+                dm.dmSize = (ushort)Marshal.SizeOf(typeof(DEVMODEW));
+                if (EnumDisplaySettingsEx(deviceName, -1, ref dm, 0))
+                {
+                    width = dm.dmPelsWidth;
+                    height = dm.dmPelsHeight;
+                    hz = dm.dmDisplayFrequency;
+                    bpp = dm.dmBitsPerPel;
+                    return true;
+                }
+            }
+            catch { }
+            return false;
+        }
+
+        [DllImport("dxgi.dll")]
+        public static extern int CreateDXGIFactory1(ref Guid riid, out IntPtr ppFactory);
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        public struct DXGI_ADAPTER_DESC1
+        {
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
+            public string Description;
+            public uint VendorId;
+            public uint DeviceId;
+            public uint SubSysId;
+            public uint Revision;
+            public UIntPtr DedicatedVideoMemory;
+            public UIntPtr DedicatedSystemMemory;
+            public UIntPtr SharedSystemMemory;
+            public long AdapterLuid;
+            public uint Flags;
+        }
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        public struct DXGI_OUTPUT_DESC
+        {
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+            public string DeviceName;
+            public RECT DesktopCoordinates;
+            public int AttachedToDesktop;
+            public int Rotation;
+            public IntPtr Monitor;
+        }
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        public struct DXGI_OUTPUT_DESC1
+        {
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+            public string DeviceName;
+            public RECT DesktopCoordinates;
+            public int AttachedToDesktop;
+            public int Rotation;
+            public IntPtr Monitor;
+            public uint BitsPerColor;
+            public int ColorSpace;
+            public float RedPrimary0, RedPrimary1;
+            public float GreenPrimary0, GreenPrimary1;
+            public float BluePrimary0, BluePrimary1;
+            public float WhitePoint0, WhitePoint1;
+            public float MinLuminance;
+            public float MaxLuminance;
+            public float MaxFullFrameLuminance;
+        }
     }
 
     #endregion
@@ -875,6 +1151,201 @@ namespace ArgonLatencyStudio
         public bool WasRunningLastCheck = false;
     }
 
+    public class GameWatchdogRule
+    {
+        public string Id = Guid.NewGuid().ToString("N");
+        public string ProcessName = "cs2";
+        public string GameTitle = "Counter-Strike 2";
+        public ProcessPriorityClass TargetPriority = ProcessPriorityClass.High;
+        public int AffinityMode = 1; // 0=Tümü, 1=Core 0 İzole, 2=Fiziksel Çekirdekler, 3=Fiziksel + Core 0 İzole, 4=AMD X3D CCD0, 5=Intel P-Cores
+        public bool EnableEcoCage = true;
+        public bool EnableIoBoost = true;
+        public bool IsEnabled = true;
+
+        public string GetAffinityModeLabel()
+        {
+            switch (AffinityMode)
+            {
+                case 0: return "Tüm Çekirdekler";
+                case 1: return "Core 0 İzole (DPC)";
+                case 2: return "Fiziksel Çekirdekler";
+                case 3: return "Fiziksel + Core 0 İzole";
+                case 4: return "AMD X3D CCD0 Kilidi";
+                case 5: return "Intel P-Cores Kilidi";
+                default: return "Özel";
+            }
+        }
+    }
+
+    public class WatchdogConfig
+    {
+        public bool WatchdogActive = true;
+        public bool NotifyOnGameLaunch = true;
+        public bool NotifyOnGameExit = true;
+        public List<GameWatchdogRule> Rules = new List<GameWatchdogRule>();
+        public List<string> BackgroundCageTargets = new List<string>
+        {
+            "discord", "chrome", "spotify", "steamwebhelper", "epicgameslauncher", "msedge", "brave", "onedrive"
+        };
+
+        public void SaveToFile(string path)
+        {
+            try
+            {
+                List<string> lines = new List<string>
+                {
+                    "ARGON_WATCHDOG_CONFIG|10",
+                    "WatchdogActive|" + WatchdogActive,
+                    "NotifyOnGameLaunch|" + NotifyOnGameLaunch,
+                    "NotifyOnGameExit|" + NotifyOnGameExit,
+                    "BGCAGE|" + string.Join(",", BackgroundCageTargets.ToArray())
+                };
+                foreach (var r in Rules)
+                {
+                    lines.Add(string.Format("RULE|{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}",
+                        r.Id,
+                        r.ProcessName,
+                        r.GameTitle,
+                        r.TargetPriority,
+                        r.AffinityMode,
+                        r.EnableEcoCage,
+                        r.EnableIoBoost,
+                        r.IsEnabled));
+                }
+                StateVault.WriteAllLinesAtomic(path, lines.ToArray());
+            }
+            catch { }
+        }
+
+        public static WatchdogConfig LoadFromFile(string path)
+        {
+            WatchdogConfig cfg = new WatchdogConfig();
+            try
+            {
+                if (!File.Exists(path))
+                {
+                    cfg.SeedDefaultRules();
+                    return cfg;
+                }
+                foreach (string line in File.ReadAllLines(path, Encoding.UTF8))
+                {
+                    if (string.IsNullOrWhiteSpace(line)) continue;
+                    string[] parts = line.Split('|');
+                    if (parts[0] == "WatchdogActive" && parts.Length >= 2) bool.TryParse(parts[1], out cfg.WatchdogActive);
+                    else if (parts[0] == "NotifyOnGameLaunch" && parts.Length >= 2) bool.TryParse(parts[1], out cfg.NotifyOnGameLaunch);
+                    else if (parts[0] == "NotifyOnGameExit" && parts.Length >= 2) bool.TryParse(parts[1], out cfg.NotifyOnGameExit);
+                    else if (parts[0] == "BGCAGE" && parts.Length >= 2)
+                    {
+                        cfg.BackgroundCageTargets.Clear();
+                        string[] tgts = parts[1].Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+                        foreach (string t in tgts)
+                        {
+                            string tr = t.Trim().ToLowerInvariant().Replace(".exe", "");
+                            if (!string.IsNullOrEmpty(tr) && !cfg.BackgroundCageTargets.Contains(tr))
+                                cfg.BackgroundCageTargets.Add(tr);
+                        }
+                    }
+                    else if (parts[0] == "RULE" && parts.Length >= 9)
+                    {
+                        GameWatchdogRule r = new GameWatchdogRule
+                        {
+                            Id = parts[1].Trim(),
+                            ProcessName = parts[2].Trim().ToLowerInvariant().Replace(".exe", ""),
+                            GameTitle = parts[3].Trim()
+                        };
+                        try { r.TargetPriority = (ProcessPriorityClass)Enum.Parse(typeof(ProcessPriorityClass), parts[4].Trim()); } catch { r.TargetPriority = ProcessPriorityClass.High; }
+                        int.TryParse(parts[5], out r.AffinityMode);
+                        bool.TryParse(parts[6], out r.EnableEcoCage);
+                        bool.TryParse(parts[7], out r.EnableIoBoost);
+                        bool.TryParse(parts[8], out r.IsEnabled);
+                        cfg.Rules.Add(r);
+                    }
+                }
+                if (cfg.Rules.Count == 0) cfg.SeedDefaultRules();
+                if (cfg.BackgroundCageTargets.Count == 0)
+                {
+                    cfg.BackgroundCageTargets.AddRange(new string[] { "discord", "chrome", "spotify", "steamwebhelper", "epicgameslauncher", "msedge", "brave", "onedrive" });
+                }
+            }
+            catch
+            {
+                cfg.SeedDefaultRules();
+            }
+            return cfg;
+        }
+
+        public void SeedDefaultRules()
+        {
+            Rules.Clear();
+            Rules.Add(new GameWatchdogRule { ProcessName = "cs2", GameTitle = "Counter-Strike 2", TargetPriority = ProcessPriorityClass.High, AffinityMode = 1, EnableEcoCage = true, EnableIoBoost = true, IsEnabled = true });
+            Rules.Add(new GameWatchdogRule { ProcessName = "pathofexile", GameTitle = "Path of Exile 2 / 1", TargetPriority = ProcessPriorityClass.High, AffinityMode = 1, EnableEcoCage = true, EnableIoBoost = true, IsEnabled = true });
+            Rules.Add(new GameWatchdogRule { ProcessName = "pathofexile_x64", GameTitle = "Path of Exile (x64)", TargetPriority = ProcessPriorityClass.High, AffinityMode = 1, EnableEcoCage = true, EnableIoBoost = true, IsEnabled = true });
+            Rules.Add(new GameWatchdogRule { ProcessName = "valorant-win64-shipping", GameTitle = "Valorant", TargetPriority = ProcessPriorityClass.High, AffinityMode = 1, EnableEcoCage = true, EnableIoBoost = true, IsEnabled = true });
+            Rules.Add(new GameWatchdogRule { ProcessName = "dota2", GameTitle = "Dota 2", TargetPriority = ProcessPriorityClass.High, AffinityMode = 1, EnableEcoCage = true, EnableIoBoost = true, IsEnabled = true });
+            Rules.Add(new GameWatchdogRule { ProcessName = "r5apex", GameTitle = "Apex Legends", TargetPriority = ProcessPriorityClass.High, AffinityMode = 1, EnableEcoCage = true, EnableIoBoost = true, IsEnabled = true });
+            Rules.Add(new GameWatchdogRule { ProcessName = "overwatch", GameTitle = "Overwatch 2", TargetPriority = ProcessPriorityClass.High, AffinityMode = 1, EnableEcoCage = true, EnableIoBoost = true, IsEnabled = true });
+        }
+    }
+
+    public class FrametimeBenchmarkResult
+    {
+        public string RunLabel = "Test A (Stok)";
+        public string ProcessName = "";
+        public int ProcessId = 0;
+        public DateTime Timestamp = DateTime.Now;
+        public double DurationSeconds = 0;
+        public int TotalFrames = 0;
+        public double AverageFps = 0;
+        public double OnePercentLowFps = 0;
+        public double ZeroPointOnePercentLowFps = 0;
+        public double FrametimeJitterMs = 0;
+        public double MinFrametimeMs = 0;
+        public double MaxFrametimeMs = 0;
+        public double MedianFrametimeMs = 0;
+        public int DroppedFrames = 0;
+        public string EngineUsed = "Native DWM/QPC";
+        public List<double> FrameTimesMs = new List<double>();
+
+        public void CalculateMetrics(List<double> samples, double durationSec, string engine, int dropped)
+        {
+            EngineUsed = engine;
+            DurationSeconds = durationSec;
+            DroppedFrames = dropped;
+            FrameTimesMs = new List<double>(samples);
+            TotalFrames = samples.Count;
+
+            if (samples.Count == 0) return;
+
+            List<double> sorted = new List<double>(samples);
+            sorted.Sort();
+
+            MinFrametimeMs = sorted[0];
+            MaxFrametimeMs = sorted[sorted.Count - 1];
+            MedianFrametimeMs = sorted[sorted.Count / 2];
+
+            double sumMs = 0;
+            for (int i = 0; i < samples.Count; i++) sumMs += samples[i];
+            AverageFps = durationSec > 0 ? (samples.Count / durationSec) : (samples.Count * 1000.0 / Math.Max(1.0, sumMs));
+
+            double mean = sumMs / samples.Count;
+            double varianceSum = 0;
+            for (int i = 0; i < samples.Count; i++)
+            {
+                double diff = samples[i] - mean;
+                varianceSum += diff * diff;
+            }
+            FrametimeJitterMs = Math.Sqrt(varianceSum / Math.Max(1, samples.Count - 1));
+
+            int idx99 = Math.Min(sorted.Count - 1, (int)(sorted.Count * 0.99));
+            double ft99 = sorted[idx99];
+            OnePercentLowFps = ft99 > 0 ? (1000.0 / ft99) : 0;
+
+            int idx999 = Math.Min(sorted.Count - 1, (int)(sorted.Count * 0.999));
+            double ft999 = sorted[idx999];
+            ZeroPointOnePercentLowFps = ft999 > 0 ? (1000.0 / ft999) : 0;
+        }
+    }
+
     public class QoLAutomationConfig
     {
         // Güç & Kapatma Zamanlayıcısı
@@ -898,6 +1369,11 @@ namespace ArgonLatencyStudio
         public bool HealthRemindersEnabled = false; // Opt-in; default false
         public int HealthReminderIntervalMin = 60;
         public DateTime LastHealthReminderTime = DateTime.MinValue;
+
+        // Bildirim & Monitör Konumlandırma
+        public string NotificationMonitorDevice = "PRIMARY"; // "PRIMARY" or device name like "\\.\DISPLAY1"
+        public int NotificationMonitorIndex = -1; // -1 = Primary, >= 0 = Screen.AllScreens[index]
+        public string NotificationPosition = "BOTTOM_RIGHT"; // "BOTTOM_RIGHT", "TOP_RIGHT", "BOTTOM_LEFT", "TOP_LEFT"
 
         // Akıllı RAM & Standby List Otomasyonu
         public bool AutoRamCleanActive = false;
@@ -929,6 +1405,9 @@ namespace ArgonLatencyStudio
                     "AlarmMaxPlayDurationSec|" + AlarmMaxPlayDurationSec,
                     "HealthRemindersEnabled|" + HealthRemindersEnabled,
                     "HealthReminderIntervalMin|" + HealthReminderIntervalMin,
+                    "NotificationMonitorDevice|" + (NotificationMonitorDevice ?? "PRIMARY"),
+                    "NotificationMonitorIndex|" + NotificationMonitorIndex,
+                    "NotificationPosition|" + (NotificationPosition ?? "BOTTOM_RIGHT"),
                     "AutoRamCleanActive|" + AutoRamCleanActive,
                     "RamFreeThresholdPercent|" + RamFreeThresholdPercent,
                     "RamCleanProtectForegroundGame|" + RamCleanProtectForegroundGame
@@ -1022,6 +1501,9 @@ namespace ArgonLatencyStudio
                     else if (key == "AlarmMaxPlayDurationSec" && int.TryParse(parts[1], out nVal)) cfg.AlarmMaxPlayDurationSec = nVal;
                     else if (key == "HealthRemindersEnabled" && bool.TryParse(parts[1], out bVal)) cfg.HealthRemindersEnabled = bVal;
                     else if (key == "HealthReminderIntervalMin" && int.TryParse(parts[1], out nVal)) cfg.HealthReminderIntervalMin = nVal;
+                    else if (key == "NotificationMonitorDevice") cfg.NotificationMonitorDevice = parts[1].Trim();
+                    else if (key == "NotificationMonitorIndex" && int.TryParse(parts[1], out nVal)) cfg.NotificationMonitorIndex = nVal;
+                    else if (key == "NotificationPosition") cfg.NotificationPosition = parts[1].Trim();
                     else if (key == "AutoRamCleanActive" && bool.TryParse(parts[1], out bVal)) cfg.AutoRamCleanActive = bVal;
                     else if (key == "RamFreeThresholdPercent" && int.TryParse(parts[1], out nVal)) cfg.RamFreeThresholdPercent = nVal;
                     else if (key == "RamCleanProtectForegroundGame" && bool.TryParse(parts[1], out bVal)) cfg.RamCleanProtectForegroundGame = bVal;
@@ -1053,15 +1535,31 @@ namespace ArgonLatencyStudio
                 }
             }
             catch { }
+
+            // Program kapalıyken geçmişte kalmış tüm alarm zamanlarını mevcut andan sonraki ilk periyoda taşı (açılışta geçmiş alarm patlamasını engeller)
+            cfg.FastForwardMissedAlarms(DateTime.Now);
             return cfg;
+        }
+
+        public void FastForwardMissedAlarms(DateTime now)
+        {
+            if (Alarms == null || Alarms.Count == 0) return;
+            for (int i = 0; i < Alarms.Count; i++)
+            {
+                CustomAlarmItem a = Alarms[i];
+                if (a != null && a.IsEnabled && a.NextTrigger <= now)
+                {
+                    CryptoAlarmHelpers.FastForwardAlarmToNextFuture(a, now);
+                }
+            }
         }
     }
 
     public static class CryptoAlarmHelpers
     {
-        public static DateTime GetNextCrypto4HCandleTime()
+        public static DateTime GetNextCrypto4HCandleTime(DateTime fromTime = default(DateTime))
         {
-            DateTime now = DateTime.Now;
+            DateTime now = (fromTime <= DateTime.MinValue.AddDays(1)) ? DateTime.Now : fromTime;
             int[] hours = new int[] { 3, 7, 11, 15, 19, 23 };
             foreach (int h in hours)
             {
@@ -1072,24 +1570,67 @@ namespace ArgonLatencyStudio
             return new DateTime(t.Year, t.Month, t.Day, 3, 0, 0);
         }
 
-        public static DateTime GetNextCryptoDailyCloseTime()
+        public static DateTime GetNextCryptoDailyCloseTime(DateTime fromTime = default(DateTime))
         {
-            DateTime now = DateTime.Now;
+            DateTime now = (fromTime <= DateTime.MinValue.AddDays(1)) ? DateTime.Now : fromTime;
             DateTime cand = new DateTime(now.Year, now.Month, now.Day, 3, 0, 0);
             if (cand > now) return cand;
             DateTime t = now.AddDays(1);
             return new DateTime(t.Year, t.Month, t.Day, 3, 0, 0);
         }
 
-        public static DateTime GetNextCryptoWeeklyCloseTime()
+        public static DateTime GetNextCryptoWeeklyCloseTime(DateTime fromTime = default(DateTime))
         {
-            DateTime now = DateTime.Now;
+            DateTime now = (fromTime <= DateTime.MinValue.AddDays(1)) ? DateTime.Now : fromTime;
             DateTime cand = new DateTime(now.Year, now.Month, now.Day, 3, 0, 0);
             while (cand <= now || cand.DayOfWeek != DayOfWeek.Monday)
             {
                 cand = cand.AddDays(1);
             }
             return cand;
+        }
+
+        public static void FastForwardAlarmToNextFuture(CustomAlarmItem a, DateTime fromTime = default(DateTime))
+        {
+            if (a == null) return;
+            DateTime now = (fromTime <= DateTime.MinValue.AddDays(1)) ? DateTime.Now : fromTime;
+            string type = a.AlarmType ?? "PERIODIC";
+
+            if (type == "CRYPTO_4H")
+            {
+                a.NextTrigger = GetNextCrypto4HCandleTime(now);
+            }
+            else if (type == "CRYPTO_DAILY")
+            {
+                a.NextTrigger = GetNextCryptoDailyCloseTime(now);
+            }
+            else if (type == "CRYPTO_WEEKLY")
+            {
+                a.NextTrigger = GetNextCryptoWeeklyCloseTime(now);
+            }
+            else if (type == "PERIODIC")
+            {
+                int p = Math.Max(1, a.PeriodMinutes);
+                a.NextTrigger = now.AddMinutes(p);
+            }
+            else if (type == "SPECIFIC_TIME")
+            {
+                DateTime targetClock;
+                if (!string.IsNullOrEmpty(a.SpecificTimeHHmm) && DateTime.TryParse(a.SpecificTimeHHmm, out targetClock))
+                {
+                    DateTime sched = new DateTime(now.Year, now.Month, now.Day, targetClock.Hour, targetClock.Minute, 0);
+                    if (sched <= now) sched = sched.AddDays(1);
+                    a.NextTrigger = sched;
+                }
+                else
+                {
+                    a.IsEnabled = false;
+                }
+            }
+            else
+            {
+                a.IsEnabled = false;
+            }
         }
     }
 
@@ -1156,6 +1697,9 @@ namespace ArgonLatencyStudio
 
     public class QoLToastForm : Form
     {
+        private static readonly List<QoLToastForm> activeToasts = new List<QoLToastForm>();
+        private static readonly object activeToastsLock = new object();
+
         private System.Windows.Forms.Timer autoCloseTimer;
         private System.Windows.Forms.Timer pulseTimer;
         private int pulseCount = 0;
@@ -1163,6 +1707,11 @@ namespace ArgonLatencyStudio
         private Color accentColor;
 
         public QoLToastForm(string title, string message, string actionButtonText, Action action, Color accent, int autoCloseSeconds, bool pulseEvery3Sec)
+            : this(title, message, actionButtonText, action, accent, autoCloseSeconds, pulseEvery3Sec, "BOTTOM_RIGHT", -1, "PRIMARY")
+        {
+        }
+
+        public QoLToastForm(string title, string message, string actionButtonText, Action action, Color accent, int autoCloseSeconds, bool pulseEvery3Sec, string position, int monitorIndex, string monitorDevice)
         {
             this.FormBorderStyle = FormBorderStyle.None;
             this.StartPosition = FormStartPosition.Manual;
@@ -1173,8 +1722,94 @@ namespace ArgonLatencyStudio
             this.accentColor = accent;
             this.onActionClick = action;
 
-            Rectangle workArea = Screen.PrimaryScreen.WorkingArea;
-            this.Location = new Point(workArea.Right - this.Width - 20, workArea.Bottom - this.Height - 20);
+            // Resolve target monitor
+            Screen targetScreen = Screen.PrimaryScreen;
+            try
+            {
+                Screen[] allScreens = Screen.AllScreens;
+                if (allScreens != null && allScreens.Length > 0)
+                {
+                    bool found = false;
+                    if (!string.IsNullOrEmpty(monitorDevice) && !monitorDevice.Equals("PRIMARY", StringComparison.OrdinalIgnoreCase))
+                    {
+                        foreach (Screen s in allScreens)
+                        {
+                            if (string.Equals(s.DeviceName, monitorDevice, StringComparison.OrdinalIgnoreCase))
+                            {
+                                targetScreen = s;
+                                found = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (!found && monitorIndex >= 0 && monitorIndex < allScreens.Length)
+                    {
+                        targetScreen = allScreens[monitorIndex];
+                    }
+                }
+            }
+            catch { }
+            if (targetScreen == null) targetScreen = Screen.PrimaryScreen;
+
+            // Track active toasts to avoid overlaps and stack cleanly
+            int stackOffsetIndex = 0;
+            lock (activeToastsLock)
+            {
+                for (int i = activeToasts.Count - 1; i >= 0; i--)
+                {
+                    if (activeToasts[i] == null || activeToasts[i].IsDisposed)
+                    {
+                        activeToasts.RemoveAt(i);
+                    }
+                }
+                stackOffsetIndex = activeToasts.Count;
+                activeToasts.Add(this);
+            }
+
+            this.FormClosed += (s, e) =>
+            {
+                lock (activeToastsLock)
+                {
+                    activeToasts.Remove(this);
+                }
+            };
+
+            // Calculate exact position on selected monitor
+            Rectangle workArea = targetScreen.WorkingArea;
+            int marginX = 20;
+            int marginY = 20;
+            int stackDelta = Math.Min(3, stackOffsetIndex) * (this.Height + 10);
+            string pos = (position ?? "BOTTOM_RIGHT").ToUpperInvariant();
+
+            int posX = workArea.Right - this.Width - marginX;
+            int posY = workArea.Bottom - this.Height - marginY;
+
+            if (pos == "TOP_RIGHT")
+            {
+                posX = workArea.Right - this.Width - marginX;
+                posY = workArea.Top + marginY + stackDelta;
+                if (posY + this.Height > workArea.Bottom) posY = workArea.Bottom - this.Height - marginY;
+            }
+            else if (pos == "TOP_LEFT")
+            {
+                posX = workArea.Left + marginX;
+                posY = workArea.Top + marginY + stackDelta;
+                if (posY + this.Height > workArea.Bottom) posY = workArea.Bottom - this.Height - marginY;
+            }
+            else if (pos == "BOTTOM_LEFT")
+            {
+                posX = workArea.Left + marginX;
+                posY = workArea.Bottom - this.Height - marginY - stackDelta;
+                if (posY < workArea.Top) posY = workArea.Top + marginY;
+            }
+            else // "BOTTOM_RIGHT" or default (Saat bölgesi)
+            {
+                posX = workArea.Right - this.Width - marginX;
+                posY = workArea.Bottom - this.Height - marginY - stackDelta;
+                if (posY < workArea.Top) posY = workArea.Top + marginY;
+            }
+
+            this.Location = new Point(posX, posY);
 
             this.Paint += (s, e) =>
             {
@@ -1483,6 +2118,7 @@ namespace ArgonLatencyStudio
         public Guid OriginalPowerScheme = Guid.Empty;
         public Guid SessionCustomPowerScheme = Guid.Empty;
         public Dictionary<string, uint> PowerSettingRequests = new Dictionary<string, uint>();
+        public Dictionary<string, uint> PowerSettingRequestsDC = new Dictionary<string, uint>();
 
         public int[] OriginalMouseAccel = new int[3];
         public int OriginalMouseSensitivity = 10;
@@ -1770,6 +2406,55 @@ namespace ArgonLatencyStudio
             return fallback;
         }
 
+        public bool TryReadActivePowerValues(Guid subGroup, Guid setting, out uint acVal, out uint dcVal)
+        {
+            acVal = 0;
+            dcVal = 0;
+            try
+            {
+                IntPtr pGuid;
+                if (NativeMethods.PowerGetActiveScheme(IntPtr.Zero, out pGuid) == 0 && pGuid != IntPtr.Zero)
+                {
+                    Guid scheme = (Guid)Marshal.PtrToStructure(pGuid, typeof(Guid));
+                    NativeMethods.LocalFree(pGuid);
+                    uint a = 0, d = 0;
+                    bool okA = (NativeMethods.PowerReadACValueIndex(IntPtr.Zero, ref scheme, ref subGroup, ref setting, out a) == 0);
+                    bool okD = (NativeMethods.PowerReadDCValueIndex(IntPtr.Zero, ref scheme, ref subGroup, ref setting, out d) == 0);
+                    if (okA || okD)
+                    {
+                        acVal = okA ? a : d;
+                        dcVal = okD ? d : a;
+                        return true;
+                    }
+                }
+            }
+            catch { }
+            return false;
+        }
+
+        public string GetActivePowerSchemeInfo(out Guid activeGuid)
+        {
+            activeGuid = Guid.Empty;
+            try
+            {
+                IntPtr pGuid;
+                if (NativeMethods.PowerGetActiveScheme(IntPtr.Zero, out pGuid) == 0 && pGuid != IntPtr.Zero)
+                {
+                    activeGuid = (Guid)Marshal.PtrToStructure(pGuid, typeof(Guid));
+                    NativeMethods.LocalFree(pGuid);
+
+                    StringBuilder sb = new StringBuilder(256);
+                    uint bufSize = (uint)sb.Capacity * 2;
+                    if (NativeMethods.PowerReadFriendlyName(IntPtr.Zero, ref activeGuid, IntPtr.Zero, IntPtr.Zero, sb, ref bufSize) == 0 && sb.Length > 0)
+                    {
+                        return sb.ToString();
+                    }
+                }
+            }
+            catch { }
+            return "Aktif Güç Planı";
+        }
+
         public void SaveJournal()
         {
             try
@@ -1856,6 +2541,132 @@ namespace ArgonLatencyStudio
             }
         }
 
+        public bool DeleteRegistryTracked(string friendlyTweakName, string hiveName, string subKey, string valueName)
+        {
+            string keyId = hiveName + "\\" + subKey + "\\" + valueName;
+            try
+            {
+                RegistryKey baseKey = (hiveName == "HKLM") ? Registry.LocalMachine : Registry.CurrentUser;
+                if (!RegistryBackups.ContainsKey(keyId))
+                {
+                    RegistryBackupEntry backup = new RegistryBackupEntry
+                    {
+                        HiveName = hiveName,
+                        SubKey = subKey,
+                        ValueName = valueName,
+                        ExistedBefore = false,
+                        Kind = RegistryValueKind.String,
+                        SerializedValue = "",
+                        FriendlyTweakName = friendlyTweakName
+                    };
+
+                    using (RegistryKey existingKey = baseKey.OpenSubKey(subKey, false))
+                    {
+                        if (existingKey != null)
+                        {
+                            object oldObj = existingKey.GetValue(valueName, null);
+                            if (oldObj != null)
+                            {
+                                backup.ExistedBefore = true;
+                                backup.Kind = existingKey.GetValueKind(valueName);
+                                backup.SerializedValue = Convert.ToString(oldObj);
+                            }
+                        }
+                    }
+                    RegistryBackups[keyId] = backup;
+                }
+
+                using (RegistryKey writeKey = baseKey.OpenSubKey(subKey, true))
+                {
+                    if (writeKey != null)
+                        writeKey.DeleteValue(valueName, false);
+                }
+
+                RegistryBackups[keyId].CurrentAppliedSummary = "(Varsayılan / Kaldırıldı)";
+                SaveJournal();
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public const string DirectXUserGpuPreferencesPath = @"Software\Microsoft\DirectX\UserGpuPreferences";
+        public const string DirectXGlobalValueName = "DirectXUserGlobalSettings";
+        public const string AppCompatLayersPath = @"Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers";
+
+        public static Dictionary<string, string> ParseSemicolonSettings(string raw)
+        {
+            Dictionary<string, string> dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (string.IsNullOrEmpty(raw)) return dict;
+            string[] parts = raw.Split(new char[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (string part in parts)
+            {
+                int eq = part.IndexOf('=');
+                if (eq > 0)
+                {
+                    string k = part.Substring(0, eq).Trim();
+                    string v = part.Substring(eq + 1).Trim();
+                    if (!string.IsNullOrEmpty(k))
+                        dict[k] = v;
+                }
+            }
+            return dict;
+        }
+
+        public static string FormatSemicolonSettings(Dictionary<string, string> dict)
+        {
+            if (dict == null || dict.Count == 0) return "";
+            StringBuilder sb = new StringBuilder();
+            foreach (var kv in dict)
+            {
+                sb.Append(kv.Key).Append("=").Append(kv.Value).Append(";");
+            }
+            return sb.ToString();
+        }
+
+        public bool UpdateDirectXPreferenceTokensTracked(string friendlyTweakName, string valueName, Dictionary<string, string> updates)
+        {
+            string currentRaw = ReadRegistryDisplay("HKCU", DirectXUserGpuPreferencesPath, valueName, "");
+            Dictionary<string, string> tokens = ParseSemicolonSettings(currentRaw);
+            foreach (var kv in updates)
+            {
+                if (kv.Value == null)
+                    tokens.Remove(kv.Key);
+                else
+                    tokens[kv.Key] = kv.Value;
+            }
+            string updated = FormatSemicolonSettings(tokens);
+            if (string.IsNullOrEmpty(updated))
+                return DeleteRegistryTracked(friendlyTweakName, "HKCU", DirectXUserGpuPreferencesPath, valueName);
+            return SetRegistryTracked(friendlyTweakName, "HKCU", DirectXUserGpuPreferencesPath, valueName, updated, RegistryValueKind.String);
+        }
+
+        public bool UpdateAppCompatLayerFlagTracked(string friendlyTweakName, string exeFullPath, string flagName, bool enable)
+        {
+            string raw = ReadRegistryDisplay("HKCU", AppCompatLayersPath, exeFullPath, "").Trim();
+            List<string> flags = new List<string>();
+            if (!string.IsNullOrEmpty(raw))
+            {
+                string[] parts = raw.Split(new char[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                foreach (string part in parts)
+                {
+                    if (part == "~") continue;
+                    if (!string.Equals(part, flagName, StringComparison.OrdinalIgnoreCase))
+                        flags.Add(part);
+                }
+            }
+            if (enable && !flags.Contains(flagName))
+                flags.Add(flagName);
+
+            if (flags.Count == 0)
+                return DeleteRegistryTracked(friendlyTweakName, "HKCU", AppCompatLayersPath, exeFullPath);
+
+            string newValue = "~ " + string.Join(" ", flags.ToArray());
+            return SetRegistryTracked(friendlyTweakName, "HKCU", AppCompatLayersPath, exeFullPath, newValue, RegistryValueKind.String);
+        }
+
         public void RevertRegistryTracked(string hiveName, string subKey, string valueName)
         {
             string keyId = hiveName + "\\" + subKey + "\\" + valueName;
@@ -1872,7 +2683,7 @@ namespace ArgonLatencyStudio
             try
             {
                 RegistryKey baseKey = (hiveName == "HKLM") ? Registry.LocalMachine : Registry.CurrentUser;
-                using (RegistryKey writeKey = baseKey.OpenSubKey(subKey, true))
+                using (RegistryKey writeKey = existedBefore ? baseKey.CreateSubKey(subKey) : baseKey.OpenSubKey(subKey, true))
                 {
                     if (writeKey == null) return;
                     if (!existedBefore)
@@ -1922,16 +2733,24 @@ namespace ArgonLatencyStudio
             }
         }
 
-        public void ApplyPowerSettingTracked(string keyTag, Guid subGroup, Guid setting, uint acValue)
+        public void ApplyPowerSettingTracked(string keyTag, Guid subGroup, Guid setting, uint acValue, uint dcValue)
         {
             PowerSettingRequests[keyTag] = acValue;
+            PowerSettingRequestsDC[keyTag] = dcValue;
             RebuildSessionPowerPlan();
+        }
+
+        public void ApplyPowerSettingTracked(string keyTag, Guid subGroup, Guid setting, uint acValue)
+        {
+            ApplyPowerSettingTracked(keyTag, subGroup, setting, acValue, acValue);
         }
 
         public void RemovePowerSettingTracked(string keyTag)
         {
             if (PowerSettingRequests.ContainsKey(keyTag))
                 PowerSettingRequests.Remove(keyTag);
+            if (PowerSettingRequestsDC.ContainsKey(keyTag))
+                PowerSettingRequestsDC.Remove(keyTag);
             RebuildSessionPowerPlan();
         }
 
@@ -1964,9 +2783,10 @@ namespace ArgonLatencyStudio
                         string[] parts = kv.Key.Split('|');
                         Guid sub = new Guid(parts[0]);
                         Guid set = new Guid(parts[1]);
-                        uint val = kv.Value;
-                        NativeMethods.PowerWriteACValueIndex(IntPtr.Zero, ref SessionCustomPowerScheme, ref sub, ref set, val);
-                        NativeMethods.PowerWriteDCValueIndex(IntPtr.Zero, ref SessionCustomPowerScheme, ref sub, ref set, val);
+                        uint acVal = kv.Value;
+                        uint dcVal = PowerSettingRequestsDC.ContainsKey(kv.Key) ? PowerSettingRequestsDC[kv.Key] : acVal;
+                        NativeMethods.PowerWriteACValueIndex(IntPtr.Zero, ref SessionCustomPowerScheme, ref sub, ref set, acVal);
+                        NativeMethods.PowerWriteDCValueIndex(IntPtr.Zero, ref SessionCustomPowerScheme, ref sub, ref set, dcVal);
                     }
                     NativeMethods.PowerSetActiveScheme(IntPtr.Zero, ref SessionCustomPowerScheme);
                 }
@@ -1979,6 +2799,7 @@ namespace ArgonLatencyStudio
             try
             {
                 PowerSettingRequests.Clear();
+                PowerSettingRequestsDC.Clear();
                 if (OriginalPowerScheme != Guid.Empty)
                     NativeMethods.PowerSetActiveScheme(IntPtr.Zero, ref OriginalPowerScheme);
                 if (SessionCustomPowerScheme != Guid.Empty)
@@ -2143,6 +2964,773 @@ namespace ArgonLatencyStudio
                 }
             }
             catch { return ""; }
+        }
+    }
+
+    #endregion
+
+    #region DXGI & DWM Presentation Advisor
+
+    public class DxgiAdapterInfo
+    {
+        public int Index = 0;
+        public string Description = "";
+        public uint VendorId = 0;
+        public uint DeviceId = 0;
+        public ulong DedicatedVramMb = 0;
+        public bool IsSoftware = false;
+    }
+
+    public class DxgiOutputInfo
+    {
+        public string AdapterName = "";
+        public string DeviceName = "";
+        public int Left = 0;
+        public int Top = 0;
+        public int Width = 0;
+        public int Height = 0;
+        public uint RefreshRateHz = 0;
+        public uint BitsPerColor = 8;
+        public int ColorSpace = 0;
+        public bool IsHdrActive = false;
+        public float MaxLuminanceNits = 0f;
+        public bool SupportsOverlaysMpo = false;
+        public bool HwCompFullscreen = false;
+        public bool HwCompWindowed = false;
+        public bool HwCompCursorStretched = false;
+        public bool HasOutput6 = false;
+        public bool AttachedToDesktop = false;
+    }
+
+    public class DxgiHardwareReport
+    {
+        public List<DxgiAdapterInfo> Adapters = new List<DxgiAdapterInfo>();
+        public List<DxgiOutputInfo> Outputs = new List<DxgiOutputInfo>();
+        public bool DwmTimingOk = false;
+        public double DwmRefreshHz = 0.0;
+        public double DwmComposeHz = 0.0;
+        public ulong DwmFramesDropped = 0;
+        public ulong DwmFramesMissed = 0;
+        public string ProbeError = "";
+    }
+
+    public static class DxgiPresentationProbe
+    {
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+        private delegate int EnumAdapters1Del(IntPtr pFactory, uint index, out IntPtr ppAdapter);
+
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+        private delegate int AdapterGetDesc1Del(IntPtr pAdapter, out NativeMethods.DXGI_ADAPTER_DESC1 pDesc);
+
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+        private delegate int EnumOutputsDel(IntPtr pAdapter, uint index, out IntPtr ppOutput);
+
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+        private delegate int OutputGetDescDel(IntPtr pOutput, out NativeMethods.DXGI_OUTPUT_DESC pDesc);
+
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+        private delegate int SupportsOverlaysDel(IntPtr pOutput2);
+
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+        private delegate int OutputGetDesc1Del(IntPtr pOutput6, out NativeMethods.DXGI_OUTPUT_DESC1 pDesc1);
+
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+        private delegate int CheckHwCompDel(IntPtr pOutput6, out uint pFlags);
+
+        public static DxgiHardwareReport ProbeSystemDisplays()
+        {
+            DxgiHardwareReport report = new DxgiHardwareReport();
+
+            // 1. Live DWM Composition Timing (must pass IntPtr.Zero on Win8/10/11)
+            try
+            {
+                NativeMethods.DWM_TIMING_INFO ti = new NativeMethods.DWM_TIMING_INFO();
+                ti.cbSize = (uint)Marshal.SizeOf(typeof(NativeMethods.DWM_TIMING_INFO));
+                int hrDwm = NativeMethods.DwmGetCompositionTimingInfo(IntPtr.Zero, ref ti);
+                if (hrDwm == 0)
+                {
+                    report.DwmTimingOk = true;
+                    if (ti.rateRefresh.uiDenominator > 0)
+                        report.DwmRefreshHz = (double)ti.rateRefresh.uiNumerator / ti.rateRefresh.uiDenominator;
+                    if (ti.rateCompose.uiDenominator > 0)
+                        report.DwmComposeHz = (double)ti.rateCompose.uiNumerator / ti.rateCompose.uiDenominator;
+                    report.DwmFramesDropped = ti.cFramesDropped;
+                    report.DwmFramesMissed = ti.cFramesMissed;
+                }
+            }
+            catch { }
+
+            // 2. Native DXGI 1.1 / 1.3 / 1.6 Hardware Probe
+            IntPtr pFactory = IntPtr.Zero;
+            try
+            {
+                Guid iidFactory1 = new Guid("770aae78-f26f-4dba-a829-253c83d1b387");
+                int hrFactory = NativeMethods.CreateDXGIFactory1(ref iidFactory1, out pFactory);
+                if (hrFactory != 0 || pFactory == IntPtr.Zero)
+                {
+                    report.ProbeError = string.Format("CreateDXGIFactory1 HR=0x{0:X}", hrFactory);
+                    return report;
+                }
+
+                IntPtr vtFactory = Marshal.ReadIntPtr(pFactory);
+                EnumAdapters1Del enumAdapters1 = (EnumAdapters1Del)Marshal.GetDelegateForFunctionPointer(
+                    Marshal.ReadIntPtr(vtFactory, IntPtr.Size * 12), typeof(EnumAdapters1Del));
+
+                uint adapterIdx = 0;
+                IntPtr pAdapter = IntPtr.Zero;
+                while (enumAdapters1(pFactory, adapterIdx, out pAdapter) == 0 && pAdapter != IntPtr.Zero)
+                {
+                    try
+                    {
+                        IntPtr vtAdapter = Marshal.ReadIntPtr(pAdapter);
+                        AdapterGetDesc1Del getAdapterDesc1 = (AdapterGetDesc1Del)Marshal.GetDelegateForFunctionPointer(
+                            Marshal.ReadIntPtr(vtAdapter, IntPtr.Size * 10), typeof(AdapterGetDesc1Del));
+                        EnumOutputsDel enumOutputs = (EnumOutputsDel)Marshal.GetDelegateForFunctionPointer(
+                            Marshal.ReadIntPtr(vtAdapter, IntPtr.Size * 7), typeof(EnumOutputsDel));
+
+                        NativeMethods.DXGI_ADAPTER_DESC1 aDesc;
+                        DxgiAdapterInfo aInfo = new DxgiAdapterInfo { Index = (int)adapterIdx };
+                        if (getAdapterDesc1(pAdapter, out aDesc) == 0)
+                        {
+                            aInfo.Description = (aDesc.Description ?? "").Trim();
+                            aInfo.VendorId = aDesc.VendorId;
+                            aInfo.DeviceId = aDesc.DeviceId;
+                            aInfo.DedicatedVramMb = aDesc.DedicatedVideoMemory.ToUInt64() / (1024UL * 1024UL);
+                            aInfo.IsSoftware = (aDesc.Flags & 0x2) != 0;
+                        }
+                        report.Adapters.Add(aInfo);
+
+                        if (!aInfo.IsSoftware)
+                        {
+                            uint outIdx = 0;
+                            IntPtr pOutput = IntPtr.Zero;
+                            while (enumOutputs(pAdapter, outIdx, out pOutput) == 0 && pOutput != IntPtr.Zero)
+                            {
+                                try
+                                {
+                                    DxgiOutputInfo oInfo = ProbeSingleOutput(pOutput, aInfo.Description);
+                                    if (oInfo != null && oInfo.AttachedToDesktop)
+                                        report.Outputs.Add(oInfo);
+                                }
+                                finally
+                                {
+                                    Marshal.Release(pOutput);
+                                }
+                                outIdx++;
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        Marshal.Release(pAdapter);
+                    }
+                    adapterIdx++;
+                }
+            }
+            catch (Exception ex)
+            {
+                report.ProbeError = ex.Message;
+            }
+            finally
+            {
+                if (pFactory != IntPtr.Zero) Marshal.Release(pFactory);
+            }
+
+            return report;
+        }
+
+        private static DxgiOutputInfo ProbeSingleOutput(IntPtr pOutput, string adapterName)
+        {
+            DxgiOutputInfo info = new DxgiOutputInfo();
+            info.AdapterName = adapterName ?? "";
+
+            Guid iidOutput6 = new Guid("068346e8-aaec-4b84-add7-137f513f77a1");
+            IntPtr pOutput6 = IntPtr.Zero;
+            if (Marshal.QueryInterface(pOutput, ref iidOutput6, out pOutput6) == 0 && pOutput6 != IntPtr.Zero)
+            {
+                try
+                {
+                    info.HasOutput6 = true;
+                    IntPtr vt = Marshal.ReadIntPtr(pOutput6);
+                    SupportsOverlaysDel supportsOv = (SupportsOverlaysDel)Marshal.GetDelegateForFunctionPointer(
+                        Marshal.ReadIntPtr(vt, IntPtr.Size * 23), typeof(SupportsOverlaysDel));
+                    OutputGetDesc1Del getDesc1 = (OutputGetDesc1Del)Marshal.GetDelegateForFunctionPointer(
+                        Marshal.ReadIntPtr(vt, IntPtr.Size * 27), typeof(OutputGetDesc1Del));
+                    CheckHwCompDel checkHw = (CheckHwCompDel)Marshal.GetDelegateForFunctionPointer(
+                        Marshal.ReadIntPtr(vt, IntPtr.Size * 28), typeof(CheckHwCompDel));
+
+                    info.SupportsOverlaysMpo = (supportsOv(pOutput6) != 0);
+
+                    NativeMethods.DXGI_OUTPUT_DESC1 d1;
+                    if (getDesc1(pOutput6, out d1) == 0)
+                    {
+                        info.DeviceName = (d1.DeviceName ?? "").Trim();
+                        info.Left = d1.DesktopCoordinates.Left;
+                        info.Top = d1.DesktopCoordinates.Top;
+                        info.Width = d1.DesktopCoordinates.Width;
+                        info.Height = d1.DesktopCoordinates.Height;
+                        info.AttachedToDesktop = (d1.AttachedToDesktop != 0);
+                        info.BitsPerColor = d1.BitsPerColor;
+                        info.ColorSpace = d1.ColorSpace;
+                        // DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020 (12) = HDR10
+                        info.IsHdrActive = (d1.ColorSpace == 12);
+                        info.MaxLuminanceNits = d1.MaxLuminance;
+                    }
+
+                    uint flags = 0;
+                    if (checkHw(pOutput6, out flags) == 0)
+                    {
+                        info.HwCompFullscreen = (flags & 0x1) != 0;
+                        info.HwCompWindowed = (flags & 0x2) != 0;
+                        info.HwCompCursorStretched = (flags & 0x4) != 0;
+                    }
+                }
+                finally
+                {
+                    Marshal.Release(pOutput6);
+                }
+            }
+            else
+            {
+                // Fallback to IDXGIOutput (slot 7) & IDXGIOutput2 (slot 23) for older Windows builds
+                IntPtr vtBase = Marshal.ReadIntPtr(pOutput);
+                OutputGetDescDel getDesc = (OutputGetDescDel)Marshal.GetDelegateForFunctionPointer(
+                    Marshal.ReadIntPtr(vtBase, IntPtr.Size * 7), typeof(OutputGetDescDel));
+                NativeMethods.DXGI_OUTPUT_DESC d;
+                if (getDesc(pOutput, out d) == 0)
+                {
+                    info.DeviceName = (d.DeviceName ?? "").Trim();
+                    info.Left = d.DesktopCoordinates.Left;
+                    info.Top = d.DesktopCoordinates.Top;
+                    info.Width = d.DesktopCoordinates.Width;
+                    info.Height = d.DesktopCoordinates.Height;
+                    info.AttachedToDesktop = (d.AttachedToDesktop != 0);
+                }
+
+                Guid iidOutput2 = new Guid("595e39d1-2724-4663-99b1-da969de28364");
+                IntPtr pOutput2 = IntPtr.Zero;
+                if (Marshal.QueryInterface(pOutput, ref iidOutput2, out pOutput2) == 0 && pOutput2 != IntPtr.Zero)
+                {
+                    try
+                    {
+                        IntPtr vt2 = Marshal.ReadIntPtr(pOutput2);
+                        SupportsOverlaysDel supportsOv2 = (SupportsOverlaysDel)Marshal.GetDelegateForFunctionPointer(
+                            Marshal.ReadIntPtr(vt2, IntPtr.Size * 23), typeof(SupportsOverlaysDel));
+                        info.SupportsOverlaysMpo = (supportsOv2(pOutput2) != 0);
+                    }
+                    finally
+                    {
+                        Marshal.Release(pOutput2);
+                    }
+                }
+            }
+
+            if (!string.IsNullOrEmpty(info.DeviceName))
+            {
+                uint mw, mh, mhz, mbpp;
+                if (NativeMethods.QueryDisplayModeMetrics(info.DeviceName, out mw, out mh, out mhz, out mbpp))
+                {
+                    info.RefreshRateHz = mhz;
+                    if (mw > 0 && mh > 0)
+                    {
+                        info.Width = (int)mw;
+                        info.Height = (int)mh;
+                    }
+                }
+            }
+
+            return info;
+        }
+    }
+
+    public class PerGameDirectXRule
+    {
+        public string ExePath = "";
+        public string ExeName = "";
+        public int GpuPreference = 0; // 0 = Windows Decide, 1 = Power Saving iGPU, 2 = High Perf dGPU
+        public int SwapEffectUpgradeOverride = -1; // -1 = Global Default, 0 = Force Off, 1 = Force On
+        public bool DisableFullscreenOptimizations = false;
+        public string RawDxTokens = "";
+        public string RawAppCompat = "";
+    }
+
+    public class PresentationPolicySnapshot
+    {
+        public int OsMajor = 0;
+        public int OsMinor = 0;
+        public int OsBuild = 0;
+        public int OsUbr = 0;
+        public string OsDisplayVersion = "";
+        public string OsFriendlyName = "";
+        public bool IsWin11 = false;
+        public bool SupportsWindowedOptimizationsOs = false;
+
+        public DxgiHardwareReport Hardware = new DxgiHardwareReport();
+
+        public int HagsMode = -1; // -1=Default/Absent, 0=Disabled, 1=Off, 2=On
+        public string TdrDelay = "";
+        public string OverlayTestMode = ""; // "5" = disabled
+        public string DisableOverlays = ""; // "1" = disabled
+        public bool MpoRegistryBlocked = false;
+
+        public string RawDirectXGlobalSettings = "";
+        public int SwapEffectUpgradeEnable = -1; // -1=Absent, 0=Off, 1=On
+        public int VrrOptimizeEnable = -1;
+        public int AutoHdrEnable = -1;
+
+        public string GameDvrEnabled = "";
+        public string AppCaptureEnabled = "";
+        public string FseBehaviorMode = "";
+        public string HonorUserFseBehaviorMode = "";
+        public string DxgiHonorFseCompatible = "";
+        public string DseBehavior = "";
+
+        public bool StaleWrongKeyExists = false;
+
+        public List<PerGameDirectXRule> PerGameRules = new List<PerGameDirectXRule>();
+        public List<string> Conflicts = new List<string>();
+        public List<string> Advisories = new List<string>();
+    }
+
+    public static class PresentationAdvisorEngine
+    {
+        public static PresentationPolicySnapshot CaptureSnapshot(StateVault vault)
+        {
+            PresentationPolicySnapshot snap = new PresentationPolicySnapshot();
+
+            NativeMethods.GetRealOsVersionInfo(out snap.OsMajor, out snap.OsMinor, out snap.OsBuild, out snap.OsUbr, out snap.OsDisplayVersion);
+            snap.IsWin11 = (snap.OsMajor >= 10 && snap.OsBuild >= 22000);
+            snap.SupportsWindowedOptimizationsOs = (snap.OsMajor >= 10 && snap.OsBuild >= 22621);
+            snap.OsFriendlyName = snap.IsWin11
+                ? string.Format("Windows 11 {0} (Build {1}.{2})", snap.OsDisplayVersion, snap.OsBuild, snap.OsUbr).Replace("  ", " ")
+                : string.Format("Windows {0}.{1} {2} (Build {3}.{4})", snap.OsMajor, snap.OsMinor, snap.OsDisplayVersion, snap.OsBuild, snap.OsUbr).Replace("  ", " ");
+
+            snap.Hardware = DxgiPresentationProbe.ProbeSystemDisplays();
+
+            // Read GraphicsDrivers
+            string gfxKey = @"SYSTEM\CurrentControlSet\Control\GraphicsDrivers";
+            string hagsRaw = vault.ReadRegistryDisplay("HKLM", gfxKey, "HwSchMode", "");
+            int hagsVal;
+            if (int.TryParse(hagsRaw, out hagsVal)) snap.HagsMode = hagsVal;
+            snap.TdrDelay = vault.ReadRegistryDisplay("HKLM", gfxKey, "TdrDelay", "");
+            snap.DisableOverlays = vault.ReadRegistryDisplay("HKLM", gfxKey, "DisableOverlays", "");
+
+            // Read DWM MPO Registry
+            snap.OverlayTestMode = vault.ReadRegistryDisplay("HKLM", @"SOFTWARE\Microsoft\Windows\Dwm", "OverlayTestMode", "");
+            snap.MpoRegistryBlocked = (snap.OverlayTestMode == "5" || snap.DisableOverlays == "1");
+
+            // Read DirectX Global Settings
+            snap.RawDirectXGlobalSettings = vault.ReadRegistryDisplay("HKCU", StateVault.DirectXUserGpuPreferencesPath, StateVault.DirectXGlobalValueName, "");
+            Dictionary<string, string> dxTokens = StateVault.ParseSemicolonSettings(snap.RawDirectXGlobalSettings);
+            snap.SwapEffectUpgradeEnable = ParseTokenInt(dxTokens, "SwapEffectUpgradeEnable", -1);
+            snap.VrrOptimizeEnable = ParseTokenInt(dxTokens, "VRROptimizeEnable", -1);
+            snap.AutoHdrEnable = ParseTokenInt(dxTokens, "AutoHDREnable", -1);
+
+            // Check stale dead key from older Argon bug (`UserGlobalSettings`)
+            try
+            {
+                using (RegistryKey kStale = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\DirectX\UserGlobalSettings", false))
+                {
+                    if (kStale != null) snap.StaleWrongKeyExists = true;
+                }
+            }
+            catch { }
+
+            // Read GameConfigStore & GameDVR
+            string gcKey = @"System\GameConfigStore";
+            snap.GameDvrEnabled = vault.ReadRegistryDisplay("HKCU", gcKey, "GameDVR_Enabled", "");
+            snap.FseBehaviorMode = vault.ReadRegistryDisplay("HKCU", gcKey, "GameDVR_FSEBehaviorMode", "");
+            snap.HonorUserFseBehaviorMode = vault.ReadRegistryDisplay("HKCU", gcKey, "GameDVR_HonorUserFSEBehaviorMode", "");
+            snap.DxgiHonorFseCompatible = vault.ReadRegistryDisplay("HKCU", gcKey, "GameDVR_DXGIHonorFSEWindowsCompatible", "");
+            snap.DseBehavior = vault.ReadRegistryDisplay("HKCU", gcKey, "GameDVR_DSEBehavior", "");
+            snap.AppCaptureEnabled = vault.ReadRegistryDisplay("HKCU", @"SOFTWARE\Microsoft\Windows\CurrentVersion\GameDVR", "AppCaptureEnabled", "");
+
+            // Read Per-Game DirectX & AppCompat rules
+            LoadPerGameRules(snap);
+
+            // Evaluate Conflicts & Advisories
+            AnalyzeConflicts(snap);
+
+            return snap;
+        }
+
+        private static int ParseTokenInt(Dictionary<string, string> tokens, string key, int fallback)
+        {
+            string val;
+            int parsed;
+            if (tokens.TryGetValue(key, out val) && int.TryParse(val, out parsed))
+                return parsed;
+            return fallback;
+        }
+
+        private static void LoadPerGameRules(PresentationPolicySnapshot snap)
+        {
+            Dictionary<string, PerGameDirectXRule> map = new Dictionary<string, PerGameDirectXRule>(StringComparer.OrdinalIgnoreCase);
+
+            try
+            {
+                using (RegistryKey dxKey = Registry.CurrentUser.OpenSubKey(StateVault.DirectXUserGpuPreferencesPath, false))
+                {
+                    if (dxKey != null)
+                    {
+                        foreach (string valName in dxKey.GetValueNames())
+                        {
+                            if (string.IsNullOrEmpty(valName) || string.Equals(valName, StateVault.DirectXGlobalValueName, StringComparison.OrdinalIgnoreCase))
+                                continue;
+                            if (!valName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+                                continue;
+
+                            string raw = Convert.ToString(dxKey.GetValue(valName, ""));
+                            var toks = StateVault.ParseSemicolonSettings(raw);
+                            PerGameDirectXRule rule = new PerGameDirectXRule();
+                            rule.ExePath = valName;
+                            rule.ExeName = Path.GetFileName(valName);
+                            rule.RawDxTokens = raw;
+                            rule.GpuPreference = ParseTokenInt(toks, "GpuPreference", 0);
+                            rule.SwapEffectUpgradeOverride = ParseTokenInt(toks, "SwapEffectUpgradeEnable", -1);
+                            map[valName] = rule;
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            try
+            {
+                using (RegistryKey acKey = Registry.CurrentUser.OpenSubKey(StateVault.AppCompatLayersPath, false))
+                {
+                    if (acKey != null)
+                    {
+                        foreach (string valName in acKey.GetValueNames())
+                        {
+                            if (string.IsNullOrEmpty(valName) || !valName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+                                continue;
+                            string raw = Convert.ToString(acKey.GetValue(valName, ""));
+                            bool disFso = raw.IndexOf("DISABLEDXMAXIMIZEDWINDOWEDMODE", StringComparison.OrdinalIgnoreCase) >= 0;
+                            if (!map.ContainsKey(valName) && !disFso)
+                                continue;
+
+                            PerGameDirectXRule rule;
+                            if (!map.TryGetValue(valName, out rule))
+                            {
+                                rule = new PerGameDirectXRule();
+                                rule.ExePath = valName;
+                                rule.ExeName = Path.GetFileName(valName);
+                                map[valName] = rule;
+                            }
+                            rule.DisableFullscreenOptimizations = disFso;
+                            rule.RawAppCompat = raw;
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            foreach (var r in map.Values)
+                snap.PerGameRules.Add(r);
+
+            snap.PerGameRules.Sort((a, b) => string.Compare(a.ExeName, b.ExeName, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static void AnalyzeConflicts(PresentationPolicySnapshot snap)
+        {
+            bool anyLiveMpo = false;
+            bool allOutputsHaveLiveMpo = snap.Hardware.Outputs.Count > 0;
+            HashSet<uint> distinctHz = new HashSet<uint>();
+
+            foreach (var o in snap.Hardware.Outputs)
+            {
+                if (o.SupportsOverlaysMpo) anyLiveMpo = true;
+                else allOutputsHaveLiveMpo = false;
+                if (o.RefreshRateHz > 0) distinctHz.Add(o.RefreshRateHz);
+            }
+
+            // Conflict 1: MPO Disabled vs Borderless / Windowed Optimizations
+            if (snap.MpoRegistryBlocked && snap.SwapEffectUpgradeEnable == 1)
+            {
+                snap.Conflicts.Add(
+                    "MPO Devre Dışı (OverlayTestMode=5 / DisableOverlays=1) ↔ Pencereli Oyun Optimizasyonları (SwapEffectUpgradeEnable=1): " +
+                    "MPO kapalıyken oyun üzerinde herhangi bir katman (Discord/Steam/Ses çubuğu/FPS sayacı) çıktığında Windows DWM donanımsal katman birleştirmeyi " +
+                    "(Hardware Composed: Independent Flip) kullanamaz ve DWM kompozisyonuna (Composed: Flip) düşer. Çift ekran titreme sorununuz yoksa MPO'yu Etkin tutmanız önerilir.");
+            }
+
+            // Conflict 2: Pending reboot verification between Registry MPO setting and live DXGI driver state
+            if (snap.Hardware.Outputs.Count > 0)
+            {
+                if (snap.MpoRegistryBlocked && anyLiveMpo)
+                {
+                    snap.Conflicts.Add("Bekleyen Yeniden Başlatma: Kayıt defterinde MPO kapalı ayarlanmış ancak DXGI sürücüsü hâlâ SupportsOverlays=TRUE bildiriyor. Değişikliğin aktifleşmesi için Windows'u yeniden başlatın.");
+                }
+                else if (!snap.MpoRegistryBlocked && !allOutputsHaveLiveMpo)
+                {
+                    snap.Advisories.Add("Bilgi: Kayıt defterinde MPO engeli yok ancak DXGI sürücüsü SupportsOverlays=FALSE döndürüyor (yeniden başlatma bekleniyor olabilir veya monitör kablosu/sürücü yapılandırması MPO plane ayırmamış olabilir).");
+                }
+            }
+
+            // Conflict 3: Global FSEBehaviorMode=2 vs Win11 Borderless Flip Model & VRR
+            if (snap.FseBehaviorMode == "2" && snap.SwapEffectUpgradeEnable == 1)
+            {
+                snap.Advisories.Add(
+                    "Karma FSO Politikası: GameDVR_FSEBehaviorMode=2 küresel olarak Tam Ekran İyileştirmelerini kapatmaya zorluyor. " +
+                    "Modern DX12 oyunlarında gerçek Exclusive Fullscreen zaten yoktur (daima Flip Model çalışır); DX10/11 pencereli/kenarsız oyunlarda hızlı Alt+Tab için Mod=0 + SwapEffectUpgradeEnable=1 daha tutarlıdır.");
+            }
+
+            // Advisory: Mixed refresh rate monitors
+            if (distinctHz.Count >= 2)
+            {
+                StringBuilder hzStr = new StringBuilder();
+                foreach (uint hz in distinctHz)
+                {
+                    if (hzStr.Length > 0) hzStr.Append(" / ");
+                    hzStr.Append(hz).Append("Hz");
+                }
+                snap.Advisories.Add(string.Format("Karışık Yenileme Hızı Algılandı ({0}): Birden fazla farklı Hz monitör kullanımında MPO kapalıysa yan ekranda video/tarayıcı açıkken DWM zamanlama dalgalanması yaşanabilir.", hzStr.ToString()));
+            }
+
+            if (snap.StaleWrongKeyExists)
+            {
+                snap.Advisories.Add("Eski Sürüm Artığı Tespit Edildi: HKCU\\Software\\Microsoft\\DirectX\\UserGlobalSettings alt anahtarı (Windows'un okumadığı hatalı yol) sistemde mevcut; dilerseniz temizleyebilirsiniz.");
+            }
+        }
+
+        public static bool CleanupStaleWrongDirectXKey()
+        {
+            try
+            {
+                Registry.CurrentUser.DeleteSubKeyTree(@"Software\Microsoft\DirectX\UserGlobalSettings", false);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public static string InspectTargetWindowAndSwapchain(IntPtr hwnd, PresentationPolicySnapshot snap, string presentMonBin)
+        {
+            StringBuilder sb = new StringBuilder();
+            try
+            {
+                if (hwnd == IntPtr.Zero)
+                    return "❌ Geçerli bir ön plan penceresi yakalanamadı.";
+
+                uint pid = 0;
+                NativeMethods.GetWindowThreadProcessId(hwnd, out pid);
+                string procName = "Bilinmiyor";
+                string exePath = "";
+                try
+                {
+                    if (pid > 0)
+                    {
+                        using (Process p = Process.GetProcessById((int)pid))
+                        {
+                            procName = p.ProcessName + ".exe";
+                            try { exePath = p.MainModule.FileName; } catch { }
+                        }
+                    }
+                }
+                catch { }
+
+                StringBuilder titleSb = new StringBuilder(256);
+                NativeMethods.GetWindowText(hwnd, titleSb, 256);
+                string winTitle = titleSb.ToString();
+
+                NativeMethods.RECT rc = new NativeMethods.RECT();
+                NativeMethods.GetWindowRect(hwnd, out rc);
+
+                uint style = NativeMethods.GetWindowStyleSafe(hwnd, NativeMethods.GWL_STYLE);
+                int cloaked = 0;
+                NativeMethods.DwmGetWindowAttribute(hwnd, NativeMethods.DWMWA_CLOAKED, out cloaked, 4);
+
+                bool isBorderlessPopup = (style & NativeMethods.WS_CAPTION) == 0 && (style & NativeMethods.WS_POPUP) != 0;
+                Screen matchedScreen = Screen.FromHandle(hwnd) ?? Screen.PrimaryScreen;
+                bool coversMonitor = matchedScreen != null && rc.Width >= matchedScreen.Bounds.Width && rc.Height >= matchedScreen.Bounds.Height;
+
+                DxgiOutputInfo matchedOutput = null;
+                if (matchedScreen != null)
+                {
+                    foreach (var o in snap.Hardware.Outputs)
+                    {
+                        if (string.Equals(o.DeviceName, matchedScreen.DeviceName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            matchedOutput = o;
+                            break;
+                        }
+                    }
+                }
+
+                bool isArgonSelf = procName.ToLowerInvariant().Contains("argon");
+
+                sb.AppendLine("═══════════════════════════════════════════════════════════════════════════════════════════");
+                sb.AppendLine(string.Format("• YAKALANAN PENCERE SÜRECİ : {0} (PID: {1}) — Başlık: '{2}'", procName, pid, winTitle));
+                if (!string.IsNullOrEmpty(exePath))
+                    sb.AppendLine(string.Format("• ÇALIŞTIRILAN DOSYA YOLU  : {0}", exePath));
+
+                string winKind = coversMonitor
+                    ? (isBorderlessPopup ? "Kenarsız / Tam Ekran Kapsamında (Borderless/Fullscreen)" : "Tam Ekran Pencere Kapsamında")
+                    : "Standart Pencereli Mod (Masaüstü Boyutundan Küçük)";
+                sb.AppendLine(string.Format("• PENCERE GEOMETRİSİ       : {0}x{1} | {2}{3}", rc.Width, rc.Height, winKind, cloaked != 0 ? " [Gizli/Cloaked]" : ""));
+
+                if (matchedOutput != null)
+                {
+                    sb.AppendLine(string.Format("• HEDEF MONİTÖR (DXGI)     : {0} ({1}x{2} @ {3}Hz, {4}-bit {5})",
+                        matchedOutput.DeviceName, matchedOutput.Width, matchedOutput.Height, matchedOutput.RefreshRateHz,
+                        matchedOutput.BitsPerColor, matchedOutput.IsHdrActive ? "HDR10" : "SDR"));
+                    sb.AppendLine(string.Format("• DONANIM KOMPOZİSYON YET. : MPO={0} | Windowed HW Comp={1} | Fullscreen HW Comp={2}",
+                        matchedOutput.SupportsOverlaysMpo ? "AÇIK (Destekli)" : "KAPALI",
+                        matchedOutput.HwCompWindowed ? "EVET" : "HAYIR",
+                        matchedOutput.HwCompFullscreen ? "EVET" : "HAYIR"));
+                }
+
+                // Per-game rule check
+                if (!string.IsNullOrEmpty(exePath))
+                {
+                    PerGameDirectXRule foundRule = null;
+                    foreach (var r in snap.PerGameRules)
+                    {
+                        if (string.Equals(r.ExePath, exePath, StringComparison.OrdinalIgnoreCase))
+                        {
+                            foundRule = r;
+                            break;
+                        }
+                    }
+                    if (foundRule != null)
+                    {
+                        sb.AppendLine(string.Format("• OYUN ÖZEL KURALI         : GPU Tercihi={0} | Pencereli Opt={1} | FSO Devre Dışı={2}",
+                            foundRule.GpuPreference == 2 ? "Yüksek Performans dGPU" : (foundRule.GpuPreference == 1 ? "Güç Tasarrufu iGPU" : "Sistem"),
+                            foundRule.SwapEffectUpgradeOverride == 1 ? "Açık" : (foundRule.SwapEffectUpgradeOverride == 0 ? "Kapalı" : "Genel"),
+                            foundRule.DisableFullscreenOptimizations ? "EVET (DISABLEDXMAXIMIZEDWINDOWEDMODE)" : "Hayır"));
+                    }
+                }
+
+                sb.AppendLine("───────────────────────────────────────────────────────────────────────────────────────────");
+
+                if (isArgonSelf)
+                {
+                    sb.AppendLine("⚠️ NOT: Ön plan penceresi şu anda Argon'un kendisi! Gerçek oyununuzu analiz etmek için");
+                    sb.AppendLine("   '⏱️ 5 Sn Gecikmeli Yakala' butonuna basıp hemen oyuna geçiş (Alt+Tab) yapın.");
+                }
+                else
+                {
+                    // Check PresentMon ETW if binary available
+                    string etwResult = TryRunQuickPresentMonPresentMode(pid, procName, presentMonBin);
+                    sb.AppendLine(etwResult);
+                }
+
+                sb.AppendLine("═══════════════════════════════════════════════════════════════════════════════════════════");
+            }
+            catch (Exception ex)
+            {
+                sb.AppendLine("Ön plan analizi sırasında hata: " + ex.Message);
+            }
+            return sb.ToString();
+        }
+
+        private static string TryRunQuickPresentMonPresentMode(uint pid, string procName, string presentMonBin)
+        {
+            if (string.IsNullOrEmpty(presentMonBin) || !File.Exists(presentMonBin))
+            {
+                return "ℹ️ SWAPCHAIN PRESENTMODE (ETW ÖLÇÜLMEDİ): Intel PresentMon bulunamadı (DXGI/ETW swapchain kanıtı için\n" +
+                       "   uygulama yanına veya 'tools\\PresentMon.exe' klasörüne yerleştirin).\n" +
+                       "   Argon kayıt defteri tahminiyle sahte '0 ms Independent Flip' iddiasında BULUNMAZ; yalnızca yukarıdaki\n" +
+                       "   gerçek DXGI donanım yeterliliği ve Windows politika durumu raporlanır.";
+            }
+
+            string tempCsv = Path.Combine(Path.GetTempPath(), "argon_pm_pres_" + Guid.NewGuid().ToString("N") + ".csv");
+            try
+            {
+                string args = string.Format("-process_id {0} -timed 3 -output_file \"{1}\" -no_top", pid, tempCsv);
+                ProcessStartInfo psi = new ProcessStartInfo
+                {
+                    FileName = presentMonBin,
+                    Arguments = args,
+                    CreateNoWindow = true,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                };
+                using (Process pmProc = Process.Start(psi))
+                {
+                    pmProc.WaitForExit(7000);
+                }
+
+                if (!File.Exists(tempCsv))
+                    return "⚠️ PresentMon ETW çıktısı oluşturulamadı (yönetici yetkisi / ETW oturumu veya hedef DXGI sunumu yok).";
+
+                string[] lines = File.ReadAllLines(tempCsv);
+                if (lines.Length <= 1)
+                    return "⚠️ PresentMon 3 saniyede kare yakalayamadı (hedef süreç DXGI/Vulkan swapchain çizmiyor olabilir).";
+
+                string[] headers = lines[0].Split(',');
+                int pmCol = -1;
+                int tearingCol = -1;
+                int syncCol = -1;
+                for (int h = 0; h < headers.Length; h++)
+                {
+                    string hn = headers[h].Trim().ToLowerInvariant();
+                    if (hn == "presentmode") pmCol = h;
+                    else if (hn == "allowstearing") tearingCol = h;
+                    else if (hn == "syncinterval") syncCol = h;
+                }
+
+                if (pmCol < 0)
+                    return "⚠️ PresentMon CSV dosyasında PresentMode sütunu bulunamadı.";
+
+                Dictionary<string, int> modeCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                int totalFrames = 0;
+                int tearingCount = 0;
+                Dictionary<string, int> syncCounts = new Dictionary<string, int>();
+
+                for (int i = 1; i < lines.Length; i++)
+                {
+                    if (string.IsNullOrWhiteSpace(lines[i])) continue;
+                    string[] row = lines[i].Split(',');
+                    if (row.Length <= pmCol) continue;
+
+                    string mode = row[pmCol].Trim();
+                    if (string.IsNullOrEmpty(mode)) continue;
+                    totalFrames++;
+                    if (!modeCounts.ContainsKey(mode)) modeCounts[mode] = 0;
+                    modeCounts[mode]++;
+
+                    if (tearingCol >= 0 && row.Length > tearingCol)
+                    {
+                        string tVal = row[tearingCol].Trim();
+                        if (tVal == "1" || string.Equals(tVal, "true", StringComparison.OrdinalIgnoreCase))
+                            tearingCount++;
+                    }
+                    if (syncCol >= 0 && row.Length > syncCol)
+                    {
+                        string sVal = row[syncCol].Trim();
+                        if (!syncCounts.ContainsKey(sVal)) syncCounts[sVal] = 0;
+                        syncCounts[sVal]++;
+                    }
+                }
+
+                if (totalFrames == 0)
+                    return "⚠️ PresentMon CSV içinde geçerli kare satırı bulunamadı.";
+
+                StringBuilder outSb = new StringBuilder();
+                outSb.AppendLine(string.Format("📊 ÖLÇÜLEN SWAPCHAIN PRESENTMODE (Intel PresentMon ETW — {0} kare, {1}):", totalFrames, procName));
+                foreach (var kv in modeCounts)
+                {
+                    double pct = (kv.Value * 100.0) / totalFrames;
+                    outSb.AppendLine(string.Format("   • {0,-38} : {1,4} kare (%{2:0.0})", kv.Key, kv.Value, pct));
+                }
+                if (tearingCol >= 0)
+                {
+                    outSb.AppendLine(string.Format("   • AllowsTearing (VRR/Yırtılma İzni) : %{0:0.0} karede etkin", (tearingCount * 100.0) / totalFrames));
+                }
+                return outSb.ToString().TrimEnd();
+            }
+            catch (Exception ex)
+            {
+                return "⚠️ PresentMon ETW ölçümü hatası: " + ex.Message;
+            }
+            finally
+            {
+                try { if (File.Exists(tempCsv)) File.Delete(tempCsv); } catch { }
+            }
         }
     }
 
@@ -3388,6 +4976,2290 @@ namespace ArgonLatencyStudio
         }
     }
 
+    public class GameWatchdogRuleDialog : Form
+    {
+        public GameWatchdogRule RuleResult { get; private set; }
+
+        private TextBox txtTitle;
+        private TextBox txtProcName;
+        private ComboBox cmbPriority;
+        private ComboBox cmbAffinity;
+        private CheckBox chkEcoCage;
+        private CheckBox chkIoBoost;
+        private CheckBox chkEnabled;
+
+        public GameWatchdogRuleDialog(GameWatchdogRule ruleToEdit)
+        {
+            this.Text = (ruleToEdit == null) ? "Yeni Oyun Nöbetçisi Kuralı Ekle" : "Oyun Nöbetçisi Kuralını Düzenle";
+            this.Size = new Size(520, 420);
+            this.StartPosition = FormStartPosition.CenterParent;
+            this.FormBorderStyle = FormBorderStyle.FixedDialog;
+            this.MaximizeBox = false;
+            this.MinimizeBox = false;
+            this.BackColor = Color.FromArgb(13, 16, 23);
+            this.ForeColor = Color.White;
+            this.Font = new Font("Segoe UI", 8.5f, FontStyle.Regular);
+
+            Panel pnlHeader = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 48,
+                BackColor = Color.FromArgb(18, 23, 34)
+            };
+            this.Controls.Add(pnlHeader);
+
+            Label lblTitle = new Label
+            {
+                Text = "🎮 OYUN YAŞAM DÖNGÜSÜ & ÖZEL PERFORMANS KURALI",
+                Font = new Font("Segoe UI", 9.0f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(52, 211, 153),
+                Location = new Point(14, 14),
+                AutoSize = true
+            };
+            pnlHeader.Controls.Add(lblTitle);
+
+            int curY = 60;
+
+            // Oyun Başlığı
+            Label lblName = new Label { Text = "Oyun Başlığı:", ForeColor = Color.FromArgb(148, 163, 184), Location = new Point(18, curY + 2), AutoSize = true, Font = new Font("Segoe UI", 8.2f, FontStyle.Bold) };
+            this.Controls.Add(lblName);
+            txtTitle = new TextBox { Location = new Point(165, curY), Size = new Size(315, 22), BackColor = Color.FromArgb(18, 23, 34), ForeColor = Color.White, BorderStyle = BorderStyle.FixedSingle };
+            this.Controls.Add(txtTitle);
+            curY += 32;
+
+            // Süreç Adı (.exe)
+            Label lblExe = new Label { Text = "Süreç Adı (.exe):", ForeColor = Color.FromArgb(148, 163, 184), Location = new Point(18, curY + 2), AutoSize = true, Font = new Font("Segoe UI", 8.2f, FontStyle.Bold) };
+            this.Controls.Add(lblExe);
+            txtProcName = new TextBox { Location = new Point(165, curY), Size = new Size(225, 22), BackColor = Color.FromArgb(18, 23, 34), ForeColor = Color.White, BorderStyle = BorderStyle.FixedSingle };
+            this.Controls.Add(txtProcName);
+
+            Button btnBrowse = new Button
+            {
+                Text = "Gözat...",
+                Location = new Point(398, curY - 1),
+                Size = new Size(82, 24),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(30, 41, 59),
+                ForeColor = Color.FromArgb(226, 232, 240),
+                Cursor = Cursors.Hand
+            };
+            btnBrowse.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnBrowse.Click += (s, e) =>
+            {
+                using (OpenFileDialog ofd = new OpenFileDialog())
+                {
+                    ofd.Filter = "Çalıştırılabilir Dosyalar (*.exe)|*.exe|Tüm Dosyalar (*.*)|*.*";
+                    ofd.Title = "Oyun Yürütülebilir Dosyasını (.exe) Seçin";
+                    if (ofd.ShowDialog() == DialogResult.OK)
+                    {
+                        string exeName = Path.GetFileNameWithoutExtension(ofd.FileName);
+                        txtProcName.Text = exeName;
+                        if (string.IsNullOrEmpty(txtTitle.Text.Trim()))
+                            txtTitle.Text = exeName;
+                    }
+                }
+            };
+            this.Controls.Add(btnBrowse);
+            curY += 32;
+
+            // CPU Önceliği
+            Label lblPrio = new Label { Text = "Hedef CPU Önceliği:", ForeColor = Color.FromArgb(148, 163, 184), Location = new Point(18, curY + 2), AutoSize = true, Font = new Font("Segoe UI", 8.2f, FontStyle.Bold) };
+            this.Controls.Add(lblPrio);
+            cmbPriority = new ComboBox { Location = new Point(165, curY), Size = new Size(315, 22), DropDownStyle = ComboBoxStyle.DropDownList, BackColor = Color.FromArgb(18, 23, 34), ForeColor = Color.White };
+            cmbPriority.Items.Add("High (Yüksek - Espor Standardı)");
+            cmbPriority.Items.Add("AboveNormal (Normal Üstü)");
+            cmbPriority.Items.Add("Normal (Varsayılan)");
+            cmbPriority.SelectedIndex = 0;
+            this.Controls.Add(cmbPriority);
+            curY += 32;
+
+            // Çekirdek Politikası
+            Label lblAff = new Label { Text = "Çekirdek Politikası:", ForeColor = Color.FromArgb(148, 163, 184), Location = new Point(18, curY + 2), AutoSize = true, Font = new Font("Segoe UI", 8.2f, FontStyle.Bold) };
+            this.Controls.Add(lblAff);
+            cmbAffinity = new ComboBox { Location = new Point(165, curY), Size = new Size(315, 22), DropDownStyle = ComboBoxStyle.DropDownList, BackColor = Color.FromArgb(18, 23, 34), ForeColor = Color.White };
+            cmbAffinity.Items.Add("0: Tüm Çekirdekler (İşletim Sistemi Yönetimi)");
+            cmbAffinity.Items.Add("1: Core 0 İzole (DPC/Kesme Koruması - Önerilen)");
+            cmbAffinity.Items.Add("2: Fiziksel Çekirdekler (SMT/HT Devre Dışı)");
+            cmbAffinity.Items.Add("3: Fiziksel Çekirdekler + Core 0 İzole");
+            cmbAffinity.Items.Add("4: AMD 3D V-Cache CCD0 Kilidi (X3D L3 İzolasyonu)");
+            cmbAffinity.Items.Add("5: Intel P-Cores Kilidi (E-Core Filtresi)");
+            cmbAffinity.SelectedIndex = 1;
+            this.Controls.Add(cmbAffinity);
+            curY += 34;
+
+            // Checkboxes
+            chkEcoCage = new CheckBox
+            {
+                Text = "Gürültülü Arka Plan Uygulamalarını EcoQoS Kalkanına Al (Discord, Chrome vb.)",
+                Location = new Point(18, curY),
+                Size = new Size(470, 22),
+                ForeColor = Color.FromArgb(226, 232, 240),
+                Checked = true
+            };
+            this.Controls.Add(chkEcoCage);
+            curY += 26;
+
+            chkIoBoost = new CheckBox
+            {
+                Text = "Yüksek I/O ve Sayfa Önceliği Uygula (Disk & Bellek Gecikme Kalkanı)",
+                Location = new Point(18, curY),
+                Size = new Size(470, 22),
+                ForeColor = Color.FromArgb(226, 232, 240),
+                Checked = true
+            };
+            this.Controls.Add(chkIoBoost);
+            curY += 26;
+
+            chkEnabled = new CheckBox
+            {
+                Text = "Bu Kuralı Aktif Et",
+                Location = new Point(18, curY),
+                Size = new Size(470, 22),
+                ForeColor = Color.FromArgb(52, 211, 153),
+                Checked = true,
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold)
+            };
+            this.Controls.Add(chkEnabled);
+            curY += 34;
+
+            if (ruleToEdit != null)
+            {
+                txtTitle.Text = ruleToEdit.GameTitle;
+                txtProcName.Text = ruleToEdit.ProcessName;
+                if (ruleToEdit.TargetPriority == ProcessPriorityClass.AboveNormal) cmbPriority.SelectedIndex = 1;
+                else if (ruleToEdit.TargetPriority == ProcessPriorityClass.Normal) cmbPriority.SelectedIndex = 2;
+                else cmbPriority.SelectedIndex = 0;
+
+                cmbAffinity.SelectedIndex = Math.Max(0, Math.Min(5, ruleToEdit.AffinityMode));
+                chkEcoCage.Checked = ruleToEdit.EnableEcoCage;
+                chkIoBoost.Checked = ruleToEdit.EnableIoBoost;
+                chkEnabled.Checked = ruleToEdit.IsEnabled;
+            }
+
+            // Bottom Buttons
+            Panel pnlBottom = new Panel
+            {
+                Dock = DockStyle.Bottom,
+                Height = 50,
+                BackColor = Color.FromArgb(18, 23, 34)
+            };
+            this.Controls.Add(pnlBottom);
+
+            Button btnSave = new Button
+            {
+                Text = "Kuralı Kaydet",
+                Location = new Point(pnlBottom.Width - 215, 11),
+                Size = new Size(105, 28),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(16, 185, 129),
+                ForeColor = Color.Black,
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                Cursor = Cursors.Hand
+            };
+            btnSave.FlatAppearance.BorderSize = 0;
+            btnSave.Click += (s, e) =>
+            {
+                string proc = txtProcName.Text.Trim().ToLowerInvariant().Replace(".exe", "");
+                if (string.IsNullOrEmpty(proc))
+                {
+                    MessageBox.Show("Lütfen geçerli bir süreç (.exe) adı belirtin.", "Eksik Bilgi", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                GameWatchdogRule res = ruleToEdit != null ? ruleToEdit : new GameWatchdogRule();
+                res.ProcessName = proc;
+                res.GameTitle = string.IsNullOrEmpty(txtTitle.Text.Trim()) ? proc : txtTitle.Text.Trim();
+
+                if (cmbPriority.SelectedIndex == 1) res.TargetPriority = ProcessPriorityClass.AboveNormal;
+                else if (cmbPriority.SelectedIndex == 2) res.TargetPriority = ProcessPriorityClass.Normal;
+                else res.TargetPriority = ProcessPriorityClass.High;
+
+                res.AffinityMode = cmbAffinity.SelectedIndex;
+                res.EnableEcoCage = chkEcoCage.Checked;
+                res.EnableIoBoost = chkIoBoost.Checked;
+                res.IsEnabled = chkEnabled.Checked;
+
+                RuleResult = res;
+                this.DialogResult = DialogResult.OK;
+                this.Close();
+            };
+            pnlBottom.Controls.Add(btnSave);
+
+            Button btnCancel = new Button
+            {
+                Text = "İptal",
+                Location = new Point(pnlBottom.Width - 100, 11),
+                Size = new Size(85, 28),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(30, 41, 59),
+                ForeColor = Color.FromArgb(203, 213, 225),
+                Cursor = Cursors.Hand,
+                DialogResult = DialogResult.Cancel
+            };
+            btnCancel.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnCancel.Click += (s, e) => this.Close();
+            pnlBottom.Controls.Add(btnCancel);
+
+            pnlBottom.Resize += (s, e) =>
+            {
+                btnCancel.Location = new Point(pnlBottom.ClientSize.Width - 100, 11);
+                btnSave.Location = new Point(pnlBottom.ClientSize.Width - 215, 11);
+            };
+        }
+    }
+
+    public class ManageBackgroundCageDialog : Form
+    {
+        private List<string> targetsList;
+        private ListBox lbTargets;
+        private TextBox txtNewTarget;
+
+        public ManageBackgroundCageDialog(List<string> currentTargets)
+        {
+            this.targetsList = new List<string>(currentTargets);
+            this.Text = "Arka Plan Kalkanı Süreç Listesi (EcoQoS Cage)";
+            this.Size = new Size(460, 420);
+            this.StartPosition = FormStartPosition.CenterParent;
+            this.FormBorderStyle = FormBorderStyle.FixedDialog;
+            this.MaximizeBox = false;
+            this.MinimizeBox = false;
+            this.BackColor = Color.FromArgb(13, 16, 23);
+            this.ForeColor = Color.White;
+            this.Font = new Font("Segoe UI", 8.5f, FontStyle.Regular);
+
+            Panel pnlHeader = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 62,
+                BackColor = Color.FromArgb(18, 23, 34)
+            };
+            this.Controls.Add(pnlHeader);
+
+            Label lblTitle = new Label
+            {
+                Text = "🛡️ ARKA PLAN KALKANI (ECOQOS CAGE) SÜREÇLERİ",
+                Font = new Font("Segoe UI", 9.0f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(56, 189, 248),
+                Location = new Point(14, 10),
+                AutoSize = true
+            };
+            pnlHeader.Controls.Add(lblTitle);
+
+            Label lblDesc = new Label
+            {
+                Text = "Oyun açıkken bu süreçler 'BelowNormal' ve EcoQoS moduna alınarak CPU/DPC kirliliği önlenir. Oyun kapandığında hepsi otomatik orijinal haline döner.",
+                Font = new Font("Segoe UI", 7.6f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(148, 163, 184),
+                Location = new Point(14, 30),
+                Size = new Size(420, 28)
+            };
+            pnlHeader.Controls.Add(lblDesc);
+
+            lbTargets = new ListBox
+            {
+                Location = new Point(16, 74),
+                Size = new Size(412, 190),
+                BackColor = Color.FromArgb(18, 23, 34),
+                ForeColor = Color.White,
+                BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Consolas", 9.0f, FontStyle.Regular)
+            };
+            this.Controls.Add(lbTargets);
+
+            Panel pnlAddBar = new Panel
+            {
+                Location = new Point(16, 274),
+                Size = new Size(412, 34)
+            };
+            this.Controls.Add(pnlAddBar);
+
+            txtNewTarget = new TextBox
+            {
+                Location = new Point(0, 6),
+                Size = new Size(200, 22),
+                BackColor = Color.FromArgb(18, 23, 34),
+                ForeColor = Color.White,
+                BorderStyle = BorderStyle.FixedSingle
+            };
+            pnlAddBar.Controls.Add(txtNewTarget);
+
+            Button btnAdd = new Button
+            {
+                Text = "+ Ekle",
+                Location = new Point(208, 4),
+                Size = new Size(65, 26),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(16, 185, 129),
+                ForeColor = Color.Black,
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                Cursor = Cursors.Hand
+            };
+            btnAdd.FlatAppearance.BorderSize = 0;
+            btnAdd.Click += (s, e) =>
+            {
+                string t = txtNewTarget.Text.Trim().ToLowerInvariant().Replace(".exe", "");
+                if (!string.IsNullOrEmpty(t) && !targetsList.Contains(t))
+                {
+                    targetsList.Add(t);
+                    txtNewTarget.Clear();
+                    RefreshListBox();
+                }
+            };
+            pnlAddBar.Controls.Add(btnAdd);
+
+            Button btnDel = new Button
+            {
+                Text = "🗑️ Kaldır",
+                Location = new Point(280, 4),
+                Size = new Size(65, 26),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(51, 65, 85),
+                ForeColor = Color.White,
+                Cursor = Cursors.Hand
+            };
+            btnDel.FlatAppearance.BorderSize = 0;
+            btnDel.Click += (s, e) =>
+            {
+                if (lbTargets.SelectedItem != null)
+                {
+                    targetsList.Remove(lbTargets.SelectedItem.ToString());
+                    RefreshListBox();
+                }
+            };
+            pnlAddBar.Controls.Add(btnDel);
+
+            Button btnReset = new Button
+            {
+                Text = "Sıfırla",
+                Location = new Point(352, 4),
+                Size = new Size(60, 26),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(30, 41, 59),
+                ForeColor = Color.FromArgb(203, 213, 225),
+                Cursor = Cursors.Hand
+            };
+            btnReset.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnReset.Click += (s, e) =>
+            {
+                targetsList = new List<string> { "discord", "chrome", "spotify", "steamwebhelper", "epicgameslauncher", "msedge", "brave", "onedrive" };
+                RefreshListBox();
+            };
+            pnlAddBar.Controls.Add(btnReset);
+
+            Panel pnlBottom = new Panel
+            {
+                Dock = DockStyle.Bottom,
+                Height = 48,
+                BackColor = Color.FromArgb(18, 23, 34)
+            };
+            this.Controls.Add(pnlBottom);
+
+            Button btnOk = new Button
+            {
+                Text = "Tamam",
+                Location = new Point(pnlBottom.Width - 110, 10),
+                Size = new Size(95, 28),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(16, 185, 129),
+                ForeColor = Color.Black,
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                Cursor = Cursors.Hand,
+                DialogResult = DialogResult.OK
+            };
+            btnOk.FlatAppearance.BorderSize = 0;
+            btnOk.Click += (s, e) => this.Close();
+            pnlBottom.Controls.Add(btnOk);
+
+            pnlBottom.Resize += (s, e) =>
+            {
+                btnOk.Location = new Point(pnlBottom.ClientSize.Width - 110, 10);
+            };
+
+            RefreshListBox();
+        }
+
+        private void RefreshListBox()
+        {
+            lbTargets.Items.Clear();
+            foreach (string t in targetsList)
+                lbTargets.Items.Add(t);
+        }
+
+        public List<string> GetUpdatedTargets()
+        {
+            return targetsList;
+        }
+    }
+
+    public class AdvancedPowerPolicyDialog : Form
+    {
+        private StateVault vault;
+        private Guid activeSchemeGuid;
+        private string activeSchemeName;
+        private ListView lvSettings;
+        private Label lblSelectedName;
+        private Label lblSelectedDesc;
+        private Panel pnlEditor;
+        private TrackBar trkAc;
+        private NumericUpDown numAc;
+        private TrackBar trkDc;
+        private NumericUpDown numDc;
+        private ComboBox cmbDiscreteAc;
+        private ComboBox cmbDiscreteDc;
+        private CheckBox chkSync;
+        private Label lblAcLabel;
+        private Label lblDcLabel;
+        private bool isUpdatingControls = false;
+
+        public class PowerItemDef
+        {
+            public string Name;
+            public string Description;
+            public Guid SubGroup;
+            public Guid SettingGuid;
+            public uint MinValue;
+            public uint MaxValue;
+            public uint CurrentAcValue;
+            public uint CurrentDcValue;
+            public uint OriginalAcValue;
+            public uint OriginalDcValue;
+            public string Unit;
+            public bool IsDiscrete;
+            public Dictionary<uint, string> DiscreteOptions;
+        }
+
+        private List<PowerItemDef> powerItems = new List<PowerItemDef>();
+
+        static readonly Guid SUB_PROCESSOR = new Guid("54533251-82be-4824-96c1-47b60b740d00");
+        static readonly Guid SET_PERFEPP = new Guid("36687f9e-e3a5-4dbf-b1dc-15eb381c6863");
+        static readonly Guid SET_PERFBOOSTMODE = new Guid("be337238-0d82-4146-a960-4f3749d470c7");
+        static readonly Guid SET_CPMINCORES = new Guid("0cc5b647-c1df-4637-891a-dec35c318583");
+        static readonly Guid SET_CPMAXCORES = new Guid("ea062031-0e34-4ff1-9b6d-eb10593ac081");
+        static readonly Guid SET_PROCTHROTTLEMIN = new Guid("893dee8e-2bef-41e0-89c6-b55d0929964c");
+        static readonly Guid SET_PROCTHROTTLEMAX = new Guid("bc5038f7-23e0-4960-96da-33abaf5935ec");
+        static readonly Guid SET_LATENCYHINT = new Guid("619af095-20e9-440e-a344-a1692e6914ae");
+        static readonly Guid SET_SYSCOOLPOL = new Guid("94d3a615-a899-4ac5-ae2b-e4d8f634367f");
+        static readonly Guid SET_AUTONOMOUS = new Guid("8baa4a8a-14c6-4451-8e8b-14bdbd197537");
+        static readonly Guid SET_BOOSTPOLICY = new Guid("45bcc044-d885-43e2-8605-ee0ec6e96b59");
+
+        public AdvancedPowerPolicyDialog(StateVault vault)
+        {
+            this.vault = vault;
+            this.Text = "Argon Latency Studio — Gelişmiş İşlemci Güç Yöneticisi & Gizli Politikalar";
+            this.Size = new Size(790, 610);
+            this.StartPosition = FormStartPosition.CenterParent;
+            this.FormBorderStyle = FormBorderStyle.FixedDialog;
+            this.MaximizeBox = false;
+            this.MinimizeBox = false;
+            this.BackColor = Color.FromArgb(13, 16, 23);
+            this.ForeColor = Color.White;
+            this.Font = new Font("Segoe UI", 8.5f, FontStyle.Regular);
+
+            activeSchemeName = vault.GetActivePowerSchemeInfo(out activeSchemeGuid);
+
+            InitializePowerItems();
+            BuildDialogUi();
+            RefreshListView();
+
+            if (lvSettings.Items.Count > 0)
+            {
+                lvSettings.Items[0].Selected = true;
+            }
+        }
+
+        private void InitializePowerItems()
+        {
+            // 1. EPP
+            AddPowerItem("Enerji Performans Tercihi (EPP)",
+                "İşlemcinin donanımsal güç eğrisini yönetir. 0 = Maksimum Performans (frekans kısıtlaması sıfırlanır, en düşük gecikme), 50 = Standart Dengeli, 100 = Maksimum Pil Tasarrufu.",
+                SUB_PROCESSOR, SET_PERFEPP, 0, 100, 50, "%", false, null);
+
+            // 2. Boost Mode
+            Dictionary<uint, string> boostOpts = new Dictionary<uint, string>();
+            boostOpts[0] = "0 - Devre Dışı (Base Clock Limiti / Serin Laptop)";
+            boostOpts[1] = "1 - Etkin (Standart Turbo Boost)";
+            boostOpts[2] = "2 - Agresif (En Yüksek Hızlı Turbo Tepkisi - Rekabetçi)";
+            boostOpts[3] = "3 - Verimli Etkin (Efficient Enabled)";
+            boostOpts[4] = "4 - Verimli Agresif (Efficient Aggressive)";
+            boostOpts[5] = "5 - Garanti Edilen Hızda Agresif";
+            boostOpts[6] = "6 - Garanti Edilen Hızda Verimli Agresif";
+            AddPowerItem("İşlemci Boost Modu (Turbo / Precision Boost)",
+                "Turbo Boost sıçrama agresifliği. Agresif (2) en hızlı saat hızı tepkisini verir. Devre Dışı (0) laptoplarda aşırı ısınmayı 15-20°C engeller.",
+                SUB_PROCESSOR, SET_PERFBOOSTMODE, 0, 6, 1, "", true, boostOpts);
+
+            // 3. Core Parking Min Cores
+            AddPowerItem("Çekirdek Park Etme Alt Sınırı (Core Parking Min)",
+                "Sistemin uyutamayacağı minimum çekirdek yüzdesi. %100 yapıldığında Core Parking tamamen devre dışı kalır; mikro takılmalar (stuttering) ve çekirdek uyandırma gecikmeleri önlenir.",
+                SUB_PROCESSOR, SET_CPMINCORES, 0, 100, 100, "%", false, null);
+
+            // 4. Core Parking Max Cores
+            AddPowerItem("Çekirdek Park Etme Üst Sınırı (Core Parking Max)",
+                "Aynı anda kullanılabilecek maksimum çekirdek yüzdesi. %100 tüm fiziksel ve mantıksal çekirdeklerin tam kapasite çalışmasını garanti eder.",
+                SUB_PROCESSOR, SET_CPMAXCORES, 0, 100, 100, "%", false, null);
+
+            // 5. Min Processor State
+            AddPowerItem("En Düşük İşlemci Durumu (Min CPU State)",
+                "İşlemcinin inebileceği taban frekans yüzdesi. %100 seçilirse işlemci boşta bile tavan saat hızında bekler; ani yüklenmelerde frekans yükseltme gecikmesi ortadan kalkar.",
+                SUB_PROCESSOR, SET_PROCTHROTTLEMIN, 0, 100, 5, "%", false, null);
+
+            // 6. Max Processor State
+            AddPowerItem("En Yüksek İşlemci Durumu (Max CPU State)",
+                "İşlemcinin ulaşabileceği tavan frekans yüzdesi. %100 tam performanstır.",
+                SUB_PROCESSOR, SET_PROCTHROTTLEMAX, 0, 100, 100, "%", false, null);
+
+            // 7. Latency Sensitivity Hint
+            AddPowerItem("Gecikme Duyarlılığı İpucu (Latency Sensitivity)",
+                "İşletim sistemi zamanlayıcısına gecikmeye duyarlı iş parçacıklarını anında algılamasını ve frekansı gecikmesiz yükseltmesini bildirir.",
+                SUB_PROCESSOR, SET_LATENCYHINT, 0, 100, 0, "%", false, null);
+
+            // 8. Cooling Policy
+            Dictionary<uint, string> coolOpts = new Dictionary<uint, string>();
+            coolOpts[0] = "0 - Pasif (Frekansı Düşürerek Soğut)";
+            coolOpts[1] = "1 - Aktif (Frekansı Koru, Fan Devrini Artır)";
+            AddPowerItem("Sistem Soğutma İlkesi (Cooling Policy)",
+                "Isınma durumunda işlemcinin nasıl davranacağını yönetir. Aktif mod fan devrini artırarak frekansı korur (oyun için önerilir); Pasif mod fanı açmadan önce frekansı düşürür.",
+                SUB_PROCESSOR, SET_SYSCOOLPOL, 0, 1, 1, "", true, coolOpts);
+
+            // 9. Autonomous Mode
+            Dictionary<uint, string> autoOpts = new Dictionary<uint, string>();
+            autoOpts[0] = "0 - İşletim Sistemi Güdümlü (OS P-State)";
+            autoOpts[1] = "1 - Donanım Otonom Etkin (CPPC / SpeedShift)";
+            AddPowerItem("Donanım Otonom Modu (CPPC / SpeedShift)",
+                "Frekans kontrolünü işletim sistemi yazılım katmanından alıp CPU donanımına devreder (~1ms tepki süresi). Modern AMD Ryzen ve Intel Core işlemcilerde gecikmeyi ciddi oranda düşürür.",
+                SUB_PROCESSOR, SET_AUTONOMOUS, 0, 1, 1, "", true, autoOpts);
+
+            // 10. Boost Policy
+            AddPowerItem("Performans Artırma İlkesi (Boost Policy)",
+                "İşlemciye yük bindiğinde frekansın ne kadar hızlı tavan seviyeye sıçrayacağını belirler. %100 anında tavan frekansa geçiş sağlar.",
+                SUB_PROCESSOR, SET_BOOSTPOLICY, 0, 100, 100, "%", false, null);
+        }
+
+        private void AddPowerItem(string name, string desc, Guid sub, Guid set, uint minVal, uint maxVal, uint defaultVal, string unit, bool isDiscrete, Dictionary<uint, string> discOpts)
+        {
+            PowerItemDef item = new PowerItemDef();
+            item.Name = name;
+            item.Description = desc;
+            item.SubGroup = sub;
+            item.SettingGuid = set;
+            item.MinValue = minVal;
+            item.MaxValue = maxVal;
+            item.Unit = unit;
+            item.IsDiscrete = isDiscrete;
+            item.DiscreteOptions = discOpts != null ? discOpts : new Dictionary<uint, string>();
+
+            uint ac = defaultVal;
+            uint dc = defaultVal;
+            if (vault.TryReadActivePowerValues(sub, set, out ac, out dc))
+            {
+                item.CurrentAcValue = ac;
+                item.CurrentDcValue = dc;
+            }
+            else
+            {
+                item.CurrentAcValue = defaultVal;
+                item.CurrentDcValue = defaultVal;
+            }
+            item.OriginalAcValue = item.CurrentAcValue;
+            item.OriginalDcValue = item.CurrentDcValue;
+
+            powerItems.Add(item);
+        }
+
+        private void BuildDialogUi()
+        {
+            // Header Panel
+            Panel pnlHeader = new Panel
+            {
+                Location = new Point(0, 0),
+                Size = new Size(790, 85),
+                BackColor = Color.FromArgb(18, 23, 34)
+            };
+            this.Controls.Add(pnlHeader);
+
+            Label lblTitle = new Label
+            {
+                Text = "⚡ GELİŞMİŞ İŞLEMCİ GÜÇ YÖNETİCİSİ (POWER POLICY GOVERNOR)",
+                Font = new Font("Segoe UI", 9.2f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(52, 211, 153),
+                Location = new Point(16, 12),
+                AutoSize = true
+            };
+            pnlHeader.Controls.Add(lblTitle);
+
+            Label lblSubtitle = new Label
+            {
+                Text = string.Format("Aktif Plan: {0} ({1}) — Argon Reversible StateVault Koruması Altındadır", activeSchemeName, activeSchemeGuid.ToString().Substring(0, 8) + "..."),
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(148, 163, 184),
+                Location = new Point(17, 34),
+                AutoSize = true
+            };
+            pnlHeader.Controls.Add(lblSubtitle);
+
+            // Presets row inside header
+            Label lblPresets = new Label
+            {
+                Text = "🏆 Hızlı Şablonlar:",
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(203, 213, 225),
+                Location = new Point(17, 58),
+                AutoSize = true
+            };
+            pnlHeader.Controls.Add(lblPresets);
+
+            Button btnPresetEsport = new Button
+            {
+                Text = "🏆 Espor / Ultra Düşük Gecikme",
+                Font = new Font("Segoe UI", 7.5f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(16, 185, 129),
+                ForeColor = Color.Black,
+                Location = new Point(135, 54),
+                Size = new Size(185, 24),
+                Cursor = Cursors.Hand
+            };
+            btnPresetEsport.FlatAppearance.BorderSize = 0;
+            btnPresetEsport.Click += (s, e) => ApplyPreset(0, 2, 100, 100, 100, 100, 100, 1, 1, 100);
+            pnlHeader.Controls.Add(btnPresetEsport);
+
+            Button btnPresetBalanced = new Button
+            {
+                Text = "⚖️ Dengeli Düşük Gecikme",
+                Font = new Font("Segoe UI", 7.5f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(37, 45, 64),
+                ForeColor = Color.FromArgb(226, 232, 240),
+                Location = new Point(326, 54),
+                Size = new Size(165, 24),
+                Cursor = Cursors.Hand
+            };
+            btnPresetBalanced.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnPresetBalanced.Click += (s, e) => ApplyPreset(15, 1, 50, 100, 5, 100, 0, 1, 1, 80);
+            pnlHeader.Controls.Add(btnPresetBalanced);
+
+            Button btnPresetCool = new Button
+            {
+                Text = "🌱 Serin & Sessiz (Isınma Kalkanı)",
+                Font = new Font("Segoe UI", 7.5f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(37, 45, 64),
+                ForeColor = Color.FromArgb(226, 232, 240),
+                Location = new Point(497, 54),
+                Size = new Size(195, 24),
+                Cursor = Cursors.Hand
+            };
+            btnPresetCool.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnPresetCool.Click += (s, e) => ApplyPreset(60, 0, 10, 100, 5, 99, 0, 0, 1, 0);
+            pnlHeader.Controls.Add(btnPresetCool);
+
+            // ListView of Settings
+            lvSettings = new ListView
+            {
+                Location = new Point(16, 95),
+                Size = new Size(750, 215),
+                View = View.Details,
+                FullRowSelect = true,
+                GridLines = true,
+                MultiSelect = false,
+                BackColor = Color.FromArgb(18, 23, 34),
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Regular),
+                BorderStyle = BorderStyle.FixedSingle
+            };
+            lvSettings.Columns.Add("Parametre Adı", 230);
+            lvSettings.Columns.Add("Prizde (AC)", 75);
+            lvSettings.Columns.Add("Pilde (DC)", 75);
+            lvSettings.Columns.Add("Mevcut Durum / Açıklama", 360);
+            lvSettings.SelectedIndexChanged += LvSettings_SelectedIndexChanged;
+            this.Controls.Add(lvSettings);
+
+            // Editor Panel
+            pnlEditor = new Panel
+            {
+                Location = new Point(16, 318),
+                Size = new Size(750, 195),
+                BackColor = Color.FromArgb(18, 23, 34)
+            };
+            pnlEditor.Paint += (s, e) =>
+            {
+                using (Pen p = new Pen(Color.FromArgb(45, 55, 75), 1))
+                {
+                    e.Graphics.DrawRectangle(p, 0, 0, pnlEditor.Width - 1, pnlEditor.Height - 1);
+                }
+            };
+            this.Controls.Add(pnlEditor);
+
+            lblSelectedName = new Label
+            {
+                Text = "Seçili Parametre",
+                Font = new Font("Segoe UI", 9.0f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(56, 189, 248),
+                Location = new Point(14, 10),
+                AutoSize = true
+            };
+            pnlEditor.Controls.Add(lblSelectedName);
+
+            chkSync = new CheckBox
+            {
+                Text = "AC ve DC Değerlerini Senkronize Tut",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(148, 163, 184),
+                Location = new Point(480, 10),
+                Size = new Size(250, 20),
+                Checked = true
+            };
+            pnlEditor.Controls.Add(chkSync);
+
+            lblSelectedDesc = new Label
+            {
+                Text = "Parametre detayları burada listelenecek.",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(203, 213, 225),
+                Location = new Point(14, 34),
+                Size = new Size(720, 36)
+            };
+            pnlEditor.Controls.Add(lblSelectedDesc);
+
+            // AC Controls
+            lblAcLabel = new Label
+            {
+                Text = "🔌 Şebeke / Priz Gücü (AC):",
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(52, 211, 153),
+                Location = new Point(14, 78),
+                AutoSize = true
+            };
+            pnlEditor.Controls.Add(lblAcLabel);
+
+            trkAc = new TrackBar
+            {
+                Location = new Point(14, 102),
+                Size = new Size(245, 30),
+                TickStyle = TickStyle.None,
+                Minimum = 0,
+                Maximum = 100
+            };
+            pnlEditor.Controls.Add(trkAc);
+
+            numAc = new NumericUpDown
+            {
+                Location = new Point(265, 104),
+                Size = new Size(60, 24),
+                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+                BackColor = Color.FromArgb(13, 16, 23),
+                ForeColor = Color.White,
+                Minimum = 0,
+                Maximum = 100
+            };
+            pnlEditor.Controls.Add(numAc);
+
+            cmbDiscreteAc = new ComboBox
+            {
+                Location = new Point(14, 104),
+                Size = new Size(310, 24),
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                BackColor = Color.FromArgb(13, 16, 23),
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Regular),
+                Visible = false
+            };
+            pnlEditor.Controls.Add(cmbDiscreteAc);
+
+            // DC Controls
+            lblDcLabel = new Label
+            {
+                Text = "🔋 Pil Gücü (DC):",
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(251, 191, 36),
+                Location = new Point(380, 78),
+                AutoSize = true
+            };
+            pnlEditor.Controls.Add(lblDcLabel);
+
+            trkDc = new TrackBar
+            {
+                Location = new Point(380, 102),
+                Size = new Size(245, 30),
+                TickStyle = TickStyle.None,
+                Minimum = 0,
+                Maximum = 100
+            };
+            pnlEditor.Controls.Add(trkDc);
+
+            numDc = new NumericUpDown
+            {
+                Location = new Point(631, 104),
+                Size = new Size(60, 24),
+                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+                BackColor = Color.FromArgb(13, 16, 23),
+                ForeColor = Color.White,
+                Minimum = 0,
+                Maximum = 100
+            };
+            pnlEditor.Controls.Add(numDc);
+
+            cmbDiscreteDc = new ComboBox
+            {
+                Location = new Point(380, 104),
+                Size = new Size(310, 24),
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                BackColor = Color.FromArgb(13, 16, 23),
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Regular),
+                Visible = false
+            };
+            pnlEditor.Controls.Add(cmbDiscreteDc);
+
+            Label lblNote = new Label
+            {
+                Text = "💡 İpucu: Listeden parametre seçtikten sonra kaydırıcı veya açılır kutu ile anlık test değerleri ayarlayabilirsiniz. 'Değişiklikleri Uygula' butonu oturum planını günceller.",
+                Font = new Font("Segoe UI", 7.6f, FontStyle.Italic),
+                ForeColor = Color.FromArgb(148, 163, 184),
+                Location = new Point(14, 150),
+                Size = new Size(720, 30)
+            };
+            pnlEditor.Controls.Add(lblNote);
+
+            // Event wiring for inputs
+            trkAc.Scroll += (s, e) =>
+            {
+                if (isUpdatingControls) return;
+                numAc.Value = trkAc.Value;
+                if (chkSync.Checked)
+                {
+                    trkDc.Value = trkAc.Value;
+                    numDc.Value = numAc.Value;
+                }
+                UpdateCurrentValuesFromEditor();
+            };
+
+            numAc.ValueChanged += (s, e) =>
+            {
+                if (isUpdatingControls) return;
+                if (trkAc.Value != (int)numAc.Value) trkAc.Value = (int)numAc.Value;
+                if (chkSync.Checked)
+                {
+                    numDc.Value = numAc.Value;
+                    if (trkDc.Value != (int)numDc.Value) trkDc.Value = (int)numDc.Value;
+                }
+                UpdateCurrentValuesFromEditor();
+            };
+
+            trkDc.Scroll += (s, e) =>
+            {
+                if (isUpdatingControls) return;
+                numDc.Value = trkDc.Value;
+                UpdateCurrentValuesFromEditor();
+            };
+
+            numDc.ValueChanged += (s, e) =>
+            {
+                if (isUpdatingControls) return;
+                if (trkDc.Value != (int)numDc.Value) trkDc.Value = (int)numDc.Value;
+                UpdateCurrentValuesFromEditor();
+            };
+
+            cmbDiscreteAc.SelectedIndexChanged += (s, e) =>
+            {
+                if (isUpdatingControls) return;
+                if (chkSync.Checked && cmbDiscreteDc.Items.Count > cmbDiscreteAc.SelectedIndex)
+                {
+                    cmbDiscreteDc.SelectedIndex = cmbDiscreteAc.SelectedIndex;
+                }
+                UpdateCurrentValuesFromEditor();
+            };
+
+            cmbDiscreteDc.SelectedIndexChanged += (s, e) =>
+            {
+                if (isUpdatingControls) return;
+                UpdateCurrentValuesFromEditor();
+            };
+
+            // Bottom Action Panel
+            Panel pnlBottom = new Panel
+            {
+                Location = new Point(0, 520),
+                Size = new Size(790, 52),
+                BackColor = Color.FromArgb(18, 23, 34)
+            };
+            this.Controls.Add(pnlBottom);
+
+            Button btnExportPowercfg = new Button
+            {
+                Text = "📋 powercfg Komutlarını Kopyala",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Regular),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(37, 45, 64),
+                ForeColor = Color.FromArgb(56, 189, 248),
+                Location = new Point(16, 11),
+                Size = new Size(210, 30),
+                Cursor = Cursors.Hand
+            };
+            btnExportPowercfg.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnExportPowercfg.Click += (s, e) => ExportPowercfgBatch();
+            pnlBottom.Controls.Add(btnExportPowercfg);
+
+            Button btnReset = new Button
+            {
+                Text = "🔄 Orijinale Sıfırla",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Regular),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(45, 55, 75),
+                ForeColor = Color.White,
+                Location = new Point(370, 11),
+                Size = new Size(130, 30),
+                Cursor = Cursors.Hand
+            };
+            btnReset.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnReset.Click += (s, e) => ResetToOriginals();
+            pnlBottom.Controls.Add(btnReset);
+
+            Button btnApply = new Button
+            {
+                Text = "✓ Değişiklikleri Uygula",
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(16, 185, 129),
+                ForeColor = Color.Black,
+                Location = new Point(510, 11),
+                Size = new Size(160, 30),
+                Cursor = Cursors.Hand
+            };
+            btnApply.FlatAppearance.BorderSize = 0;
+            btnApply.Click += (s, e) => ApplyAllPowerSettings();
+            pnlBottom.Controls.Add(btnApply);
+
+            Button btnClose = new Button
+            {
+                Text = "Kapat",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Regular),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(30, 41, 59),
+                ForeColor = Color.FromArgb(203, 213, 225),
+                Location = new Point(680, 11),
+                Size = new Size(85, 30),
+                Cursor = Cursors.Hand,
+                DialogResult = DialogResult.OK
+            };
+            btnClose.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnClose.Click += (s, e) => this.Close();
+            pnlBottom.Controls.Add(btnClose);
+        }
+
+        private void RefreshListView()
+        {
+            lvSettings.BeginUpdate();
+            lvSettings.Items.Clear();
+            for (int i = 0; i < powerItems.Count; i++)
+            {
+                PowerItemDef item = powerItems[i];
+                ListViewItem lvi = new ListViewItem(item.Name);
+
+                string acStr = item.IsDiscrete && item.DiscreteOptions.ContainsKey(item.CurrentAcValue)
+                    ? item.CurrentAcValue.ToString()
+                    : item.CurrentAcValue.ToString() + item.Unit;
+
+                string dcStr = item.IsDiscrete && item.DiscreteOptions.ContainsKey(item.CurrentDcValue)
+                    ? item.CurrentDcValue.ToString()
+                    : item.CurrentDcValue.ToString() + item.Unit;
+
+                lvi.SubItems.Add(acStr);
+                lvi.SubItems.Add(dcStr);
+
+                string desc = "";
+                if (item.IsDiscrete && item.DiscreteOptions.ContainsKey(item.CurrentAcValue))
+                {
+                    desc = item.DiscreteOptions[item.CurrentAcValue];
+                }
+                else
+                {
+                    if (item.SettingGuid == SET_PERFEPP)
+                        desc = item.CurrentAcValue == 0 ? "🏆 Maksimum Performans (Gecikmesiz)" : (item.CurrentAcValue <= 20 ? "⚡ Düşük Gecikme" : "🌱 Enerji Tasarrufu");
+                    else if (item.SettingGuid == SET_CPMINCORES)
+                        desc = item.CurrentAcValue == 100 ? "✓ Çekirdek Park Yok (Sıfır Uyanma Gecikmesi)" : "%" + item.CurrentAcValue + " Min Çekirdek";
+                    else if (item.SettingGuid == SET_PROCTHROTTLEMIN)
+                        desc = item.CurrentAcValue == 100 ? "✓ Sabit Yüksek Saat Hızı (%100 Taban)" : "%" + item.CurrentAcValue + " Taban Frekans";
+                    else
+                        desc = item.CurrentAcValue.ToString() + item.Unit;
+                }
+                lvi.SubItems.Add(desc);
+                lvi.Tag = item;
+
+                if (item.CurrentAcValue != item.OriginalAcValue || item.CurrentDcValue != item.OriginalDcValue)
+                {
+                    lvi.ForeColor = Color.FromArgb(52, 211, 153);
+                }
+                else
+                {
+                    lvi.ForeColor = Color.FromArgb(226, 232, 240);
+                }
+
+                lvSettings.Items.Add(lvi);
+            }
+            lvSettings.EndUpdate();
+        }
+
+        private void LvSettings_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (lvSettings.SelectedItems.Count == 0) return;
+            PowerItemDef sel = (PowerItemDef)lvSettings.SelectedItems[0].Tag;
+            if (sel == null) return;
+
+            isUpdatingControls = true;
+            lblSelectedName.Text = sel.Name;
+            lblSelectedDesc.Text = sel.Description;
+
+            if (sel.IsDiscrete)
+            {
+                trkAc.Visible = false;
+                numAc.Visible = false;
+                trkDc.Visible = false;
+                numDc.Visible = false;
+
+                cmbDiscreteAc.Visible = true;
+                cmbDiscreteDc.Visible = true;
+
+                cmbDiscreteAc.Items.Clear();
+                cmbDiscreteDc.Items.Clear();
+                int selIdxAc = 0;
+                int selIdxDc = 0;
+                int idx = 0;
+                foreach (var opt in sel.DiscreteOptions)
+                {
+                    cmbDiscreteAc.Items.Add(opt.Value);
+                    cmbDiscreteDc.Items.Add(opt.Value);
+                    if (opt.Key == sel.CurrentAcValue) selIdxAc = idx;
+                    if (opt.Key == sel.CurrentDcValue) selIdxDc = idx;
+                    idx++;
+                }
+                if (cmbDiscreteAc.Items.Count > 0) cmbDiscreteAc.SelectedIndex = selIdxAc;
+                if (cmbDiscreteDc.Items.Count > 0) cmbDiscreteDc.SelectedIndex = selIdxDc;
+            }
+            else
+            {
+                cmbDiscreteAc.Visible = false;
+                cmbDiscreteDc.Visible = false;
+
+                trkAc.Visible = true;
+                numAc.Visible = true;
+                trkDc.Visible = true;
+                numDc.Visible = true;
+
+                trkAc.Minimum = (int)sel.MinValue;
+                trkAc.Maximum = (int)sel.MaxValue;
+                numAc.Minimum = sel.MinValue;
+                numAc.Maximum = sel.MaxValue;
+
+                trkDc.Minimum = (int)sel.MinValue;
+                trkDc.Maximum = (int)sel.MaxValue;
+                numDc.Minimum = sel.MinValue;
+                numDc.Maximum = sel.MaxValue;
+
+                int safeAc = Math.Min((int)sel.MaxValue, Math.Max((int)sel.MinValue, (int)sel.CurrentAcValue));
+                int safeDc = Math.Min((int)sel.MaxValue, Math.Max((int)sel.MinValue, (int)sel.CurrentDcValue));
+
+                trkAc.Value = safeAc;
+                numAc.Value = safeAc;
+                trkDc.Value = safeDc;
+                numDc.Value = safeDc;
+            }
+            isUpdatingControls = false;
+        }
+
+        private void UpdateCurrentValuesFromEditor()
+        {
+            if (isUpdatingControls || lvSettings.SelectedItems.Count == 0) return;
+            PowerItemDef sel = (PowerItemDef)lvSettings.SelectedItems[0].Tag;
+            if (sel == null) return;
+
+            if (sel.IsDiscrete)
+            {
+                if (cmbDiscreteAc.SelectedItem != null)
+                {
+                    foreach (var kv in sel.DiscreteOptions)
+                    {
+                        if (kv.Value == cmbDiscreteAc.SelectedItem.ToString())
+                        {
+                            sel.CurrentAcValue = kv.Key;
+                            break;
+                        }
+                    }
+                }
+                if (cmbDiscreteDc.SelectedItem != null)
+                {
+                    foreach (var kv in sel.DiscreteOptions)
+                    {
+                        if (kv.Value == cmbDiscreteDc.SelectedItem.ToString())
+                        {
+                            sel.CurrentDcValue = kv.Key;
+                            break;
+                        }
+                    }
+                }
+            }
+            else
+            {
+                sel.CurrentAcValue = (uint)numAc.Value;
+                sel.CurrentDcValue = (uint)numDc.Value;
+            }
+
+            ListViewItem lvi = lvSettings.SelectedItems[0];
+            string acStr = sel.IsDiscrete && sel.DiscreteOptions.ContainsKey(sel.CurrentAcValue)
+                ? sel.CurrentAcValue.ToString()
+                : sel.CurrentAcValue.ToString() + sel.Unit;
+
+            string dcStr = sel.IsDiscrete && sel.DiscreteOptions.ContainsKey(sel.CurrentDcValue)
+                ? sel.CurrentDcValue.ToString()
+                : sel.CurrentDcValue.ToString() + sel.Unit;
+
+            lvi.SubItems[1].Text = acStr;
+            lvi.SubItems[2].Text = dcStr;
+
+            string desc = "";
+            if (sel.IsDiscrete && sel.DiscreteOptions.ContainsKey(sel.CurrentAcValue))
+            {
+                desc = sel.DiscreteOptions[sel.CurrentAcValue];
+            }
+            else
+            {
+                if (sel.SettingGuid == SET_PERFEPP)
+                    desc = sel.CurrentAcValue == 0 ? "🏆 Maksimum Performans (Gecikmesiz)" : (sel.CurrentAcValue <= 20 ? "⚡ Düşük Gecikme" : "🌱 Enerji Tasarrufu");
+                else if (sel.SettingGuid == SET_CPMINCORES)
+                    desc = sel.CurrentAcValue == 100 ? "✓ Çekirdek Park Yok (Sıfır Uyanma Gecikmesi)" : "%" + sel.CurrentAcValue + " Min Çekirdek";
+                else if (sel.SettingGuid == SET_PROCTHROTTLEMIN)
+                    desc = sel.CurrentAcValue == 100 ? "✓ Sabit Yüksek Saat Hızı (%100 Taban)" : "%" + sel.CurrentAcValue + " Taban Frekans";
+                else
+                    desc = sel.CurrentAcValue.ToString() + sel.Unit;
+            }
+            lvi.SubItems[3].Text = desc;
+
+            if (sel.CurrentAcValue != sel.OriginalAcValue || sel.CurrentDcValue != sel.OriginalDcValue)
+            {
+                lvi.ForeColor = Color.FromArgb(52, 211, 153);
+            }
+            else
+            {
+                lvi.ForeColor = Color.FromArgb(226, 232, 240);
+            }
+        }
+
+        private void ApplyPreset(uint epp, uint boost, uint parkMin, uint parkMax, uint throttleMin, uint throttleMax, uint latencyHint, uint cooling, uint autoMode, uint boostPolicy)
+        {
+            foreach (var item in powerItems)
+            {
+                if (item.SettingGuid == SET_PERFEPP) { item.CurrentAcValue = epp; item.CurrentDcValue = epp; }
+                else if (item.SettingGuid == SET_PERFBOOSTMODE) { item.CurrentAcValue = boost; item.CurrentDcValue = boost; }
+                else if (item.SettingGuid == SET_CPMINCORES) { item.CurrentAcValue = parkMin; item.CurrentDcValue = parkMin; }
+                else if (item.SettingGuid == SET_CPMAXCORES) { item.CurrentAcValue = parkMax; item.CurrentDcValue = parkMax; }
+                else if (item.SettingGuid == SET_PROCTHROTTLEMIN) { item.CurrentAcValue = throttleMin; item.CurrentDcValue = throttleMin; }
+                else if (item.SettingGuid == SET_PROCTHROTTLEMAX) { item.CurrentAcValue = throttleMax; item.CurrentDcValue = throttleMax; }
+                else if (item.SettingGuid == SET_LATENCYHINT) { item.CurrentAcValue = latencyHint; item.CurrentDcValue = latencyHint; }
+                else if (item.SettingGuid == SET_SYSCOOLPOL) { item.CurrentAcValue = cooling; item.CurrentDcValue = cooling; }
+                else if (item.SettingGuid == SET_AUTONOMOUS) { item.CurrentAcValue = autoMode; item.CurrentDcValue = autoMode; }
+                else if (item.SettingGuid == SET_BOOSTPOLICY) { item.CurrentAcValue = boostPolicy; item.CurrentDcValue = boostPolicy; }
+            }
+            RefreshListView();
+            if (lvSettings.SelectedItems.Count > 0)
+                LvSettings_SelectedIndexChanged(null, null);
+        }
+
+        private void ApplyAllPowerSettings()
+        {
+            try
+            {
+                foreach (var item in powerItems)
+                {
+                    string keyTag = item.SubGroup.ToString() + "|" + item.SettingGuid.ToString();
+                    vault.ApplyPowerSettingTracked(keyTag, item.SubGroup, item.SettingGuid, item.CurrentAcValue, item.CurrentDcValue);
+                }
+                MessageBox.Show(
+                    "İşlemci Güç Politikası ve gizli parametreleri başarıyla uygulandı!\n\n" +
+                    "• Tüm ayarlar Argon Reversible StateVault oturum planına işlendi.\n" +
+                    "• Sistem yeniden başladığında veya Argon sıfırlandığında orijinal plana sorunsuz dönülebilir.",
+                    "Argon Power Policy Governor",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                RefreshListView();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Güç politikası uygulanırken bir hata oluştu: " + ex.Message, "Hata", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void ResetToOriginals()
+        {
+            var res = MessageBox.Show(
+                "Tüm işlemci güç parametreleri başlangıçtaki orijinal değerlerine sıfırlanacak.\n\nDevam etmek istiyor musunuz?",
+                "Orijinale Sıfırla",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+            if (res == DialogResult.Yes)
+            {
+                foreach (var item in powerItems)
+                {
+                    item.CurrentAcValue = item.OriginalAcValue;
+                    item.CurrentDcValue = item.OriginalDcValue;
+                }
+                vault.RevertPowerPlanCompletely();
+                RefreshListView();
+                if (lvSettings.SelectedItems.Count > 0)
+                    LvSettings_SelectedIndexChanged(null, null);
+            }
+        }
+
+        private void ExportPowercfgBatch()
+        {
+            try
+            {
+                StringBuilder sb = new StringBuilder();
+                sb.AppendLine("@echo off");
+                sb.AppendLine("rem ========================================================");
+                sb.AppendLine("rem Argon Latency Studio - CPU Power Policy Governor Batch Script");
+                sb.AppendLine("rem ========================================================");
+                sb.AppendLine();
+                foreach (var item in powerItems)
+                {
+                    string subStr = item.SubGroup.ToString();
+                    string setStr = item.SettingGuid.ToString();
+                    sb.AppendLine(string.Format("rem {0}", item.Name));
+                    sb.AppendLine(string.Format("powercfg /setacvalueindex SCHEME_CURRENT {0} {1} {2}", subStr, setStr, item.CurrentAcValue));
+                    sb.AppendLine(string.Format("powercfg /setdcvalueindex SCHEME_CURRENT {0} {1} {2}", subStr, setStr, item.CurrentDcValue));
+                }
+                sb.AppendLine();
+                sb.AppendLine("rem Degisiklikleri aninda aktif plana yansit");
+                sb.AppendLine("powercfg /setactive SCHEME_CURRENT");
+                sb.AppendLine("echo [OK] Argon Power Policy basariyla uygulandi!");
+                sb.AppendLine("pause");
+
+                Clipboard.SetText(sb.ToString());
+                MessageBox.Show(
+                    "Tüm parametreler için powercfg komutları başarıyla panoya kopyalandı!\n\nBir .bat dosyasına yapıştırarak yönetici olarak çalıştırabilirsiniz.",
+                    "powercfg Dışa Aktarıldı",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Panoya kopyalanırken hata oluştu: " + ex.Message, "Hata", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+    }
+
+    public class PresentationAdvisorDialog : Form
+    {
+        private StateVault vault;
+        private bool isAdmin;
+        private string presentMonBin;
+        private Action onPolicyChangedCallback;
+        private PresentationPolicySnapshot snapshot;
+
+        private Label lblOsDwmSummary;
+        private Button btnCleanStaleKey;
+        private Button btnTabHw, btnTabGlobal, btnTabPerGame;
+        private Panel pnlHardwareTab, pnlGlobalTab, pnlPerGameTab;
+
+        // Tab 1 controls
+        private ListView lvOutputs;
+        private TextBox txtDiagnostics;
+        private Button btnDelayedCapture;
+        private System.Windows.Forms.Timer captureCountdownTimer;
+        private int captureCountdownLeft = 0;
+
+        // Tab 2 controls
+        private ComboBox cmbSwapUpgrade;
+        private ComboBox cmbVrrOpt;
+        private ComboBox cmbAutoHdr;
+        private ComboBox cmbFseMode;
+        private ComboBox cmbGameDvr;
+        private ComboBox cmbMpoMode;
+        private ComboBox cmbHagsMode;
+        private Label lblRebootNotice;
+
+        // Tab 3 controls
+        private ListView lvPerGame;
+        private TextBox txtGameExePath;
+        private ComboBox cmbPerGameGpu;
+        private ComboBox cmbPerGameSwap;
+        private CheckBox chkPerGameDisFso;
+
+        public PresentationAdvisorDialog(StateVault vault, bool isAdmin, string presentMonBin, Action onPolicyChangedCallback)
+        {
+            this.vault = vault;
+            this.isAdmin = isAdmin;
+            this.presentMonBin = presentMonBin;
+            this.onPolicyChangedCallback = onPolicyChangedCallback;
+
+            this.Text = "Argon Latency Studio — DWM / Flip Model, MPO & DXGI Sunum Danışmanı";
+            this.Size = new Size(880, 680);
+            this.StartPosition = FormStartPosition.CenterParent;
+            this.FormBorderStyle = FormBorderStyle.FixedDialog;
+            this.MaximizeBox = false;
+            this.MinimizeBox = false;
+            this.BackColor = Color.FromArgb(13, 16, 23);
+            this.ForeColor = Color.White;
+            this.Font = new Font("Segoe UI", 8.5f, FontStyle.Regular);
+
+            BuildUi();
+            RefreshAllData();
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            if (captureCountdownTimer != null)
+            {
+                captureCountdownTimer.Stop();
+                captureCountdownTimer.Dispose();
+                captureCountdownTimer = null;
+            }
+            base.OnFormClosing(e);
+        }
+
+        private void BuildUi()
+        {
+            // Header
+            Panel pnlHeader = new Panel
+            {
+                Location = new Point(0, 0),
+                Size = new Size(880, 74),
+                BackColor = Color.FromArgb(18, 23, 34)
+            };
+            this.Controls.Add(pnlHeader);
+
+            Label lblTitle = new Label
+            {
+                Text = "🎮 DWM / FLIP MODEL, MPO & DXGI SUNUM DANIŞMANI",
+                Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(168, 85, 247),
+                Location = new Point(16, 10),
+                AutoSize = true
+            };
+            pnlHeader.Controls.Add(lblTitle);
+
+            lblOsDwmSummary = new Label
+            {
+                Text = "Donanım ve DXGI çıkışları taranıyor...",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(148, 163, 184),
+                Location = new Point(17, 34),
+                Size = new Size(650, 32)
+            };
+            pnlHeader.Controls.Add(lblOsDwmSummary);
+
+            Button btnRefresh = new Button
+            {
+                Text = "🔄 Yenile",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(37, 45, 64),
+                ForeColor = Color.White,
+                Location = new Point(770, 14),
+                Size = new Size(85, 28),
+                Cursor = Cursors.Hand
+            };
+            btnRefresh.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnRefresh.Click += (s, e) => RefreshAllData();
+            pnlHeader.Controls.Add(btnRefresh);
+
+            btnCleanStaleKey = new Button
+            {
+                Text = "🧹 Eski Anahtarı Temizle",
+                Font = new Font("Segoe UI", 7.6f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(120, 53, 15),
+                ForeColor = Color.FromArgb(253, 224, 71),
+                Location = new Point(605, 14),
+                Size = new Size(158, 28),
+                Cursor = Cursors.Hand,
+                Visible = false
+            };
+            btnCleanStaleKey.FlatAppearance.BorderSize = 0;
+            btnCleanStaleKey.Click += (s, e) =>
+            {
+                if (PresentationAdvisorEngine.CleanupStaleWrongDirectXKey())
+                {
+                    MessageBox.Show("Eski sürümden kalan HKCU\\Software\\Microsoft\\DirectX\\UserGlobalSettings anahtarı temizlendi.", "Temizlendi", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    RefreshAllData();
+                }
+            };
+            pnlHeader.Controls.Add(btnCleanStaleKey);
+
+            // Sub-Navigation Bar
+            Panel pnlSubNav = new Panel
+            {
+                Location = new Point(0, 74),
+                Size = new Size(880, 38),
+                BackColor = Color.FromArgb(15, 19, 28)
+            };
+            this.Controls.Add(pnlSubNav);
+
+            btnTabHw = CreateNavTabBtn(pnlSubNav, 16, 5, 250, "🖥️ Donanım, DXGI & Çakışma Analizi", 0);
+            btnTabGlobal = CreateNavTabBtn(pnlSubNav, 274, 5, 265, "⚡ Küresel Flip-Model / MPO Politikaları", 1);
+            btnTabPerGame = CreateNavTabBtn(pnlSubNav, 547, 5, 265, "🎮 Oyun Bazlı GPU & FSO Kuralları", 2);
+
+            // Content Host Panels (Bounds: 16, 120, 840, 465)
+            pnlHardwareTab = new Panel { Location = new Point(16, 120), Size = new Size(838, 465), BackColor = Color.FromArgb(13, 16, 23) };
+            pnlGlobalTab = new Panel { Location = new Point(16, 120), Size = new Size(838, 465), BackColor = Color.FromArgb(13, 16, 23), Visible = false };
+            pnlPerGameTab = new Panel { Location = new Point(16, 120), Size = new Size(838, 465), BackColor = Color.FromArgb(13, 16, 23), Visible = false };
+
+            this.Controls.Add(pnlHardwareTab);
+            this.Controls.Add(pnlGlobalTab);
+            this.Controls.Add(pnlPerGameTab);
+
+            BuildHardwareTabUi();
+            BuildGlobalPoliciesTabUi();
+            BuildPerGameTabUi();
+
+            // Bottom Close Bar
+            Panel pnlBottom = new Panel
+            {
+                Location = new Point(0, 595),
+                Size = new Size(880, 48),
+                BackColor = Color.FromArgb(18, 23, 34)
+            };
+            this.Controls.Add(pnlBottom);
+
+            Label lblFootNote = new Label
+            {
+                Text = "✓ Tüm değişiklikler StateVault kayıt defteri günlüğüne yedeklenir ve istendiğinde tek tıkla geri alınabilir.",
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Italic),
+                ForeColor = Color.FromArgb(148, 163, 184),
+                Location = new Point(16, 16),
+                AutoSize = true
+            };
+            pnlBottom.Controls.Add(lblFootNote);
+
+            Button btnClose = new Button
+            {
+                Text = "Kapat",
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(30, 41, 59),
+                ForeColor = Color.White,
+                Location = new Point(760, 9),
+                Size = new Size(94, 30),
+                Cursor = Cursors.Hand,
+                DialogResult = DialogResult.OK
+            };
+            btnClose.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnClose.Click += (s, e) => this.Close();
+            pnlBottom.Controls.Add(btnClose);
+
+            DisableMnemonicsRecursive(this);
+            SwitchSubTab(0);
+        }
+
+        private static void DisableMnemonicsRecursive(Control root)
+        {
+            foreach (Control c in root.Controls)
+            {
+                Label l = c as Label;
+                if (l != null) l.UseMnemonic = false;
+                ButtonBase b = c as ButtonBase;
+                if (b != null) b.UseMnemonic = false;
+                if (c.HasChildren) DisableMnemonicsRecursive(c);
+            }
+        }
+
+        private Button CreateNavTabBtn(Panel parent, int x, int y, int w, string text, int tabIdx)
+        {
+            Button b = new Button
+            {
+                Text = text,
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                Location = new Point(x, y),
+                Size = new Size(w, 28),
+                Cursor = Cursors.Hand
+            };
+            b.FlatAppearance.BorderSize = 0;
+            b.Click += (s, e) => SwitchSubTab(tabIdx);
+            parent.Controls.Add(b);
+            return b;
+        }
+
+        private void SwitchSubTab(int idx)
+        {
+            pnlHardwareTab.Visible = (idx == 0);
+            pnlGlobalTab.Visible = (idx == 1);
+            pnlPerGameTab.Visible = (idx == 2);
+
+            Button[] tabs = new Button[] { btnTabHw, btnTabGlobal, btnTabPerGame };
+            for (int i = 0; i < tabs.Length; i++)
+            {
+                bool active = (i == idx);
+                tabs[i].BackColor = active ? Color.FromArgb(168, 85, 247) : Color.FromArgb(24, 31, 46);
+                tabs[i].ForeColor = active ? Color.White : Color.FromArgb(148, 163, 184);
+            }
+        }
+
+        private void BuildHardwareTabUi()
+        {
+            Label lblOutHdr = new Label
+            {
+                Text = "DXGI ÇIKIŞ MATRİSİ (Canlı Ekran Kartı & Sürücü Donanım Yetenekleri — Salt Okunur)",
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(56, 189, 248),
+                Location = new Point(0, 2),
+                AutoSize = true
+            };
+            pnlHardwareTab.Controls.Add(lblOutHdr);
+
+            lvOutputs = new ListView
+            {
+                Location = new Point(0, 24),
+                Size = new Size(836, 135),
+                View = View.Details,
+                FullRowSelect = true,
+                GridLines = true,
+                BackColor = Color.FromArgb(18, 23, 34),
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Regular),
+                BorderStyle = BorderStyle.FixedSingle
+            };
+            lvOutputs.Columns.Add("Ekran", 90);
+            lvOutputs.Columns.Add("Ekran Kartı (GPU)", 190);
+            lvOutputs.Columns.Add("Çözünürlük & Hz", 125);
+            lvOutputs.Columns.Add("Renk / HDR", 105);
+            lvOutputs.Columns.Add("MPO (SupportsOverlays)", 135);
+            lvOutputs.Columns.Add("HW Comp (Win / FSE)", 180);
+            pnlHardwareTab.Controls.Add(lvOutputs);
+
+            Label lblDiagHdr = new Label
+            {
+                Text = "ÇAKIŞMA ANALİZİ, YENİDEN BAŞLATMA DOĞRULAMASI & HEDEF PENCERE SUNUM RAPORU",
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(52, 211, 153),
+                Location = new Point(0, 168),
+                AutoSize = true
+            };
+            pnlHardwareTab.Controls.Add(lblDiagHdr);
+
+            txtDiagnostics = new TextBox
+            {
+                Location = new Point(0, 190),
+                Size = new Size(836, 224),
+                Multiline = true,
+                ReadOnly = true,
+                ScrollBars = ScrollBars.Vertical,
+                BackColor = Color.FromArgb(10, 13, 19),
+                ForeColor = Color.FromArgb(226, 232, 240),
+                Font = new Font("Consolas", 8.2f, FontStyle.Regular),
+                BorderStyle = BorderStyle.FixedSingle
+            };
+            pnlHardwareTab.Controls.Add(txtDiagnostics);
+
+            btnDelayedCapture = new Button
+            {
+                Text = "⏱️ 5 Sn Gecikmeli Ön Plan Oyunu & PresentMode Yakala (Basıp Oyuna Alt+Tab Yapın)",
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(16, 185, 129),
+                ForeColor = Color.Black,
+                Location = new Point(0, 424),
+                Size = new Size(550, 34),
+                Cursor = Cursors.Hand
+            };
+            btnDelayedCapture.FlatAppearance.BorderSize = 0;
+            btnDelayedCapture.Click += (s, e) => StartDelayedForegroundCapture();
+            pnlHardwareTab.Controls.Add(btnDelayedCapture);
+
+            Button btnOpenWinGfx = new Button
+            {
+                Text = "⚙️ Windows Grafik Ayarları",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(30, 41, 59),
+                ForeColor = Color.White,
+                Location = new Point(560, 424),
+                Size = new Size(276, 34),
+                Cursor = Cursors.Hand
+            };
+            btnOpenWinGfx.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnOpenWinGfx.Click += (s, e) =>
+            {
+                try { Process.Start("ms-settings:display-advancedgraphics"); } catch { }
+            };
+            pnlHardwareTab.Controls.Add(btnOpenWinGfx);
+        }
+
+        private void BuildGlobalPoliciesTabUi()
+        {
+            Panel pnlBox = new Panel
+            {
+                Location = new Point(0, 4),
+                Size = new Size(836, 352),
+                BackColor = Color.FromArgb(18, 23, 34)
+            };
+            pnlBox.Paint += (s, e) =>
+            {
+                using (Pen p = new Pen(Color.FromArgb(45, 55, 75), 1))
+                {
+                    e.Graphics.DrawRectangle(p, 0, 0, pnlBox.Width - 1, pnlBox.Height - 1);
+                }
+            };
+            pnlGlobalTab.Controls.Add(pnlBox);
+
+            int ry = 16;
+            cmbSwapUpgrade = AddPolicyRow(pnlBox, ry, "Windows Pencereli Oyun Optimizasyonları (SwapEffectUpgradeEnable):",
+                new string[] { "Mevcut / Varsayılan (Dokunma)", "1 - Açık (DX10/11 Pencereli Oyunları Flip-Model'e Yükselt - Önerilen)", "0 - Kapalı (Klasik BitBlt Davranışı)" });
+            ry += 44;
+
+            cmbVrrOpt = AddPolicyRow(pnlBox, ry, "Değişken Yenileme Hızı (VRR / G-Sync / FreeSync) Optimizasyonu:",
+                new string[] { "Mevcut / Varsayılan (Dokunma)", "1 - Açık (Pencereli VRR Optimizasyonunu Etkinleştir)", "0 - Kapalı" });
+            ry += 44;
+
+            cmbAutoHdr = AddPolicyRow(pnlBox, ry, "Auto HDR (DirectXUserGlobalSettings):",
+                new string[] { "Mevcut Değeri Koru (Önerilen)", "1 - Açık", "0 - Kapalı" });
+            ry += 44;
+
+            cmbFseMode = AddPolicyRow(pnlBox, ry, "Tam Ekran İyileştirmeleri (GameDVR_FSEBehaviorMode):",
+                new string[] { "Mevcut Değeri Koru", "0 - Modern Flip Model / Hızlı Alt+Tab Uyumlu (Win11 Önerilen)", "2 - Klasik Özel Tam Ekran Zorla (FSO Küresel Kapalı)" });
+            ry += 44;
+
+            cmbGameDvr = AddPolicyRow(pnlBox, ry, "Xbox GameDVR Arka Plan Video Yakalama (GameDVR_Enabled / AppCapture):",
+                new string[] { "Mevcut Değeri Koru", "0 - Tamamen Kapalı (Arka Plan Kaydı Yok - Önerilen)", "1 - Açık" });
+            ry += 44;
+
+            cmbMpoMode = AddPolicyRow(pnlBox, ry, "Multiplane Overlay (MPO) Donanım Katmanı " + (isAdmin ? "[Reboot Gerekir]:" : "[Yönetici Gerekir]:"),
+                new string[] { "Mevcut Değeri Koru", "Etkin / Varsayılan (OverlayTestMode Kaldır — Independent Flip için Önerilen)", "Devre Dışı (OverlayTestMode=5 — Çift Ekran Titreme Çözümü)", "Agresif Devre Dışı (OverlayTestMode=5 + DisableOverlays=1)" });
+            if (!isAdmin) cmbMpoMode.Enabled = false;
+            ry += 44;
+
+            cmbHagsMode = AddPolicyRow(pnlBox, ry, "Donanım GPU Zamanlama HAGS (HwSchMode) " + (isAdmin ? "[Reboot Gerekir]:" : "[Yönetici Gerekir]:"),
+                new string[] { "Mevcut Değeri Koru", "2 - Açık (Donanım GPU Zamanlama Aktif)", "1 - Kapalı (Klasik CPU Sürücü Zamanlaması)" });
+            if (!isAdmin) cmbHagsMode.Enabled = false;
+
+            lblRebootNotice = new Label
+            {
+                Text = "ℹ️ Bilgi: DirectX Pencereli Optimizasyonlar ve GameConfigStore bir sonraki oyun başlatmada; MPO ve HAGS ise Windows yeniden başlatıldığında devreye girer.",
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Italic),
+                ForeColor = Color.FromArgb(148, 163, 184),
+                Location = new Point(16, 324),
+                Size = new Size(800, 22)
+            };
+            pnlBox.Controls.Add(lblRebootNotice);
+
+            // Quick Preset + Save/Revert Buttons
+            Button btnPresetWin11Flip = new Button
+            {
+                Text = "🏆 Win11 Borderless / Independent Flip Şablonu",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(37, 45, 64),
+                ForeColor = Color.FromArgb(52, 211, 153),
+                Location = new Point(0, 368),
+                Size = new Size(305, 36),
+                Cursor = Cursors.Hand
+            };
+            btnPresetWin11Flip.FlatAppearance.BorderColor = Color.FromArgb(16, 185, 129);
+            btnPresetWin11Flip.Click += (s, e) =>
+            {
+                cmbSwapUpgrade.SelectedIndex = 1;
+                cmbVrrOpt.SelectedIndex = 1;
+                cmbFseMode.SelectedIndex = 1;
+                cmbGameDvr.SelectedIndex = 1;
+                if (isAdmin && cmbMpoMode.Enabled) cmbMpoMode.SelectedIndex = 1;
+            };
+            pnlGlobalTab.Controls.Add(btnPresetWin11Flip);
+
+            Button btnPresetClassicFse = new Button
+            {
+                Text = "🖥️ Klasik Tam Ekran (FSE=2) Şablonu",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(37, 45, 64),
+                ForeColor = Color.FromArgb(56, 189, 248),
+                Location = new Point(313, 368),
+                Size = new Size(255, 36),
+                Cursor = Cursors.Hand
+            };
+            btnPresetClassicFse.FlatAppearance.BorderColor = Color.FromArgb(56, 189, 248);
+            btnPresetClassicFse.Click += (s, e) =>
+            {
+                cmbSwapUpgrade.SelectedIndex = 1;
+                cmbFseMode.SelectedIndex = 2;
+                cmbGameDvr.SelectedIndex = 1;
+            };
+            pnlGlobalTab.Controls.Add(btnPresetClassicFse);
+
+            Button btnRevertGlobal = new Button
+            {
+                Text = "🔄 StateVault Geri Al",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(51, 65, 85),
+                ForeColor = Color.White,
+                Location = new Point(0, 416),
+                Size = new Size(190, 38),
+                Cursor = Cursors.Hand
+            };
+            btnRevertGlobal.FlatAppearance.BorderSize = 0;
+            btnRevertGlobal.Click += (s, e) => RevertTrackedDisplayPolicies();
+            pnlGlobalTab.Controls.Add(btnRevertGlobal);
+
+            Button btnApplyGlobal = new Button
+            {
+                Text = "✓ Seçili Küresel Grafik Politikalarını Uygula & StateVault'a Kaydet",
+                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(16, 185, 129),
+                ForeColor = Color.Black,
+                Location = new Point(200, 416),
+                Size = new Size(636, 38),
+                Cursor = Cursors.Hand
+            };
+            btnApplyGlobal.FlatAppearance.BorderSize = 0;
+            btnApplyGlobal.Click += (s, e) => ApplyGlobalPolicies();
+            pnlGlobalTab.Controls.Add(btnApplyGlobal);
+        }
+
+        private ComboBox AddPolicyRow(Panel parent, int y, string labelText, string[] options)
+        {
+            Label lbl = new Label
+            {
+                Text = labelText,
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(226, 232, 240),
+                Location = new Point(16, y + 4),
+                Size = new Size(410, 22),
+                AutoEllipsis = true
+            };
+            parent.Controls.Add(lbl);
+
+            ComboBox cmb = new ComboBox
+            {
+                Location = new Point(432, y),
+                Size = new Size(388, 24),
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                BackColor = Color.FromArgb(13, 16, 23),
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Regular)
+            };
+            cmb.Items.AddRange(options);
+            cmb.SelectedIndex = 0;
+            parent.Controls.Add(cmb);
+            return cmb;
+        }
+
+        private void BuildPerGameTabUi()
+        {
+            Label lblHdr = new Label
+            {
+                Text = "OYUN BAZLI DIRECTX GPU YÖNLENDİRME & FSO İSTİSNA KURALLARI (UserGpuPreferences + AppCompatFlags)",
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(56, 189, 248),
+                Location = new Point(0, 2),
+                AutoSize = true
+            };
+            pnlPerGameTab.Controls.Add(lblHdr);
+
+            lvPerGame = new ListView
+            {
+                Location = new Point(0, 24),
+                Size = new Size(836, 235),
+                View = View.Details,
+                FullRowSelect = true,
+                GridLines = true,
+                MultiSelect = false,
+                BackColor = Color.FromArgb(18, 23, 34),
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Regular),
+                BorderStyle = BorderStyle.FixedSingle
+            };
+            lvPerGame.Columns.Add("Oyun (.exe)", 175);
+            lvPerGame.Columns.Add("GPU Tercihi", 150);
+            lvPerGame.Columns.Add("Pencereli Opt.", 115);
+            lvPerGame.Columns.Add("FSO Devre Dışı", 105);
+            lvPerGame.Columns.Add("Tam Dosya Yolu", 280);
+            lvPerGame.SelectedIndexChanged += LvPerGame_SelectedIndexChanged;
+            pnlPerGameTab.Controls.Add(lvPerGame);
+
+            Panel pnlEdit = new Panel
+            {
+                Location = new Point(0, 268),
+                Size = new Size(836, 190),
+                BackColor = Color.FromArgb(18, 23, 34)
+            };
+            pnlEdit.Paint += (s, e) =>
+            {
+                using (Pen p = new Pen(Color.FromArgb(45, 55, 75), 1))
+                {
+                    e.Graphics.DrawRectangle(p, 0, 0, pnlEdit.Width - 1, pnlEdit.Height - 1);
+                }
+            };
+            pnlPerGameTab.Controls.Add(pnlEdit);
+
+            Label lblExe = new Label
+            {
+                Text = "Hedef Oyun Yolu (.exe):",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(203, 213, 225),
+                Location = new Point(14, 15),
+                AutoSize = true
+            };
+            pnlEdit.Controls.Add(lblExe);
+
+            txtGameExePath = new TextBox
+            {
+                Location = new Point(170, 12),
+                Size = new Size(515, 24),
+                BackColor = Color.FromArgb(13, 16, 23),
+                ForeColor = Color.White,
+                BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Regular)
+            };
+            pnlEdit.Controls.Add(txtGameExePath);
+
+            Button btnBrowseExe = new Button
+            {
+                Text = "📂 .exe Gözat",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(37, 45, 64),
+                ForeColor = Color.White,
+                Location = new Point(692, 11),
+                Size = new Size(128, 26),
+                Cursor = Cursors.Hand
+            };
+            btnBrowseExe.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnBrowseExe.Click += (s, e) =>
+            {
+                using (OpenFileDialog ofd = new OpenFileDialog())
+                {
+                    ofd.Filter = "Uygulama (*.exe)|*.exe";
+                    ofd.Title = "DirectX GPU / FSO kuralı eklenecek oyun .exe dosyasını seçin";
+                    if (ofd.ShowDialog(this) == DialogResult.OK)
+                    {
+                        txtGameExePath.Text = ofd.FileName;
+                    }
+                }
+            };
+            pnlEdit.Controls.Add(btnBrowseExe);
+
+            Label lblGpu = new Label
+            {
+                Text = "GPU Yönlendirme:",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(203, 213, 225),
+                Location = new Point(14, 52),
+                AutoSize = true
+            };
+            pnlEdit.Controls.Add(lblGpu);
+
+            cmbPerGameGpu = new ComboBox
+            {
+                Location = new Point(170, 48),
+                Size = new Size(310, 24),
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                BackColor = Color.FromArgb(13, 16, 23),
+                ForeColor = Color.White
+            };
+            cmbPerGameGpu.Items.AddRange(new string[] { "0 - Windows Karar Versin", "1 - Güç Tasarrufu (Dahili iGPU)", "2 - Yüksek Performans (Harici dGPU - Önerilen)" });
+            cmbPerGameGpu.SelectedIndex = 2;
+            pnlEdit.Controls.Add(cmbPerGameGpu);
+
+            Label lblSwap = new Label
+            {
+                Text = "Pencereli Optimizasyon:",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(203, 213, 225),
+                Location = new Point(14, 88),
+                AutoSize = true
+            };
+            pnlEdit.Controls.Add(lblSwap);
+
+            cmbPerGameSwap = new ComboBox
+            {
+                Location = new Point(170, 84),
+                Size = new Size(310, 24),
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                BackColor = Color.FromArgb(13, 16, 23),
+                ForeColor = Color.White
+            };
+            cmbPerGameSwap.Items.AddRange(new string[] { "Küresel Ayarı Kullan", "1 - Bu Oyunda Zorla Aç (SwapEffectUpgradeEnable=1)", "0 - Bu Oyunda Kapat (SwapEffectUpgradeEnable=0)" });
+            cmbPerGameSwap.SelectedIndex = 0;
+            pnlEdit.Controls.Add(cmbPerGameSwap);
+
+            chkPerGameDisFso = new CheckBox
+            {
+                Text = "Bu oyun için Tam Ekran İyileştirmelerini Devre Dışı Bırak (DISABLEDXMAXIMIZEDWINDOWEDMODE)",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(251, 191, 36),
+                Location = new Point(14, 118),
+                Size = new Size(800, 22)
+            };
+            pnlEdit.Controls.Add(chkPerGameDisFso);
+
+            Button btnSavePerGame = new Button
+            {
+                Text = "✓ Oyun Kuralını Kaydet (StateVault Takipli)",
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(16, 185, 129),
+                ForeColor = Color.Black,
+                Location = new Point(14, 148),
+                Size = new Size(330, 30),
+                Cursor = Cursors.Hand
+            };
+            btnSavePerGame.FlatAppearance.BorderSize = 0;
+            btnSavePerGame.Click += (s, e) => SaveSelectedPerGameRule();
+            pnlEdit.Controls.Add(btnSavePerGame);
+
+            Button btnRemovePerGame = new Button
+            {
+                Text = "🗑️ Seçili Kuralı Kaldır / Sıfırla",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(127, 29, 29),
+                ForeColor = Color.White,
+                Location = new Point(356, 148),
+                Size = new Size(220, 30),
+                Cursor = Cursors.Hand
+            };
+            btnRemovePerGame.FlatAppearance.BorderSize = 0;
+            btnRemovePerGame.Click += (s, e) => DeleteSelectedPerGameRule();
+            pnlEdit.Controls.Add(btnRemovePerGame);
+        }
+
+        private void RefreshAllData()
+        {
+            snapshot = PresentationAdvisorEngine.CaptureSnapshot(vault);
+
+            // Header summary
+            StringBuilder hdr = new StringBuilder();
+            hdr.Append(snapshot.OsFriendlyName);
+            if (snapshot.Hardware.DwmTimingOk)
+            {
+                hdr.AppendFormat("  |  DWM Compose: {0:0.0}Hz (Atlanan: {1}, Kaçırılan: {2})",
+                    snapshot.Hardware.DwmComposeHz, snapshot.Hardware.DwmFramesDropped, snapshot.Hardware.DwmFramesMissed);
+            }
+            if (snapshot.Conflicts.Count > 0)
+            {
+                hdr.AppendFormat("  |  ⚠️ {0} Çakışma", snapshot.Conflicts.Count);
+            }
+            lblOsDwmSummary.Text = hdr.ToString();
+            btnCleanStaleKey.Visible = snapshot.StaleWrongKeyExists;
+
+            // Populate DXGI Output ListView
+            lvOutputs.BeginUpdate();
+            lvOutputs.Items.Clear();
+            foreach (var o in snapshot.Hardware.Outputs)
+            {
+                ListViewItem lvi = new ListViewItem(o.DeviceName);
+                lvi.SubItems.Add(o.AdapterName);
+                lvi.SubItems.Add(string.Format("{0}x{1} @ {2}Hz", o.Width, o.Height, o.RefreshRateHz));
+                lvi.SubItems.Add(string.Format("{0}-bit {1}", o.BitsPerColor, o.IsHdrActive ? "HDR10" : "SDR"));
+                lvi.SubItems.Add(o.SupportsOverlaysMpo ? "✓ Destekliyor (AÇIK)" : "✕ KAPALI (Engelli)");
+                lvi.SubItems.Add(string.Format("Win:{0} | FSE:{1}", o.HwCompWindowed ? "Evet" : "Hayır", o.HwCompFullscreen ? "Evet" : "Hayır"));
+                lvi.ForeColor = o.SupportsOverlaysMpo ? Color.FromArgb(52, 211, 153) : Color.FromArgb(251, 191, 36);
+                lvOutputs.Items.Add(lvi);
+            }
+            lvOutputs.EndUpdate();
+
+            // Diagnostics report
+            StringBuilder diag = new StringBuilder();
+            diag.AppendLine("═══════════════════════════════════════════════════════════════════════════════════════════");
+            diag.AppendLine("1. KAYIT DEFTERİ & SÜRÜCÜ DURUMU (Source-Documented Read-Back)");
+            diag.AppendLine("───────────────────────────────────────────────────────────────────────────────────────────");
+            diag.AppendLine(string.Format("• Win11 Pencereli Opt. (SwapEffectUpgradeEnable) : {0}",
+                snapshot.SwapEffectUpgradeEnable == 1 ? "AÇIK (1)" : (snapshot.SwapEffectUpgradeEnable == 0 ? "KAPALI (0)" : "Varsayılan (Tanımsız)")));
+            diag.AppendLine(string.Format("• Pencereli VRR Opt.   (VRROptimizeEnable)       : {0}",
+                snapshot.VrrOptimizeEnable == 1 ? "AÇIK (1)" : (snapshot.VrrOptimizeEnable == 0 ? "KAPALI (0)" : "Varsayılan")));
+            diag.AppendLine(string.Format("• Auto HDR             (AutoHDREnable)           : {0}",
+                snapshot.AutoHdrEnable >= 0 ? snapshot.AutoHdrEnable.ToString() : "Varsayılan"));
+            diag.AppendLine(string.Format("• MPO Kayıt Engeli     (OverlayTestMode/DisOv)   : {0}",
+                snapshot.MpoRegistryBlocked
+                    ? string.Format("ENGELLİ (OverlayTestMode={0}, DisableOverlays={1})", snapshot.OverlayTestMode, string.IsNullOrEmpty(snapshot.DisableOverlays) ? "-" : snapshot.DisableOverlays)
+                    : "YOK (MPO İzni Açık)"));
+            diag.AppendLine(string.Format("• Tam Ekran FSO Modu   (GameDVR_FSEBehaviorMode) : {0}",
+                snapshot.FseBehaviorMode == "2" ? "2 (FSO Küresel Kapalı / Legacy FSE Zorlaması)" : (string.IsNullOrEmpty(snapshot.FseBehaviorMode) ? "Varsayılan (0)" : snapshot.FseBehaviorMode)));
+            diag.AppendLine(string.Format("• GameDVR / AppCapture                           : GameDVR={0} | AppCapture={1}",
+                string.IsNullOrEmpty(snapshot.GameDvrEnabled) ? "-" : snapshot.GameDvrEnabled,
+                string.IsNullOrEmpty(snapshot.AppCaptureEnabled) ? "-" : snapshot.AppCaptureEnabled));
+            diag.AppendLine(string.Format("• Donanım GPU Zamanlama (HAGS / HwSchMode)       : {0}",
+                snapshot.HagsMode == 2 ? "AÇIK (2)" : (snapshot.HagsMode == 1 ? "KAPALI (1)" : "Varsayılan")));
+
+            if (snapshot.Conflicts.Count > 0)
+            {
+                diag.AppendLine();
+                diag.AppendLine("⚠️ TESPİT EDİLEN ÇAKIŞMALAR:");
+                foreach (string c in snapshot.Conflicts)
+                    diag.AppendLine("  [!] " + c);
+            }
+            if (snapshot.Advisories.Count > 0)
+            {
+                diag.AppendLine();
+                diag.AppendLine("ℹ️ TEKNİK NOTLAR VE ÖNERİLER:");
+                foreach (string a in snapshot.Advisories)
+                    diag.AppendLine("  • " + a);
+            }
+            if (!string.IsNullOrEmpty(snapshot.Hardware.ProbeError))
+            {
+                diag.AppendLine();
+                diag.AppendLine("DXGI Tarama Notu: " + snapshot.Hardware.ProbeError);
+            }
+            diag.AppendLine("═══════════════════════════════════════════════════════════════════════════════════════════");
+            txtDiagnostics.Text = diag.ToString();
+
+            // Populate Tab 2 dropdowns based on current OS state
+            cmbSwapUpgrade.SelectedIndex = snapshot.SwapEffectUpgradeEnable == 1 ? 1 : (snapshot.SwapEffectUpgradeEnable == 0 ? 2 : 0);
+            cmbVrrOpt.SelectedIndex = snapshot.VrrOptimizeEnable == 1 ? 1 : (snapshot.VrrOptimizeEnable == 0 ? 2 : 0);
+            cmbAutoHdr.SelectedIndex = snapshot.AutoHdrEnable == 1 ? 1 : (snapshot.AutoHdrEnable == 0 ? 2 : 0);
+            cmbFseMode.SelectedIndex = snapshot.FseBehaviorMode == "2" ? 2 : (snapshot.FseBehaviorMode == "0" ? 1 : 0);
+            cmbGameDvr.SelectedIndex = snapshot.GameDvrEnabled == "0" ? 1 : (snapshot.GameDvrEnabled == "1" ? 2 : 0);
+
+            if (snapshot.OverlayTestMode == "5" && snapshot.DisableOverlays == "1")
+                cmbMpoMode.SelectedIndex = 3;
+            else if (snapshot.OverlayTestMode == "5")
+                cmbMpoMode.SelectedIndex = 2;
+            else if (string.IsNullOrEmpty(snapshot.OverlayTestMode) && string.IsNullOrEmpty(snapshot.DisableOverlays))
+                cmbMpoMode.SelectedIndex = 1;
+            else
+                cmbMpoMode.SelectedIndex = 0;
+
+            cmbHagsMode.SelectedIndex = snapshot.HagsMode == 2 ? 1 : (snapshot.HagsMode == 1 ? 2 : 0);
+
+            // Populate Per-Game ListView
+            lvPerGame.BeginUpdate();
+            lvPerGame.Items.Clear();
+            foreach (var r in snapshot.PerGameRules)
+            {
+                ListViewItem lvi = new ListViewItem(r.ExeName);
+                lvi.SubItems.Add(r.GpuPreference == 2 ? "Yüksek Perf (dGPU)" : (r.GpuPreference == 1 ? "Güç Tasarrufu (iGPU)" : "Windows Kararı"));
+                lvi.SubItems.Add(r.SwapEffectUpgradeOverride == 1 ? "Açık (1)" : (r.SwapEffectUpgradeOverride == 0 ? "Kapalı (0)" : "Genel"));
+                lvi.SubItems.Add(r.DisableFullscreenOptimizations ? "✓ Kapalı" : "Hayır");
+                lvi.SubItems.Add(r.ExePath);
+                lvi.Tag = r;
+                lvPerGame.Items.Add(lvi);
+            }
+            lvPerGame.EndUpdate();
+        }
+
+        private void StartDelayedForegroundCapture()
+        {
+            if (captureCountdownTimer != null && captureCountdownTimer.Enabled) return;
+            captureCountdownLeft = 5;
+            btnDelayedCapture.Enabled = false;
+            btnDelayedCapture.Text = string.Format("⏳ Oyuna Geçin (Alt+Tab)... {0} sn", captureCountdownLeft);
+
+            if (captureCountdownTimer == null)
+            {
+                captureCountdownTimer = new System.Windows.Forms.Timer { Interval = 1000 };
+                captureCountdownTimer.Tick += (s, e) =>
+                {
+                    captureCountdownLeft--;
+                    if (captureCountdownLeft > 0)
+                    {
+                        btnDelayedCapture.Text = string.Format("⏳ Oyuna Geçin (Alt+Tab)... {0} sn", captureCountdownLeft);
+                    }
+                    else
+                    {
+                        captureCountdownTimer.Stop();
+                        btnDelayedCapture.Text = "🔍 Ön Plan Penceresi & PresentMon Ölçülüyor...";
+                        IntPtr fg = NativeMethods.GetForegroundWindow();
+                        ThreadPool.QueueUserWorkItem(_ =>
+                        {
+                            string report = PresentationAdvisorEngine.InspectTargetWindowAndSwapchain(fg, snapshot, presentMonBin);
+                            try
+                            {
+                                this.BeginInvoke((MethodInvoker)delegate
+                                {
+                                    txtDiagnostics.Text = report;
+                                    btnDelayedCapture.Text = "⏱️ 5 Sn Gecikmeli Ön Plan Oyunu & PresentMode Yakala (Basıp Oyuna Alt+Tab Yapın)";
+                                    btnDelayedCapture.Enabled = true;
+                                    try { System.Media.SystemSounds.Asterisk.Play(); } catch { }
+                                });
+                            }
+                            catch { }
+                        });
+                    }
+                };
+            }
+            captureCountdownTimer.Start();
+        }
+
+        private void ApplyGlobalPolicies()
+        {
+            const string tweakTag = "DWM & DirectX Presentation Advisor";
+            string gcKey = @"System\GameConfigStore";
+            string gdKey = @"SOFTWARE\Microsoft\Windows\CurrentVersion\GameDVR";
+            string dwmKey = @"SOFTWARE\Microsoft\Windows\Dwm";
+            string gfxKey = @"SYSTEM\CurrentControlSet\Control\GraphicsDrivers";
+            bool needsReboot = false;
+
+            // 1. DirectXUserGlobalSettings tokens (non-destructive)
+            Dictionary<string, string> dxUpdates = new Dictionary<string, string>();
+            if (cmbSwapUpgrade.SelectedIndex == 1) dxUpdates["SwapEffectUpgradeEnable"] = "1";
+            else if (cmbSwapUpgrade.SelectedIndex == 2) dxUpdates["SwapEffectUpgradeEnable"] = "0";
+
+            if (cmbVrrOpt.SelectedIndex == 1) dxUpdates["VRROptimizeEnable"] = "1";
+            else if (cmbVrrOpt.SelectedIndex == 2) dxUpdates["VRROptimizeEnable"] = "0";
+
+            if (cmbAutoHdr.SelectedIndex == 1) dxUpdates["AutoHDREnable"] = "1";
+            else if (cmbAutoHdr.SelectedIndex == 2) dxUpdates["AutoHDREnable"] = "0";
+
+            if (dxUpdates.Count > 0)
+            {
+                vault.UpdateDirectXPreferenceTokensTracked(tweakTag, StateVault.DirectXGlobalValueName, dxUpdates);
+            }
+
+            // 2. FSE Behavior
+            if (cmbFseMode.SelectedIndex == 1)
+            {
+                vault.SetRegistryTracked(tweakTag, "HKCU", gcKey, "GameDVR_FSEBehaviorMode", 0, RegistryValueKind.DWord);
+                vault.SetRegistryTracked(tweakTag, "HKCU", gcKey, "GameDVR_FSEBehavior", 0, RegistryValueKind.DWord);
+            }
+            else if (cmbFseMode.SelectedIndex == 2)
+            {
+                vault.SetRegistryTracked(tweakTag, "HKCU", gcKey, "GameDVR_FSEBehaviorMode", 2, RegistryValueKind.DWord);
+                vault.SetRegistryTracked(tweakTag, "HKCU", gcKey, "GameDVR_FSEBehavior", 2, RegistryValueKind.DWord);
+                vault.SetRegistryTracked(tweakTag, "HKCU", gcKey, "GameDVR_HonorUserFSEBehaviorMode", 1, RegistryValueKind.DWord);
+                vault.SetRegistryTracked(tweakTag, "HKCU", gcKey, "GameDVR_DXGIHonorFSEWindowsCompatible", 1, RegistryValueKind.DWord);
+            }
+
+            // 3. GameDVR
+            if (cmbGameDvr.SelectedIndex == 1)
+            {
+                vault.SetRegistryTracked(tweakTag, "HKCU", gcKey, "GameDVR_Enabled", 0, RegistryValueKind.DWord);
+                vault.SetRegistryTracked(tweakTag, "HKCU", gdKey, "AppCaptureEnabled", 0, RegistryValueKind.DWord);
+            }
+            else if (cmbGameDvr.SelectedIndex == 2)
+            {
+                vault.SetRegistryTracked(tweakTag, "HKCU", gcKey, "GameDVR_Enabled", 1, RegistryValueKind.DWord);
+                vault.SetRegistryTracked(tweakTag, "HKCU", gdKey, "AppCaptureEnabled", 1, RegistryValueKind.DWord);
+            }
+
+            // 4. MPO (Admin + Reboot)
+            if (isAdmin && cmbMpoMode.SelectedIndex > 0)
+            {
+                if (cmbMpoMode.SelectedIndex == 1)
+                {
+                    if (!string.IsNullOrEmpty(snapshot.OverlayTestMode) || !string.IsNullOrEmpty(snapshot.DisableOverlays))
+                        needsReboot = true;
+                    vault.DeleteRegistryTracked(tweakTag, "HKLM", dwmKey, "OverlayTestMode");
+                    vault.DeleteRegistryTracked(tweakTag, "HKLM", gfxKey, "DisableOverlays");
+                }
+                else if (cmbMpoMode.SelectedIndex == 2)
+                {
+                    if (snapshot.OverlayTestMode != "5" || !string.IsNullOrEmpty(snapshot.DisableOverlays))
+                        needsReboot = true;
+                    vault.SetRegistryTracked(tweakTag, "HKLM", dwmKey, "OverlayTestMode", 5, RegistryValueKind.DWord);
+                    vault.DeleteRegistryTracked(tweakTag, "HKLM", gfxKey, "DisableOverlays");
+                }
+                else if (cmbMpoMode.SelectedIndex == 3)
+                {
+                    if (snapshot.OverlayTestMode != "5" || snapshot.DisableOverlays != "1")
+                        needsReboot = true;
+                    vault.SetRegistryTracked(tweakTag, "HKLM", dwmKey, "OverlayTestMode", 5, RegistryValueKind.DWord);
+                    vault.SetRegistryTracked(tweakTag, "HKLM", gfxKey, "DisableOverlays", 1, RegistryValueKind.DWord);
+                }
+            }
+
+            // 5. HAGS (Admin + Reboot)
+            if (isAdmin && cmbHagsMode.SelectedIndex > 0)
+            {
+                int targetHags = (cmbHagsMode.SelectedIndex == 1) ? 2 : 1;
+                if (snapshot.HagsMode != targetHags)
+                    needsReboot = true;
+                vault.SetRegistryTracked(tweakTag, "HKLM", gfxKey, "HwSchMode", targetHags, RegistryValueKind.DWord);
+            }
+
+            RefreshAllData();
+            if (onPolicyChangedCallback != null) onPolicyChangedCallback();
+
+            MessageBox.Show(
+                "Küresel DWM / Flip Model / Grafik politikaları StateVault yedeklemesi ile uygulandı!" +
+                (needsReboot ? "\n\n⚠️ NOT: MPO veya HAGS değişikliği yaptığınız için sürücünün yeni ayarı devralması adına Windows'u yeniden başlatmanız gerekir." : ""),
+                "Başarıyla Uygulandı",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+
+        private void RevertTrackedDisplayPolicies()
+        {
+            string gcKey = @"System\GameConfigStore";
+            string gdKey = @"SOFTWARE\Microsoft\Windows\CurrentVersion\GameDVR";
+            string dwmKey = @"SOFTWARE\Microsoft\Windows\Dwm";
+            string gfxKey = @"SYSTEM\CurrentControlSet\Control\GraphicsDrivers";
+
+            vault.RevertRegistryTracked("HKCU", StateVault.DirectXUserGpuPreferencesPath, StateVault.DirectXGlobalValueName);
+            vault.RevertRegistryTracked("HKCU", gcKey, "GameDVR_FSEBehaviorMode");
+            vault.RevertRegistryTracked("HKCU", gcKey, "GameDVR_FSEBehavior");
+            vault.RevertRegistryTracked("HKCU", gcKey, "GameDVR_HonorUserFSEBehaviorMode");
+            vault.RevertRegistryTracked("HKCU", gcKey, "GameDVR_DXGIHonorFSEWindowsCompatible");
+            vault.RevertRegistryTracked("HKCU", gcKey, "GameDVR_Enabled");
+            vault.RevertRegistryTracked("HKCU", gdKey, "AppCaptureEnabled");
+            if (isAdmin)
+            {
+                vault.RevertRegistryTracked("HKLM", dwmKey, "OverlayTestMode");
+                vault.RevertRegistryTracked("HKLM", gfxKey, "DisableOverlays");
+                vault.RevertRegistryTracked("HKLM", gfxKey, "HwSchMode");
+            }
+
+            RefreshAllData();
+            if (onPolicyChangedCallback != null) onPolicyChangedCallback();
+            MessageBox.Show("Argon oturumunda değiştirilen grafik/DWM kayıt defteri ayarları başlangıç durumuna geri alındı.", "Geri Alındı", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        private void LvPerGame_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (lvPerGame.SelectedItems.Count == 0) return;
+            PerGameDirectXRule r = lvPerGame.SelectedItems[0].Tag as PerGameDirectXRule;
+            if (r == null) return;
+
+            txtGameExePath.Text = r.ExePath;
+            cmbPerGameGpu.SelectedIndex = (r.GpuPreference >= 0 && r.GpuPreference <= 2) ? r.GpuPreference : 0;
+            cmbPerGameSwap.SelectedIndex = r.SwapEffectUpgradeOverride == 1 ? 1 : (r.SwapEffectUpgradeOverride == 0 ? 2 : 0);
+            chkPerGameDisFso.Checked = r.DisableFullscreenOptimizations;
+        }
+
+        private void SaveSelectedPerGameRule()
+        {
+            string exePath = (txtGameExePath.Text ?? "").Trim().Trim('"');
+            if (string.IsNullOrEmpty(exePath) || !exePath.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+            {
+                MessageBox.Show("Lütfen geçerli bir tam .exe dosya yolu girin veya '.exe Gözat' ile seçin.", "Geçersiz Yol", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string friendly = "Oyun Grafik Kuralı: " + Path.GetFileName(exePath);
+            Dictionary<string, string> dxUpdates = new Dictionary<string, string>();
+            if (cmbPerGameGpu.SelectedIndex == 1) dxUpdates["GpuPreference"] = "1";
+            else if (cmbPerGameGpu.SelectedIndex == 2) dxUpdates["GpuPreference"] = "2";
+            else dxUpdates["GpuPreference"] = null;
+
+            if (cmbPerGameSwap.SelectedIndex == 1) dxUpdates["SwapEffectUpgradeEnable"] = "1";
+            else if (cmbPerGameSwap.SelectedIndex == 2) dxUpdates["SwapEffectUpgradeEnable"] = "0";
+            else dxUpdates["SwapEffectUpgradeEnable"] = null;
+
+            vault.UpdateDirectXPreferenceTokensTracked(friendly, exePath, dxUpdates);
+            vault.UpdateAppCompatLayerFlagTracked(friendly, exePath, "DISABLEDXMAXIMIZEDWINDOWEDMODE", chkPerGameDisFso.Checked);
+
+            RefreshAllData();
+        }
+
+        private void DeleteSelectedPerGameRule()
+        {
+            string exePath = (txtGameExePath.Text ?? "").Trim().Trim('"');
+            if (string.IsNullOrEmpty(exePath) && lvPerGame.SelectedItems.Count > 0)
+            {
+                PerGameDirectXRule r = lvPerGame.SelectedItems[0].Tag as PerGameDirectXRule;
+                if (r != null) exePath = r.ExePath;
+            }
+            if (string.IsNullOrEmpty(exePath)) return;
+
+            string friendly = "Oyun Grafik Kuralı Sil: " + Path.GetFileName(exePath);
+            Dictionary<string, string> dxClear = new Dictionary<string, string>();
+            dxClear["GpuPreference"] = null;
+            dxClear["SwapEffectUpgradeEnable"] = null;
+            vault.UpdateDirectXPreferenceTokensTracked(friendly, exePath, dxClear);
+            vault.UpdateAppCompatLayerFlagTracked(friendly, exePath, "DISABLEDXMAXIMIZEDWINDOWEDMODE", false);
+
+            RefreshAllData();
+        }
+    }
+
     #endregion
 
     #endregion
@@ -3608,6 +7480,15 @@ namespace ArgonLatencyStudio
         private TextBox txtProcFilter;
         private Label lblProcActionStatus;
         private CheckBox chkWatchdogToggle;
+        private WatchdogConfig watchdogConfig = new WatchdogConfig();
+        private string watchdogConfigPath;
+        private ListView lvWatchdogGames;
+        private Label lblWatchdogLiveStatus;
+        private Button btnManageBgCage;
+        private Button btnWatchdogNotifyToggle;
+        private HashSet<int> activeBoostedGamePids = new HashSet<int>();
+        private HashSet<int> activeCagedBgPids = new HashSet<int>();
+        private string activeDetectedGameName = "";
 
         private Button btnRunSleepTest;
         private Button btnRunMultiPingTest;
@@ -3618,6 +7499,51 @@ namespace ArgonLatencyStudio
         private Label lblMouseDeltaLive;
         private long lastMouseTick = 0;
         private List<double> mouseHzHistory = new List<double>();
+        private List<double> mouseDeltaHistory = new List<double>();
+
+        // Windows 11 Presentation Mode Diagnostics & Flip Model Advisor (PresentMon & DXGI probe)
+        private Panel pnlPresentationModeBench;
+        private Button btnRunPresentationDiag;
+        private Button btnDelayedGamePresCapture;
+        private Button btnOpenPresentationAdvisor;
+        private Button btnOpenGraphicsSettings;
+        private Label lblPresentationReport;
+        private System.Windows.Forms.Timer presCountdownTimer;
+        private int presCountdownLeft = 0;
+
+        // PresentMon & Frametime A/B Benchmark Lab
+        private FrametimeBenchmarkResult benchResultA = null;
+        private FrametimeBenchmarkResult benchResultB = null;
+        private volatile bool benchIsRunning = false;
+        private Panel pnlFrametimeLab;
+        private ComboBox cmbBenchTarget;
+        private Button btnBenchRefreshTargets;
+        private ComboBox cmbBenchDuration;
+        private ComboBox cmbBenchWarmup;
+        private Label lblBenchLiveStatus;
+        private Label lblBenchEngineBadge;
+        private Panel pnlBoxA;
+        private Panel pnlBoxB;
+        private Button btnRunTestA;
+        private Label lblTestA_AvgFps;
+        private Label lblTestA_1Low;
+        private Label lblTestA_01Low;
+        private Label lblTestA_Jitter;
+        private Label lblTestA_Frames;
+        private Button btnRunTestB;
+        private Label lblTestB_AvgFps;
+        private Label lblTestB_1Low;
+        private Label lblTestB_01Low;
+        private Label lblTestB_Jitter;
+        private Label lblTestB_Frames;
+        private Label lblDeltaAvg;
+        private Label lblDelta1Low;
+        private Label lblDelta01Low;
+        private Label lblDeltaJitter;
+        private Label lblBenchVerdict;
+        private Button btnCopyBenchReport;
+        private Button btnExportCsv;
+        private Button btnResetBench;
 
         private ListView lvAuditLog;
 
@@ -3636,6 +7562,11 @@ namespace ArgonLatencyStudio
         static readonly Guid SET_PERFCHECK = new Guid("4d2b0152-7d5c-498b-88e2-34345392a2c5");
         static readonly Guid SET_BOOSTPOLICY = new Guid("45bcc044-d885-43e2-8605-ee0ec6e96b59");
         static readonly Guid SET_INCPOLICY = new Guid("465e1f50-b610-473a-ab58-00d1077dc418");
+        static readonly Guid SET_CPMAXCORES = new Guid("ea062031-0e34-4ff1-9b6d-eb10593ac081");
+        static readonly Guid SET_PROCTHROTTLEMAX = new Guid("bc5038f7-23e0-4960-96da-33abaf5935ec");
+        static readonly Guid SET_PERFBOOSTMODE = new Guid("be337238-0d82-4146-a960-4f3749d470c7");
+        static readonly Guid SET_LATENCYHINT = new Guid("619af095-20e9-440e-a344-a1692e6914ae");
+        static readonly Guid SET_SYSCOOLPOL = new Guid("94d3a615-a899-4ac5-ae2b-e4d8f634367f");
 
         // Intel Hybrid P/E Core & SpeedShift / AMD CPPC Autonomous GUIDs
         static readonly Guid SET_HETEROPOLICY = new Guid("7f2f5cfa-f10c-4823-b5e1-e93ae85f46b5");
@@ -3666,6 +7597,11 @@ namespace ArgonLatencyStudio
             appSettings = ArgonAppSettings.Load(appSettingsPath);
             qolConfigPath = Path.Combine(profileDir, "argon_automation_qol.txt");
             qolConfig = QoLAutomationConfig.LoadFromFile(qolConfigPath);
+            qolConfig.FastForwardMissedAlarms(DateTime.Now);
+            qolConfig.SaveToFile(qolConfigPath);
+            watchdogConfigPath = Path.Combine(profileDir, "argon_watchdog_config.txt");
+            watchdogConfig = WatchdogConfig.LoadFromFile(watchdogConfigPath);
+            autoGameWatchdogActive = watchdogConfig.WatchdogActive;
             customProfilesDir = Path.Combine(profileDir, "CustomProfiles");
             if (!Directory.Exists(customProfilesDir)) Directory.CreateDirectory(customProfilesDir);
             LoadCustomProfilesList();
@@ -3818,7 +7754,7 @@ namespace ArgonLatencyStudio
             string kbdParams = @"SYSTEM\CurrentControlSet\Services\kbdclass\Parameters";
             string gameConfig = @"System\GameConfigStore";
             string gameDvr = @"SOFTWARE\Microsoft\Windows\CurrentVersion\GameDVR";
-            string dxGlobal = @"Software\Microsoft\DirectX\UserGlobalSettings";
+            string dxGlobal = StateVault.DirectXUserGpuPreferencesPath;
             string gfxDrivers = @"SYSTEM\CurrentControlSet\Control\GraphicsDrivers";
             string nvServiceKey = @"SYSTEM\CurrentControlSet\Services\nvlddmkm";
 
@@ -4096,6 +8032,7 @@ namespace ArgonLatencyStudio
                     vault.RemovePowerSettingTracked(SUB_PCIEXPRESS + "|" + SET_PCIEASPM);
                     vault.RevertRegistryTracked("HKLM", gfxDrivers, "HwSchMode");
                     vault.RevertRegistryTracked("HKLM", gfxDrivers, "TdrDelay");
+                    vault.RevertRegistryTracked("HKCU", dxGlobal, "DirectXUserGlobalSettings");
                 }
             };
             hwIntelGpu.Variations.Add(new TweakVariation(
@@ -4117,7 +8054,10 @@ namespace ArgonLatencyStudio
                 () =>
                 {
                     vault.ApplyPowerSettingTracked(SUB_PCIEXPRESS + "|" + SET_PCIEASPM, SUB_PCIEXPRESS, SET_PCIEASPM, 0);
-                    vault.SetRegistryTracked(hwIntelGpu.Title, "HKCU", dxGlobal, "DirectXUserGlobalSettings", "VRROptimizeEnable=1;SwapEffectUpgradeEnable=1;", RegistryValueKind.String);
+                    Dictionary<string, string> dxTokens = new Dictionary<string, string>();
+                    dxTokens["VRROptimizeEnable"] = "1";
+                    dxTokens["SwapEffectUpgradeEnable"] = "1";
+                    vault.UpdateDirectXPreferenceTokensTracked(hwIntelGpu.Title, StateVault.DirectXGlobalValueName, dxTokens);
                 }));
             hwIntelGpu.Variations.Add(new TweakVariation(
                 "Sadece Veri Yolu Uyku Kilidi",
@@ -5832,7 +9772,10 @@ namespace ArgonLatencyStudio
                     vault.SetRegistryTracked(fps02.Title, "HKCU", gameConfig, "GameDVR_HonorUserFSEBehaviorMode", 1, RegistryValueKind.DWord);
                     vault.SetRegistryTracked(fps02.Title, "HKCU", gameConfig, "GameDVR_DXGIHonorFSEWindowsCompatible", 1, RegistryValueKind.DWord);
                     vault.SetRegistryTracked(fps02.Title, "HKCU", gameDvr, "AppCaptureEnabled", 0, RegistryValueKind.DWord);
-                    vault.SetRegistryTracked(fps02.Title, "HKCU", dxGlobal, "DirectXUserGlobalSettings", "VRROptimizeEnable=1;SwapEffectUpgradeEnable=1;", RegistryValueKind.String);
+                    Dictionary<string, string> dxTok1 = new Dictionary<string, string>();
+                    dxTok1["VRROptimizeEnable"] = "1";
+                    dxTok1["SwapEffectUpgradeEnable"] = "1";
+                    vault.UpdateDirectXPreferenceTokensTracked(fps02.Title, StateVault.DirectXGlobalValueName, dxTok1);
                 }));
             fps02.Variations.Add(new TweakVariation(
                 "Hızlı Alt+Tab Sevenler İçin (Pencereli Odaklı + DVR Kapalı)",
@@ -5844,7 +9787,10 @@ namespace ArgonLatencyStudio
                     vault.SetRegistryTracked(fps02.Title, "HKCU", gameConfig, "GameDVR_Enabled", 0, RegistryValueKind.DWord);
                     vault.SetRegistryTracked(fps02.Title, "HKCU", gameConfig, "GameDVR_FSEBehaviorMode", 0, RegistryValueKind.DWord);
                     vault.SetRegistryTracked(fps02.Title, "HKCU", gameDvr, "AppCaptureEnabled", 0, RegistryValueKind.DWord);
-                    vault.SetRegistryTracked(fps02.Title, "HKCU", dxGlobal, "DirectXUserGlobalSettings", "VRROptimizeEnable=1;SwapEffectUpgradeEnable=1;", RegistryValueKind.String);
+                    Dictionary<string, string> dxTok2 = new Dictionary<string, string>();
+                    dxTok2["VRROptimizeEnable"] = "1";
+                    dxTok2["SwapEffectUpgradeEnable"] = "1";
+                    vault.UpdateDirectXPreferenceTokensTracked(fps02.Title, StateVault.DirectXGlobalValueName, dxTok2);
                 }));
             fps02.Variations.Add(new TweakVariation(
                 "Sadece Klasik Tam Ekran & DVR Kapatma",
@@ -7534,6 +11480,8 @@ namespace ArgonLatencyStudio
             trayMenu.Items.Add("Seçili Donanım Matrisini Otomatik Uygula", null, (s, e) => ApplyHardwareAwareSmartTune());
             trayMenu.Items.Add("Gerçek Windows Durumunu (Live OS) Algıla & Eşitle", null, (s, e) => ProbeAllTweaksLiveOsTruthAndOptionallySync(true));
             trayMenu.Items.Add("Şimdi Akıllı RAM & Standby Temizle", null, (s, e) => ExecuteSmartRamAndStandbyPurge(true));
+            trayMenu.Items.Add("⚡ İşlemci Güç Yöneticisi (EPP / Boost / Core Parking)...", null, (s, e) => ShowAdvancedPowerPolicyDialog());
+            trayMenu.Items.Add("🎮 DWM / Flip Model & MPO Danışmanı...", null, (s, e) => ShowPresentationAdvisorDialog());
             trayMenu.Items.Add("Makine Varsayılanlarına Döndür (Fabrika Sıfırla)", null, (s, e) => RevertAllActiveTweaksToOriginal());
             trayMenu.Items.Add(new ToolStripSeparator());
             mnuRevertOnExit = new ToolStripMenuItem("Çıkışta varsayılanlara dön");
@@ -7560,7 +11508,11 @@ namespace ArgonLatencyStudio
                 PerformCleanShutdownKeepSettings();
             };
 
-            AppendConsoleLog(string.Format("{0} ({1})", Environment.OSVersion.VersionString, Environment.Is64BitOperatingSystem ? "64-bit" : "32-bit"));
+            int osMaj, osMin, osBuild, osUbr;
+            string osDispVer;
+            NativeMethods.GetRealOsVersionInfo(out osMaj, out osMin, out osBuild, out osUbr, out osDispVer);
+            string osFriendly = (osMaj >= 10 && osBuild >= 22000) ? "Windows 11" : string.Format("Windows {0}.{1}", osMaj, osMin);
+            AppendConsoleLog(string.Format("{0} {1} (Build {2}.{3}, {4})", osFriendly, osDispVer, osBuild, osUbr, Environment.Is64BitOperatingSystem ? "64-bit" : "32-bit").Replace("  ", " "));
             AppendConsoleLog("Argon Latency Studio v4.0 Yüklendi — Yetki: " + (isAdmin ? "Yönetici (Administrator)" : "Standart Kullanıcı"));
             AppendConsoleLog(string.Format("Algılanan CPU: {0} ({1}C/{2}T)", detectedHw.CpuName, detectedHw.PhysicalCores, detectedHw.LogicalThreads));
             AppendConsoleLog("Algılanan GPU: " + detectedHw.GpuName);
@@ -8797,6 +12749,59 @@ namespace ArgonLatencyStudio
                             : category == "FPS" ? "Kare Hızı (FPS), DWM, MMCSS & Bellek"
                             : "İleri Seviye / Deneysel Çekirdek Parametreleri";
 
+            if (category == "FPS")
+            {
+                Panel pnlFpsAdvisorBanner = new Panel
+                {
+                    Width = 810,
+                    Height = 58,
+                    BackColor = Color.FromArgb(20, 26, 40),
+                    Margin = new Padding(0, 0, 0, 6)
+                };
+                pnlFpsAdvisorBanner.Paint += (s, e) =>
+                {
+                    using (Pen p = new Pen(Color.FromArgb(88, 28, 135), 1))
+                    {
+                        e.Graphics.DrawRectangle(p, 0, 0, pnlFpsAdvisorBanner.Width - 1, pnlFpsAdvisorBanner.Height - 1);
+                    }
+                };
+
+                Label lblAdvT = new Label
+                {
+                    Text = "🎮 DWM / FLIP MODEL, MPO & OYUN BAZLI DXGI SUNUM DANIŞMANI",
+                    Font = new Font("Segoe UI", 8.4f, FontStyle.Bold),
+                    ForeColor = Color.FromArgb(192, 132, 252),
+                    UseMnemonic = false,
+                    AutoSize = true,
+                    Location = new Point(12, 8)
+                };
+                pnlFpsAdvisorBanner.Controls.Add(lblAdvT);
+
+                Label lblAdvD = new Label
+                {
+                    Text = "Ekran kartı DXGI çıkışlarını (MPO SupportsOverlays, Pencereli Optimizasyon, HDR/VRR), çakışmaları ve oyun bazlı GPU tercihlerini inceleyin.",
+                    Font = new Font("Segoe UI", 7.6f, FontStyle.Regular),
+                    ForeColor = Color.FromArgb(203, 213, 225),
+                    Location = new Point(12, 30),
+                    Size = new Size(575, 20),
+                    AutoEllipsis = true
+                };
+                pnlFpsAdvisorBanner.Controls.Add(lblAdvD);
+
+                Button btnLaunchAdv = CreateActionButton(pnlFpsAdvisorBanner, 600, 12, 198, 34, "🎮 Sunum Danışmanını Aç", Color.FromArgb(147, 51, 234));
+                btnLaunchAdv.Click += (s, e) => ShowPresentationAdvisorDialog();
+                mainToolTip.SetToolTip(btnLaunchAdv, "Canlı DXGI MPO/Donanım Kompozisyonu, DWM zamanlaması, Win11 Pencereli Oyun Optimizasyonları ve oyun bazlı GPU kurallarını yönetir.");
+
+                pnlFpsAdvisorBanner.Resize += (s, e) =>
+                {
+                    int bw = Math.Max(500, pnlFpsAdvisorBanner.ClientSize.Width);
+                    btnLaunchAdv.Location = new Point(bw - btnLaunchAdv.Width - 12, 12);
+                    lblAdvD.Width = Math.Max(280, btnLaunchAdv.Left - 24);
+                };
+
+                flow.Controls.Add(pnlFpsAdvisorBanner);
+            }
+
             Panel colHdr = CreateTweakTableColumnHeader(catTitle);
             flow.Controls.Add(colHdr);
 
@@ -8830,6 +12835,7 @@ namespace ArgonLatencyStudio
                 Text = text,
                 Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
                 FlatStyle = FlatStyle.Flat,
+                UseMnemonic = false,
                 BackColor = bg,
                 ForeColor = Color.White,
                 Location = new Point(x, y),
@@ -8856,49 +12862,215 @@ namespace ArgonLatencyStudio
             };
             pnlContentHost.Controls.Add(viewProcesses);
 
-            Panel pnlTopProc = new Panel
+            // -------------------------------------------------------------
+            // ÜST BÖLÜM: OTOMATİK OYUN NÖBETÇİSİ & SÜREÇ KALKANI (WATCHDOG)
+            // -------------------------------------------------------------
+            Panel pnlWatchdogSection = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 42,
+                Height = 215,
+                BackColor = Color.FromArgb(18, 23, 34),
+                Padding = new Padding(8, 6, 8, 6)
+            };
+            pnlWatchdogSection.Paint += (s, e) =>
+            {
+                using (Pen p = new Pen(Color.FromArgb(36, 46, 66), 1))
+                {
+                    e.Graphics.DrawRectangle(p, 0, 0, pnlWatchdogSection.Width - 1, pnlWatchdogSection.Height - 1);
+                }
+            };
+            viewProcesses.Controls.Add(pnlWatchdogSection);
+
+            Panel pnlWatchdogHeader = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 32,
+                BackColor = Color.Transparent
+            };
+            pnlWatchdogSection.Controls.Add(pnlWatchdogHeader);
+
+            chkWatchdogToggle = new CheckBox
+            {
+                Text = "🛡️ OTOMATİK OYUN NÖBETÇİSİ & SÜREÇ KALKANI",
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(52, 211, 153),
+                AutoSize = true,
+                Checked = watchdogConfig.WatchdogActive,
+                Location = new Point(4, 6),
+                Cursor = Cursors.Hand
+            };
+            chkWatchdogToggle.CheckedChanged += (s, e) =>
+            {
+                watchdogConfig.WatchdogActive = chkWatchdogToggle.Checked;
+                autoGameWatchdogActive = chkWatchdogToggle.Checked;
+                watchdogConfig.SaveToFile(watchdogConfigPath);
+                UpdateWatchdogStatusBadge();
+                if (!chkWatchdogToggle.Checked)
+                {
+                    RestoreAllWatchdogSessionProcesses();
+                }
+                else
+                {
+                    RunAutoGameWatchdogPass();
+                }
+            };
+            pnlWatchdogHeader.Controls.Add(chkWatchdogToggle);
+
+            lblWatchdogLiveStatus = new Label
+            {
+                Text = "⚪ Durum: İzlemede - 7 oyun profili hazır",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(56, 189, 248),
+                AutoSize = true,
+                Location = new Point(370, 7)
+            };
+            pnlWatchdogHeader.Controls.Add(lblWatchdogLiveStatus);
+
+            btnManageBgCage = new Button
+            {
+                Text = string.Format("⚙️ Arka Plan Kalkanı ({0})", watchdogConfig.BackgroundCageTargets.Count),
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(28, 35, 50),
+                ForeColor = Color.FromArgb(203, 213, 225),
+                Size = new Size(160, 24),
+                Location = new Point(pnlWatchdogSection.ClientSize.Width - 265, 3),
+                Cursor = Cursors.Hand
+            };
+            btnManageBgCage.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnManageBgCage.Click += (s, e) => ShowManageBackgroundCageDialog();
+            pnlWatchdogHeader.Controls.Add(btnManageBgCage);
+
+            btnWatchdogNotifyToggle = new Button
+            {
+                Text = watchdogConfig.NotifyOnGameLaunch ? "🔔 Bildirim" : "🔕 Sessiz",
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(28, 35, 50),
+                ForeColor = watchdogConfig.NotifyOnGameLaunch ? Color.FromArgb(52, 211, 153) : Color.FromArgb(148, 163, 184),
+                Size = new Size(90, 24),
+                Location = new Point(pnlWatchdogSection.ClientSize.Width - 98, 3),
+                Cursor = Cursors.Hand
+            };
+            btnWatchdogNotifyToggle.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnWatchdogNotifyToggle.Click += (s, e) =>
+            {
+                watchdogConfig.NotifyOnGameLaunch = !watchdogConfig.NotifyOnGameLaunch;
+                watchdogConfig.NotifyOnGameExit = watchdogConfig.NotifyOnGameLaunch;
+                btnWatchdogNotifyToggle.Text = watchdogConfig.NotifyOnGameLaunch ? "🔔 Bildirim" : "🔕 Sessiz";
+                btnWatchdogNotifyToggle.ForeColor = watchdogConfig.NotifyOnGameLaunch ? Color.FromArgb(52, 211, 153) : Color.FromArgb(148, 163, 184);
+                watchdogConfig.SaveToFile(watchdogConfigPath);
+            };
+            pnlWatchdogHeader.Controls.Add(btnWatchdogNotifyToggle);
+
+            pnlWatchdogHeader.Resize += (s, e) =>
+            {
+                btnWatchdogNotifyToggle.Location = new Point(pnlWatchdogHeader.ClientSize.Width - 98, 3);
+                btnManageBgCage.Location = new Point(pnlWatchdogHeader.ClientSize.Width - 265, 3);
+            };
+
+            lvWatchdogGames = new ListView
+            {
+                Dock = DockStyle.Fill,
+                View = View.Details,
+                FullRowSelect = true,
+                GridLines = true,
+                BackColor = Color.FromArgb(14, 18, 26),
+                ForeColor = Color.White,
+                BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Regular)
+            };
+            lvWatchdogGames.Columns.Add("Durum", 85);
+            lvWatchdogGames.Columns.Add("Süreç Adı (.exe)", 150);
+            lvWatchdogGames.Columns.Add("Oyun / Profil Başlığı", 170);
+            lvWatchdogGames.Columns.Add("Hedef Öncelik", 100);
+            lvWatchdogGames.Columns.Add("Çekirdek Politikası (Affinity)", 190);
+            lvWatchdogGames.Columns.Add("EcoQoS Kalkanı", 115);
+            lvWatchdogGames.Columns.Add("I/O Boost", 85);
+            lvWatchdogGames.DoubleClick += (s, e) => ShowEditWatchdogGameDialog();
+            pnlWatchdogSection.Controls.Add(lvWatchdogGames);
+
+            Panel pnlWatchdogActions = new Panel
+            {
+                Dock = DockStyle.Bottom,
+                Height = 32,
+                BackColor = Color.Transparent,
+                Padding = new Padding(0, 4, 0, 0)
+            };
+            pnlWatchdogSection.Controls.Add(pnlWatchdogActions);
+
+            int ax = 0;
+            Button btnWAddSel = CreateActionButton(pnlWatchdogActions, ax, 4, 180, 26, "⭐ Alttan Seçili Süreci Ekle", Color.FromArgb(16, 185, 129));
+            btnWAddSel.ForeColor = Color.Black;
+            btnWAddSel.Click += (s, e) => AddSelectedExplorerProcessToWatchdog();
+            ax += 186;
+
+            Button btnWAddCust = CreateActionButton(pnlWatchdogActions, ax, 4, 150, 26, "+ Manuel Oyun Ekle...", Color.FromArgb(14, 165, 233));
+            btnWAddCust.ForeColor = Color.Black;
+            btnWAddCust.Click += (s, e) => ShowAddCustomWatchdogGameDialog();
+            ax += 156;
+
+            Button btnWEdit = CreateActionButton(pnlWatchdogActions, ax, 4, 90, 26, "✏️ Düzenle", Color.FromArgb(51, 65, 85));
+            btnWEdit.Click += (s, e) => ShowEditWatchdogGameDialog();
+            ax += 96;
+
+            Button btnWDel = CreateActionButton(pnlWatchdogActions, ax, 4, 90, 26, "🗑️ Kaldır", Color.FromArgb(71, 85, 105));
+            btnWDel.Click += (s, e) => DeleteSelectedWatchdogGame();
+            ax += 96;
+
+            Button btnWToggle = CreateActionButton(pnlWatchdogActions, ax, 4, 95, 26, "⏯️ Aç/Kapat", Color.FromArgb(30, 41, 59));
+            btnWToggle.Click += (s, e) => ToggleSelectedWatchdogGameRule();
+
+            lvWatchdogGames.BringToFront();
+
+            // -------------------------------------------------------------
+            // ORTA / ALT BÖLÜM: CANLI PROSES TABLOSU (PROCESS EXPLORER)
+            // -------------------------------------------------------------
+            Panel pnlExplorerHeader = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 36,
                 BackColor = Color.FromArgb(18, 23, 34)
             };
-            viewProcesses.Controls.Add(pnlTopProc);
+            viewProcesses.Controls.Add(pnlExplorerHeader);
 
             Label lblFilter = new Label
             {
-                Text = "Süreç (.exe) Ara:",
+                Text = "⚡ Canlı Süreç (.exe) Ara:",
                 Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(148, 163, 184),
+                ForeColor = Color.FromArgb(56, 189, 248),
                 AutoSize = true,
-                Location = new Point(10, 12)
+                Location = new Point(10, 10)
             };
-            pnlTopProc.Controls.Add(lblFilter);
+            pnlExplorerHeader.Controls.Add(lblFilter);
 
             txtProcFilter = new TextBox
             {
-                Location = new Point(112, 9),
-                Size = new Size(165, 22),
+                Location = new Point(155, 7),
+                Size = new Size(180, 22),
                 BackColor = Color.FromArgb(12, 15, 22),
                 ForeColor = Color.White,
                 BorderStyle = BorderStyle.FixedSingle
             };
             txtProcFilter.TextChanged += (s, e) => RefreshProcessTable();
-            pnlTopProc.Controls.Add(txtProcFilter);
+            pnlExplorerHeader.Controls.Add(txtProcFilter);
 
-            Button btnRefProc = CreateActionButton(pnlTopProc, 285, 8, 96, 25, "Listeyi Yenile", Color.FromArgb(51, 65, 85));
-            btnRefProc.Click += (s, e) => RefreshProcessTable();
-
-            chkWatchdogToggle = new CheckBox
+            Button btnRefProc = CreateActionButton(pnlExplorerHeader, 345, 6, 96, 25, "Listeyi Yenile", Color.FromArgb(51, 65, 85));
+            btnRefProc.Click += (s, e) =>
             {
-                Text = "Otomatik Oyun Algılayıcı (Oyun Açıldığında High Prio + EcoQoS Kalkanı)",
-                Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(52, 211, 153),
-                AutoSize = true,
-                Checked = false,
-                Location = new Point(392, 12)
+                RefreshProcessTable();
+                RefreshWatchdogGamesListView();
             };
-            chkWatchdogToggle.CheckedChanged += (s, e) => autoGameWatchdogActive = chkWatchdogToggle.Checked;
-            pnlTopProc.Controls.Add(chkWatchdogToggle);
+
+            Label lblExplorerHeaderTitle = new Label
+            {
+                Text = "İpucu: Alttaki listeden herhangi bir oyuna çift tıklayarak veya butona basarak doğrudan Nöbetçi Kalkanına ekleyebilirsiniz.",
+                Font = new Font("Segoe UI", 7.6f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(148, 163, 184),
+                AutoSize = true,
+                Location = new Point(455, 11)
+            };
+            pnlExplorerHeader.Controls.Add(lblExplorerHeaderTitle);
 
             Panel pnlBottomProc = new Panel
             {
@@ -8909,26 +13081,31 @@ namespace ArgonLatencyStudio
             viewProcesses.Controls.Add(pnlBottomProc);
 
             int bx = 10;
-            Button bHigh = CreateActionButton(pnlBottomProc, bx, 8, 155, 28, "High Priority (Ağaç)", Color.FromArgb(16, 185, 129));
+            Button bAddSelectedWatch = CreateActionButton(pnlBottomProc, bx, 8, 165, 28, "⭐ Nöbetçiye Ekle", Color.FromArgb(5, 150, 105));
+            bAddSelectedWatch.ForeColor = Color.Black;
+            bAddSelectedWatch.Click += (s, e) => AddSelectedExplorerProcessToWatchdog();
+            bx += 171;
+
+            Button bHigh = CreateActionButton(pnlBottomProc, bx, 8, 150, 28, "High Priority (Ağaç)", Color.FromArgb(16, 185, 129));
             bHigh.ForeColor = Color.Black;
             bHigh.Click += (s, e) => ApplySelectedProcessPriority(ProcessPriorityClass.High);
-            bx += 161;
+            bx += 156;
 
-            Button bNoCore0 = CreateActionButton(pnlBottomProc, bx, 8, 158, 28, "Core 0 İzole (DPC)", Color.FromArgb(14, 165, 233));
+            Button bNoCore0 = CreateActionButton(pnlBottomProc, bx, 8, 150, 28, "Core 0 İzole (DPC)", Color.FromArgb(14, 165, 233));
             bNoCore0.ForeColor = Color.Black;
             bNoCore0.Click += (s, e) => ApplySelectedProcessTopology(1);
-            bx += 164;
+            bx += 156;
 
-            Button bPhysOnly = CreateActionButton(pnlBottomProc, bx, 8, 168, 28, "Fiziksel Çekirdekler", Color.FromArgb(168, 85, 247));
+            Button bPhysOnly = CreateActionButton(pnlBottomProc, bx, 8, 150, 28, "Fiziksel Çekirdekler", Color.FromArgb(168, 85, 247));
             bPhysOnly.Click += (s, e) => ApplySelectedProcessTopology(2);
-            bx += 174;
+            bx += 156;
 
-            Button bEcoShield = CreateActionButton(pnlBottomProc, bx, 8, 162, 28, "EcoQoS + I/O High", Color.FromArgb(217, 119, 6));
+            Button bEcoShield = CreateActionButton(pnlBottomProc, bx, 8, 150, 28, "EcoQoS + I/O High", Color.FromArgb(217, 119, 6));
             bEcoShield.ForeColor = Color.Black;
             bEcoShield.Click += (s, e) => ApplySelectedProcessEcoAndIoBoost();
-            bx += 168;
+            bx += 156;
 
-            Button bRevertProc = CreateActionButton(pnlBottomProc, bx, 8, 145, 28, "Orijinale Döndür", Color.FromArgb(71, 85, 105));
+            Button bRevertProc = CreateActionButton(pnlBottomProc, bx, 8, 140, 28, "Orijinale Döndür", Color.FromArgb(71, 85, 105));
             bRevertProc.Click += (s, e) => RevertSelectedProcessToOriginal();
 
             lblProcActionStatus = new Label
@@ -8958,10 +13135,267 @@ namespace ArgonLatencyStudio
             lvProcesses.Columns.Add("Çekirdek Maskesi (Affinity)", 190);
             lvProcesses.Columns.Add("Bellek (MB)", 95);
             lvProcesses.Columns.Add("Yedek Durumu", 160);
+            lvProcesses.DoubleClick += (s, e) => AddSelectedExplorerProcessToWatchdog();
             viewProcesses.Controls.Add(lvProcesses);
-            pnlTopProc.SendToBack();
+
+            pnlWatchdogSection.SendToBack();
+            pnlExplorerHeader.SendToBack();
             pnlBottomProc.SendToBack();
             lvProcesses.BringToFront();
+
+            RefreshWatchdogGamesListView();
+        }
+
+        private void RefreshWatchdogGamesListView()
+        {
+            if (lvWatchdogGames == null) return;
+            lvWatchdogGames.BeginUpdate();
+            lvWatchdogGames.Items.Clear();
+
+            Process[] running = Process.GetProcesses();
+            HashSet<string> runningProcNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (Process p in running)
+            {
+                try { runningProcNames.Add(p.ProcessName); } catch { }
+            }
+
+            foreach (var rule in watchdogConfig.Rules)
+            {
+                bool isRunning = runningProcNames.Contains(rule.ProcessName);
+                string statusText = !rule.IsEnabled ? "⏸️ Devre Dışı" : (isRunning ? "🟢 Çalışıyor" : "⚪ Beklemede");
+
+                ListViewItem item = new ListViewItem(statusText);
+                item.Tag = rule;
+                item.ForeColor = !rule.IsEnabled ? Color.FromArgb(148, 163, 184) : (isRunning ? Color.FromArgb(52, 211, 153) : Color.FromArgb(203, 213, 225));
+
+                item.SubItems.Add(rule.ProcessName + ".exe");
+                item.SubItems.Add(rule.GameTitle);
+                item.SubItems.Add(rule.TargetPriority.ToString());
+                item.SubItems.Add(rule.GetAffinityModeLabel());
+                item.SubItems.Add(rule.EnableEcoCage ? "Aktif (Kalkan)" : "Kapalı");
+                item.SubItems.Add(rule.EnableIoBoost ? "Yüksek" : "Normal");
+
+                lvWatchdogGames.Items.Add(item);
+            }
+            lvWatchdogGames.EndUpdate();
+            UpdateWatchdogStatusBadge();
+        }
+
+        private void UpdateWatchdogStatusBadge()
+        {
+            if (lblWatchdogLiveStatus == null) return;
+            if (!watchdogConfig.WatchdogActive)
+            {
+                lblWatchdogLiveStatus.Text = "⏸️ Nöbetçi Kapalı (Otomasyon duraklatıldı)";
+                lblWatchdogLiveStatus.ForeColor = Color.FromArgb(148, 163, 184);
+                return;
+            }
+
+            if (activeBoostedGamePids.Count > 0)
+            {
+                lblWatchdogLiveStatus.Text = string.Format("🟢 OYUN AKTİF: {0} ({1} Süreç) | High Prio + Çekirdek Devrede | {2} Arka Plan Süreci EcoQoS Kalkanında",
+                    string.IsNullOrEmpty(activeDetectedGameName) ? "Oyun" : activeDetectedGameName,
+                    activeBoostedGamePids.Count,
+                    activeCagedBgPids.Count);
+                lblWatchdogLiveStatus.ForeColor = Color.FromArgb(52, 211, 153);
+            }
+            else
+            {
+                lblWatchdogLiveStatus.Text = string.Format("⚪ Durum: İzlemede - {0} oyun profili kayıtlı. Oyun açıldığında kalkan otomatik devreye girecek.", watchdogConfig.Rules.Count);
+                lblWatchdogLiveStatus.ForeColor = Color.FromArgb(56, 189, 248);
+            }
+        }
+
+        private void AddOrUpdateWatchdogGame(GameWatchdogRule rule)
+        {
+            if (rule == null) return;
+            int idx = watchdogConfig.Rules.FindIndex(r => string.Equals(r.Id, rule.Id, StringComparison.OrdinalIgnoreCase) || string.Equals(r.ProcessName, rule.ProcessName, StringComparison.OrdinalIgnoreCase));
+            if (idx >= 0)
+                watchdogConfig.Rules[idx] = rule;
+            else
+                watchdogConfig.Rules.Add(rule);
+
+            watchdogConfig.SaveToFile(watchdogConfigPath);
+            RefreshWatchdogGamesListView();
+        }
+
+        private void ShowAddCustomWatchdogGameDialog()
+        {
+            using (GameWatchdogRuleDialog dlg = new GameWatchdogRuleDialog(null))
+            {
+                if (dlg.ShowDialog(this) == DialogResult.OK && dlg.RuleResult != null)
+                {
+                    AddOrUpdateWatchdogGame(dlg.RuleResult);
+                }
+            }
+        }
+
+        private void ShowEditWatchdogGameDialog()
+        {
+            if (lvWatchdogGames == null || lvWatchdogGames.SelectedItems.Count == 0) return;
+            GameWatchdogRule rule = lvWatchdogGames.SelectedItems[0].Tag as GameWatchdogRule;
+            if (rule == null) return;
+
+            using (GameWatchdogRuleDialog dlg = new GameWatchdogRuleDialog(rule))
+            {
+                if (dlg.ShowDialog(this) == DialogResult.OK && dlg.RuleResult != null)
+                {
+                    AddOrUpdateWatchdogGame(dlg.RuleResult);
+                }
+            }
+        }
+
+        private void ShowManageBackgroundCageDialog()
+        {
+            using (ManageBackgroundCageDialog dlg = new ManageBackgroundCageDialog(watchdogConfig.BackgroundCageTargets))
+            {
+                if (dlg.ShowDialog(this) == DialogResult.OK)
+                {
+                    watchdogConfig.BackgroundCageTargets = dlg.GetUpdatedTargets();
+                    watchdogConfig.SaveToFile(watchdogConfigPath);
+                    if (btnManageBgCage != null)
+                        btnManageBgCage.Text = string.Format("⚙️ Arka Plan Kalkanı ({0})", watchdogConfig.BackgroundCageTargets.Count);
+                }
+            }
+        }
+
+        private void DeleteSelectedWatchdogGame()
+        {
+            if (lvWatchdogGames == null || lvWatchdogGames.SelectedItems.Count == 0) return;
+            GameWatchdogRule rule = lvWatchdogGames.SelectedItems[0].Tag as GameWatchdogRule;
+            if (rule == null) return;
+
+            if (MessageBox.Show(string.Format("'{0}' oyun kuralını nöbetçi listesinden kaldırmak istiyor musunuz?", rule.GameTitle),
+                "Oyunu Kaldır", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+            {
+                watchdogConfig.Rules.Remove(rule);
+                watchdogConfig.SaveToFile(watchdogConfigPath);
+                RefreshWatchdogGamesListView();
+            }
+        }
+
+        private void ToggleSelectedWatchdogGameRule()
+        {
+            if (lvWatchdogGames == null || lvWatchdogGames.SelectedItems.Count == 0) return;
+            GameWatchdogRule rule = lvWatchdogGames.SelectedItems[0].Tag as GameWatchdogRule;
+            if (rule == null) return;
+
+            rule.IsEnabled = !rule.IsEnabled;
+            watchdogConfig.SaveToFile(watchdogConfigPath);
+            RefreshWatchdogGamesListView();
+        }
+
+        private void AddSelectedExplorerProcessToWatchdog()
+        {
+            if (lvProcesses == null || lvProcesses.SelectedItems.Count == 0)
+            {
+                MessageBox.Show("Lütfen aşağıdaki listeden bir süreç (.exe) seçin.", "Süreç Seçilmedi", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            string procName = lvProcesses.SelectedItems[0].SubItems[0].Text.Replace(".exe", "").Trim().ToLowerInvariant();
+            if (string.IsNullOrEmpty(procName)) return;
+
+            GameWatchdogRule existing = watchdogConfig.Rules.Find(r => string.Equals(r.ProcessName, procName, StringComparison.OrdinalIgnoreCase));
+            if (existing != null)
+            {
+                using (GameWatchdogRuleDialog dlg = new GameWatchdogRuleDialog(existing))
+                {
+                    if (dlg.ShowDialog(this) == DialogResult.OK && dlg.RuleResult != null)
+                    {
+                        AddOrUpdateWatchdogGame(dlg.RuleResult);
+                    }
+                }
+                return;
+            }
+
+            GameWatchdogRule newRule = new GameWatchdogRule
+            {
+                ProcessName = procName,
+                GameTitle = procName,
+                TargetPriority = ProcessPriorityClass.High,
+                AffinityMode = 1,
+                EnableEcoCage = true,
+                EnableIoBoost = true,
+                IsEnabled = true
+            };
+
+            using (GameWatchdogRuleDialog dlg = new GameWatchdogRuleDialog(newRule))
+            {
+                if (dlg.ShowDialog(this) == DialogResult.OK && dlg.RuleResult != null)
+                {
+                    AddOrUpdateWatchdogGame(dlg.RuleResult);
+                }
+            }
+        }
+
+        private void ApplyProcessEcoQoS(Process p, bool enableEco)
+        {
+            try
+            {
+                IntPtr hProc = NativeMethods.OpenProcess(NativeMethods.PROCESS_SET_INFORMATION, false, (uint)p.Id);
+                if (hProc != IntPtr.Zero)
+                {
+                    NativeMethods.PROCESS_POWER_THROTTLING_STATE ecoState = new NativeMethods.PROCESS_POWER_THROTTLING_STATE
+                    {
+                        Version = 1,
+                        ControlMask = NativeMethods.PROCESS_POWER_THROTTLING_EXECUTION_SPEED | NativeMethods.PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION,
+                        StateMask = enableEco ? (NativeMethods.PROCESS_POWER_THROTTLING_EXECUTION_SPEED | NativeMethods.PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION) : 0
+                    };
+                    NativeMethods.SetProcessInformation(hProc, NativeMethods.ProcessPowerThrottling, ref ecoState, (uint)Marshal.SizeOf(typeof(NativeMethods.PROCESS_POWER_THROTTLING_STATE)));
+                    NativeMethods.CloseHandle(hProc);
+                }
+            }
+            catch { }
+        }
+
+        private void RestoreAllWatchdogSessionProcesses()
+        {
+            try
+            {
+                foreach (int pid in activeCagedBgPids)
+                {
+                    try
+                    {
+                        Process p = Process.GetProcessById(pid);
+                        if (!p.HasExited)
+                        {
+                            ProcessBackupEntry pb;
+                            if (vault.ProcessBackups.TryGetValue(pid, out pb))
+                                p.PriorityClass = pb.OriginalPriority;
+                            else
+                                p.PriorityClass = ProcessPriorityClass.Normal;
+
+                            ApplyProcessEcoQoS(p, false);
+                            ApplyLowLevelProcessBoost(p, 2, 5, true);
+                        }
+                    }
+                    catch { }
+                }
+                activeCagedBgPids.Clear();
+
+                foreach (int pid in activeBoostedGamePids)
+                {
+                    try
+                    {
+                        Process p = Process.GetProcessById(pid);
+                        if (!p.HasExited)
+                        {
+                            ProcessBackupEntry pb;
+                            if (vault.ProcessBackups.TryGetValue(pid, out pb))
+                            {
+                                p.PriorityClass = pb.OriginalPriority;
+                                p.ProcessorAffinity = (IntPtr)pb.OriginalAffinity;
+                            }
+                        }
+                    }
+                    catch { }
+                }
+                activeBoostedGamePids.Clear();
+                activeDetectedGameName = "";
+                UpdateWatchdogStatusBadge();
+            }
+            catch { }
         }
 
         #region Otomasyon & QoL (Swiss Army Knife) View & Systems
@@ -10042,21 +14476,25 @@ namespace ArgonLatencyStudio
             );
         }
 
-        private void ShowQoLToast(string title, string msg, string actionText, Action action, Color accent, int autoCloseSec, bool pulse3Sec)
+        private void ShowQoLToast(string title, string msg, string actionText, Action action, Color accent, int autoCloseSec, bool pulse3Sec, string overridePos = null, string overrideDevice = null, int overrideIndex = -999)
         {
             if (this.IsDisposed) return;
             if (this.InvokeRequired)
             {
                 this.BeginInvoke((MethodInvoker)delegate
                 {
-                    ShowQoLToast(title, msg, actionText, action, accent, autoCloseSec, pulse3Sec);
+                    ShowQoLToast(title, msg, actionText, action, accent, autoCloseSec, pulse3Sec, overridePos, overrideDevice, overrideIndex);
                 });
                 return;
             }
 
             try
             {
-                QoLToastForm toast = new QoLToastForm(title, msg, actionText, action, accent, autoCloseSec, pulse3Sec);
+                string pos = overridePos ?? (qolConfig != null ? qolConfig.NotificationPosition : "BOTTOM_RIGHT");
+                string dev = overrideDevice ?? (qolConfig != null ? qolConfig.NotificationMonitorDevice : "PRIMARY");
+                int idx = (overrideIndex != -999) ? overrideIndex : (qolConfig != null ? qolConfig.NotificationMonitorIndex : -1);
+
+                QoLToastForm toast = new QoLToastForm(title, msg, actionText, action, accent, autoCloseSec, pulse3Sec, pos, idx, dev);
                 toast.Show();
             }
             catch { }
@@ -10198,7 +14636,7 @@ namespace ArgonLatencyStudio
             using (Form dlg = new Form())
             {
                 dlg.Text = "Ses & Bildirim Ayarları";
-                dlg.Size = new Size(540, 340);
+                dlg.Size = new Size(560, 475);
                 dlg.StartPosition = FormStartPosition.CenterParent;
                 dlg.FormBorderStyle = FormBorderStyle.FixedDialog;
                 dlg.MaximizeBox = false;
@@ -10210,7 +14648,7 @@ namespace ArgonLatencyStudio
                 Label lblSound = new Label
                 {
                     Text = "Özel Alarm Sesi (.mp3 veya .wav):",
-                    Location = new Point(20, 18),
+                    Location = new Point(20, 16),
                     AutoSize = true,
                     ForeColor = Color.FromArgb(168, 85, 247),
                     Font = new Font("Segoe UI", 8.5f, FontStyle.Bold)
@@ -10220,8 +14658,8 @@ namespace ArgonLatencyStudio
                 TextBox txtSoundPath = new TextBox
                 {
                     Text = qolConfig.AlarmCustomSoundPath ?? "",
-                    Location = new Point(20, 42),
-                    Width = 370,
+                    Location = new Point(20, 38),
+                    Width = 380,
                     BackColor = Color.FromArgb(12, 15, 22),
                     ForeColor = Color.FromArgb(226, 232, 240)
                 };
@@ -10230,11 +14668,12 @@ namespace ArgonLatencyStudio
                 Button btnBrowse = new Button
                 {
                     Text = "Gözat...",
-                    Location = new Point(400, 40),
-                    Size = new Size(100, 26),
+                    Location = new Point(410, 36),
+                    Size = new Size(110, 26),
                     BackColor = Color.FromArgb(30, 41, 59),
                     ForeColor = Color.FromArgb(203, 213, 225),
-                    FlatStyle = FlatStyle.Flat
+                    FlatStyle = FlatStyle.Flat,
+                    Cursor = Cursors.Hand
                 };
                 btnBrowse.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
                 btnBrowse.Click += (s, e) =>
@@ -10254,7 +14693,7 @@ namespace ArgonLatencyStudio
                 Label lblHint = new Label
                 {
                     Text = "Boş bırakılırsa Windows varsayılan uyarı sesi kullanılır.",
-                    Location = new Point(20, 72),
+                    Location = new Point(20, 68),
                     AutoSize = true,
                     ForeColor = Color.FromArgb(148, 163, 184),
                     Font = new Font("Segoe UI", 7.8f)
@@ -10264,11 +14703,12 @@ namespace ArgonLatencyStudio
                 Button btnTest = new Button
                 {
                     Text = "▶️ Sesi Test Et",
-                    Location = new Point(20, 96),
+                    Location = new Point(20, 92),
                     Size = new Size(115, 26),
                     BackColor = Color.FromArgb(30, 41, 59),
                     ForeColor = Color.FromArgb(52, 211, 153),
-                    FlatStyle = FlatStyle.Flat
+                    FlatStyle = FlatStyle.Flat,
+                    Cursor = Cursors.Hand
                 };
                 btnTest.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
                 btnTest.Click += (s, e) => AudioAlertPlayer.PlayAlert(txtSoundPath.Text, qolConfig.AlarmMaxPlayDurationSec);
@@ -10277,11 +14717,12 @@ namespace ArgonLatencyStudio
                 Button btnStop = new Button
                 {
                     Text = "⏹️ Durdur",
-                    Location = new Point(145, 96),
+                    Location = new Point(145, 92),
                     Size = new Size(90, 26),
                     BackColor = Color.FromArgb(30, 41, 59),
                     ForeColor = Color.FromArgb(248, 113, 113),
-                    FlatStyle = FlatStyle.Flat
+                    FlatStyle = FlatStyle.Flat,
+                    Cursor = Cursors.Hand
                 };
                 btnStop.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
                 btnStop.Click += (s, e) => AudioAlertPlayer.StopAlert();
@@ -10290,7 +14731,7 @@ namespace ArgonLatencyStudio
                 Label lblDur = new Label
                 {
                     Text = "Maksimum Çalma Kesinti Süresi (Cutoff):",
-                    Location = new Point(20, 140),
+                    Location = new Point(20, 128),
                     AutoSize = true,
                     ForeColor = Color.FromArgb(203, 213, 225),
                     Font = new Font("Segoe UI", 8.2f, FontStyle.Bold)
@@ -10300,7 +14741,7 @@ namespace ArgonLatencyStudio
                 ComboBox cmbCutoff = new ComboBox
                 {
                     DropDownStyle = ComboBoxStyle.DropDownList,
-                    Location = new Point(280, 137),
+                    Location = new Point(290, 125),
                     Width = 140,
                     BackColor = Color.FromArgb(12, 15, 22),
                     ForeColor = Color.FromArgb(168, 85, 247)
@@ -10315,37 +14756,182 @@ namespace ArgonLatencyStudio
                 cmbCutoff.SelectedIndex = cutIdx;
                 dlg.Controls.Add(cmbCutoff);
 
-                Label lblPulseInfo = new Label
-                {
-                    Text = "ℹ️ Tekrarlama Mantığı: Alarm tetiklendiğinde ses çalar ve 15 saniye boyunca\nher 3 saniyede bir masaüstü bildirim uyarısı titreşir.",
-                    Location = new Point(20, 172),
-                    Size = new Size(480, 36),
-                    ForeColor = Color.FromArgb(148, 163, 184),
-                    Font = new Font("Segoe UI", 7.8f)
-                };
-                dlg.Controls.Add(lblPulseInfo);
-
                 CheckBox chkHealth = new CheckBox
                 {
                     Text = "Sağlık & Mola Hatırlatıcıları (Göz Dinlendirme & Su İçme - Her 60 dk)",
-                    Location = new Point(20, 215),
-                    Width = 480,
+                    Location = new Point(20, 158),
+                    Width = 490,
                     Checked = qolConfig.HealthRemindersEnabled,
                     ForeColor = Color.FromArgb(56, 189, 248),
                     Font = new Font("Segoe UI", 8.2f, FontStyle.Bold)
                 };
                 dlg.Controls.Add(chkHealth);
 
+                // --- BİLDİRİM MONİTÖRÜ VE KONUM SEÇİMİ ---
+                Label lblMonitorHeader = new Label
+                {
+                    Text = "🖥️ Bildirim Monitörü ve Konumlandırma",
+                    Location = new Point(20, 192),
+                    AutoSize = true,
+                    ForeColor = Color.FromArgb(56, 189, 248),
+                    Font = new Font("Segoe UI", 8.5f, FontStyle.Bold)
+                };
+                dlg.Controls.Add(lblMonitorHeader);
+
+                Label lblMonitor = new Label
+                {
+                    Text = "Hedef Monitör:",
+                    Location = new Point(20, 220),
+                    AutoSize = true,
+                    ForeColor = Color.FromArgb(203, 213, 225),
+                    Font = new Font("Segoe UI", 8.2f, FontStyle.Bold)
+                };
+                dlg.Controls.Add(lblMonitor);
+
+                ComboBox cmbMonitor = new ComboBox
+                {
+                    DropDownStyle = ComboBoxStyle.DropDownList,
+                    Location = new Point(160, 217),
+                    Width = 360,
+                    BackColor = Color.FromArgb(12, 15, 22),
+                    ForeColor = Color.FromArgb(56, 189, 248)
+                };
+                Screen[] screens = Screen.AllScreens;
+                cmbMonitor.Items.Add("🌟 Ana Monitör (Birincil Ekran - Otomatik)");
+                if (screens != null)
+                {
+                    for (int i = 0; i < screens.Length; i++)
+                    {
+                        Screen scr = screens[i];
+                        string typeStr = scr.Primary ? "Ana Ekran" : "Yan Ekran";
+                        string devClean = (scr.DeviceName ?? "").Replace(@"\\.\", "");
+                        string itemText = string.Format("Monitör {0}: {1}x{2} [{3}] ({4})",
+                            i + 1,
+                            scr.Bounds.Width,
+                            scr.Bounds.Height,
+                            typeStr,
+                            devClean);
+                        cmbMonitor.Items.Add(itemText);
+                    }
+                }
+
+                int selectedMonIdx = 0;
+                if (!string.IsNullOrEmpty(qolConfig.NotificationMonitorDevice) && !qolConfig.NotificationMonitorDevice.Equals("PRIMARY", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (screens != null)
+                    {
+                        for (int i = 0; i < screens.Length; i++)
+                        {
+                            if (string.Equals(screens[i].DeviceName, qolConfig.NotificationMonitorDevice, StringComparison.OrdinalIgnoreCase))
+                            {
+                                selectedMonIdx = i + 1;
+                                break;
+                            }
+                        }
+                        if (selectedMonIdx == 0 && qolConfig.NotificationMonitorIndex >= 0 && qolConfig.NotificationMonitorIndex < screens.Length)
+                        {
+                            selectedMonIdx = qolConfig.NotificationMonitorIndex + 1;
+                        }
+                    }
+                }
+                cmbMonitor.SelectedIndex = Math.Max(0, Math.Min(selectedMonIdx, cmbMonitor.Items.Count - 1));
+                dlg.Controls.Add(cmbMonitor);
+
+                Label lblPos = new Label
+                {
+                    Text = "Bildirim Konumu:",
+                    Location = new Point(20, 254),
+                    AutoSize = true,
+                    ForeColor = Color.FromArgb(203, 213, 225),
+                    Font = new Font("Segoe UI", 8.2f, FontStyle.Bold)
+                };
+                dlg.Controls.Add(lblPos);
+
+                ComboBox cmbPos = new ComboBox
+                {
+                    DropDownStyle = ComboBoxStyle.DropDownList,
+                    Location = new Point(160, 251),
+                    Width = 360,
+                    BackColor = Color.FromArgb(12, 15, 22),
+                    ForeColor = Color.FromArgb(168, 85, 247)
+                };
+                cmbPos.Items.AddRange(new object[]
+                {
+                    "Sağ Alt (Varsayılan - Saat / Tepsi Bölgesi)",
+                    "Sağ Üst",
+                    "Sol Alt",
+                    "Sol Üst"
+                });
+                string curPos = (qolConfig.NotificationPosition ?? "BOTTOM_RIGHT").ToUpperInvariant();
+                if (curPos == "TOP_RIGHT") cmbPos.SelectedIndex = 1;
+                else if (curPos == "BOTTOM_LEFT") cmbPos.SelectedIndex = 2;
+                else if (curPos == "TOP_LEFT") cmbPos.SelectedIndex = 3;
+                else cmbPos.SelectedIndex = 0;
+                dlg.Controls.Add(cmbPos);
+
+                Button btnTestToast = new Button
+                {
+                    Text = "🔔 Seçilen Monitör & Konumda Test Bildirimi Göster",
+                    Location = new Point(20, 290),
+                    Size = new Size(500, 28),
+                    BackColor = Color.FromArgb(30, 41, 59),
+                    ForeColor = Color.FromArgb(56, 189, 248),
+                    FlatStyle = FlatStyle.Flat,
+                    Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                    Cursor = Cursors.Hand
+                };
+                btnTestToast.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+                btnTestToast.Click += (s, e) =>
+                {
+                    string targetDev = "PRIMARY";
+                    int targetIdx = -1;
+                    int selMon = cmbMonitor.SelectedIndex;
+                    if (selMon > 0 && screens != null && selMon - 1 < screens.Length)
+                    {
+                        targetDev = screens[selMon - 1].DeviceName;
+                        targetIdx = selMon - 1;
+                    }
+
+                    string targetPos = "BOTTOM_RIGHT";
+                    if (cmbPos.SelectedIndex == 1) targetPos = "TOP_RIGHT";
+                    else if (cmbPos.SelectedIndex == 2) targetPos = "BOTTOM_LEFT";
+                    else if (cmbPos.SelectedIndex == 3) targetPos = "TOP_LEFT";
+
+                    ShowQoLToast(
+                        "🔔 Bildirim Testi",
+                        string.Format("Hedef: {0}\nKonum: {1}", cmbMonitor.SelectedItem, cmbPos.SelectedItem),
+                        "Tamam",
+                        null,
+                        Color.FromArgb(56, 189, 248),
+                        6,
+                        false,
+                        targetPos,
+                        targetDev,
+                        targetIdx);
+                };
+                dlg.Controls.Add(btnTestToast);
+
+                Label lblPulseInfo = new Label
+                {
+                    Text = "ℹ️ Tekrarlama Mantığı: Alarm tetiklendiğinde seçilen monitör ve köşede bildirim açılır,\nses çalar ve 15 saniye boyunca her 3 saniyede bir masaüstü bildirim uyarısı titreşir.",
+                    Location = new Point(20, 328),
+                    Size = new Size(500, 34),
+                    ForeColor = Color.FromArgb(148, 163, 184),
+                    Font = new Font("Segoe UI", 7.6f)
+                };
+                dlg.Controls.Add(lblPulseInfo);
+
                 Button btnSave = new Button
                 {
                     Text = "Ayarları Kaydet",
                     DialogResult = DialogResult.OK,
-                    Location = new Point(270, 260),
-                    Size = new Size(130, 32),
+                    Location = new Point(260, 378),
+                    Size = new Size(140, 32),
                     BackColor = Color.FromArgb(16, 185, 129),
                     ForeColor = Color.Black,
                     FlatStyle = FlatStyle.Flat,
-                    Font = new Font("Segoe UI", 8.5f, FontStyle.Bold)
+                    Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+                    Cursor = Cursors.Hand
                 };
                 btnSave.FlatAppearance.BorderSize = 0;
                 dlg.Controls.Add(btnSave);
@@ -10354,11 +14940,12 @@ namespace ArgonLatencyStudio
                 {
                     Text = "Kapat",
                     DialogResult = DialogResult.Cancel,
-                    Location = new Point(410, 260),
-                    Size = new Size(90, 32),
+                    Location = new Point(410, 378),
+                    Size = new Size(110, 32),
                     BackColor = Color.FromArgb(30, 41, 59),
                     ForeColor = Color.FromArgb(203, 213, 225),
-                    FlatStyle = FlatStyle.Flat
+                    FlatStyle = FlatStyle.Flat,
+                    Cursor = Cursors.Hand
                 };
                 btnCancel.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
                 dlg.Controls.Add(btnCancel);
@@ -10375,6 +14962,29 @@ namespace ArgonLatencyStudio
                     else if (cmbCutoff.SelectedIndex == 4) selCut = 60;
                     qolConfig.AlarmMaxPlayDurationSec = selCut;
                     qolConfig.HealthRemindersEnabled = chkHealth.Checked;
+
+                    // Monitör ve Konum Kaydı
+                    int selMon = cmbMonitor.SelectedIndex;
+                    if (selMon <= 0)
+                    {
+                        qolConfig.NotificationMonitorDevice = "PRIMARY";
+                        qolConfig.NotificationMonitorIndex = -1;
+                    }
+                    else
+                    {
+                        int scrIdx = selMon - 1;
+                        if (screens != null && scrIdx >= 0 && scrIdx < screens.Length)
+                        {
+                            qolConfig.NotificationMonitorDevice = screens[scrIdx].DeviceName;
+                            qolConfig.NotificationMonitorIndex = scrIdx;
+                        }
+                    }
+
+                    if (cmbPos.SelectedIndex == 1) qolConfig.NotificationPosition = "TOP_RIGHT";
+                    else if (cmbPos.SelectedIndex == 2) qolConfig.NotificationPosition = "BOTTOM_LEFT";
+                    else if (cmbPos.SelectedIndex == 3) qolConfig.NotificationPosition = "TOP_LEFT";
+                    else qolConfig.NotificationPosition = "BOTTOM_RIGHT";
+
                     qolConfig.SaveToFile(qolConfigPath);
                 }
                 else
@@ -10787,28 +15397,18 @@ namespace ArgonLatencyStudio
                     if (!a.IsEnabled) continue;
                     if (now >= a.NextTrigger)
                     {
-                        a.LastTriggered = now;
-                        if (a.AlarmType == "CRYPTO_4H")
+                        // Uykudan / askıdan uyanma kontrolü: Eğer alarm zamanı 2 dakikadan daha eski bir zamana aitse
+                        // sistem kapalı/uykudayken kaçırılmış demektir; alarm çalmadan bir sonraki gelecekteki zamana ötelenir.
+                        if ((now - a.NextTrigger).TotalMinutes > 2.0)
                         {
-                            a.NextTrigger = CryptoAlarmHelpers.GetNextCrypto4HCandleTime();
-                        }
-                        else if (a.AlarmType == "CRYPTO_DAILY")
-                        {
-                            a.NextTrigger = CryptoAlarmHelpers.GetNextCryptoDailyCloseTime();
-                        }
-                        else if (a.AlarmType == "CRYPTO_WEEKLY")
-                        {
-                            a.NextTrigger = CryptoAlarmHelpers.GetNextCryptoWeeklyCloseTime();
-                        }
-                        else if (a.AlarmType == "PERIODIC")
-                        {
-                            a.NextTrigger = now.AddMinutes(Math.Max(1, a.PeriodMinutes));
-                        }
-                        else // ONE-TIME
-                        {
-                            a.IsEnabled = false;
+                            CryptoAlarmHelpers.FastForwardAlarmToNextFuture(a, now);
+                            qolConfig.SaveToFile(qolConfigPath);
+                            RefreshAlarmsListView();
+                            continue;
                         }
 
+                        a.LastTriggered = now;
+                        CryptoAlarmHelpers.FastForwardAlarmToNextFuture(a, now);
                         qolConfig.SaveToFile(qolConfigPath);
                         RefreshAlarmsListView();
 
@@ -11214,6 +15814,289 @@ namespace ArgonLatencyStudio
             lblMouseDeltaLive.MouseMove += OnMouseTestAreaMove;
             pnlMouseTestArea.Controls.Add(lblMouseDeltaLive);
 
+            // Card 4: DWM / FLIP MODEL, MPO & DXGI PRESENTATION MODE DIAGNOSTICS (PresentMon & DXGI Probe)
+            pnlPresentationModeBench = new Panel
+            {
+                Location = new Point(10, 495),
+                Size = new Size(820, 260),
+                BackColor = Color.FromArgb(18, 23, 34)
+            };
+            viewBenchmark.Controls.Add(pnlPresentationModeBench);
+
+            Label lblPresTitle = new Label
+            {
+                Text = "🎮 DWM / FLIP MODEL, MPO & EKRAN SUNUM MODU TANISI (DXGI + PRESENTMON)",
+                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(168, 85, 247),
+                UseMnemonic = false,
+                AutoSize = true,
+                Location = new Point(12, 10)
+            };
+            pnlPresentationModeBench.Controls.Add(lblPresTitle);
+
+            btnOpenGraphicsSettings = CreateActionButton(pnlPresentationModeBench, 632, 6, 176, 24, "⚙️ Windows Grafik Ayarları", Color.FromArgb(30, 41, 59));
+            btnOpenGraphicsSettings.Font = new Font("Segoe UI", 7.6f, FontStyle.Bold);
+            btnOpenGraphicsSettings.Click += (s, e) =>
+            {
+                try { Process.Start("ms-settings:display-advancedgraphics"); } catch { }
+            };
+
+            btnRunPresentationDiag = CreateActionButton(pnlPresentationModeBench, 12, 36, 255, 30, "🔄 Hattı Tara (DXGI & Çakışma)", Color.FromArgb(56, 189, 248));
+            btnRunPresentationDiag.ForeColor = Color.Black;
+            btnRunPresentationDiag.Click += (s, e) => RunPresentationModeDiagnostics();
+
+            btnDelayedGamePresCapture = CreateActionButton(pnlPresentationModeBench, 275, 36, 265, 30, "⏱️ 5 Sn Gecikmeli Ön Plan Oyunu Yakala", Color.FromArgb(16, 185, 129));
+            btnDelayedGamePresCapture.ForeColor = Color.Black;
+            btnDelayedGamePresCapture.Click += (s, e) => RunDelayedForegroundPresentationCapture();
+
+            btnOpenPresentationAdvisor = CreateActionButton(pnlPresentationModeBench, 548, 36, 260, 30, "🎮 Flip-Model & MPO Danışmanı", Color.FromArgb(168, 85, 247));
+            btnOpenPresentationAdvisor.Click += (s, e) => ShowPresentationAdvisorDialog();
+
+            lblPresentationReport = new Label
+            {
+                Text = "DXGI donanım çıkışları, DWM MPO katman durumu ve Pencereli Oyun Optimizasyonu için 'Hattı Tara'ya veya gerçek oyun yakalamak için '5 Sn Gecikmeli Yakala'ya tıklayın.",
+                Font = new Font("Consolas", 7.8f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(203, 213, 225),
+                UseMnemonic = false,
+                Location = new Point(12, 74),
+                Size = new Size(796, 178)
+            };
+            pnlPresentationModeBench.Controls.Add(lblPresentationReport);
+
+            // -------------------------------------------------------------
+            // Card 5: PRESENTMON & KARE ZAMANI (FRAMETIME) A/B BENCHMARK LABORATUVARI
+            // -------------------------------------------------------------
+            pnlFrametimeLab = new Panel
+            {
+                Location = new Point(10, 765),
+                Size = new Size(820, 440),
+                BackColor = Color.FromArgb(18, 23, 34)
+            };
+            pnlFrametimeLab.Paint += (s, e) =>
+            {
+                using (Pen p = new Pen(Color.FromArgb(36, 46, 66), 1))
+                {
+                    e.Graphics.DrawRectangle(p, 0, 0, pnlFrametimeLab.Width - 1, pnlFrametimeLab.Height - 1);
+                }
+            };
+            viewBenchmark.Controls.Add(pnlFrametimeLab);
+
+            Label lblLabTitle = new Label
+            {
+                Text = "🔬 PRESENTMON & KARE ZAMANI (FRAMETIME) A/B BENCHMARK LABORATUVARI",
+                Font = new Font("Segoe UI", 8.8f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(56, 189, 248),
+                AutoSize = true,
+                Location = new Point(12, 10)
+            };
+            pnlFrametimeLab.Controls.Add(lblLabTitle);
+
+            string pmBin = FindPresentMonBinary();
+            lblBenchEngineBadge = new Label
+            {
+                Text = string.IsNullOrEmpty(pmBin) ? "⚡ Motor: Native DWM/QPC" : "🟢 Motor: Intel PresentMon",
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
+                ForeColor = string.IsNullOrEmpty(pmBin) ? Color.FromArgb(251, 191, 36) : Color.FromArgb(52, 211, 153),
+                AutoSize = true,
+                Location = new Point(pnlFrametimeLab.Width - 220, 10)
+            };
+            pnlFrametimeLab.Controls.Add(lblBenchEngineBadge);
+
+            // Controls Bar (Y: 38)
+            Label lblTgtHdr = new Label { Text = "Hedef Oyun (.exe):", Font = new Font("Segoe UI", 8.0f, FontStyle.Bold), ForeColor = Color.FromArgb(148, 163, 184), Location = new Point(12, 42), AutoSize = true };
+            pnlFrametimeLab.Controls.Add(lblTgtHdr);
+
+            cmbBenchTarget = new ComboBox
+            {
+                Location = new Point(125, 39),
+                Size = new Size(160, 22),
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                BackColor = Color.FromArgb(12, 15, 22),
+                ForeColor = Color.White
+            };
+            pnlFrametimeLab.Controls.Add(cmbBenchTarget);
+
+            btnBenchRefreshTargets = new Button
+            {
+                Text = "🔄",
+                Location = new Point(288, 38),
+                Size = new Size(28, 24),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(28, 35, 50),
+                ForeColor = Color.White,
+                Cursor = Cursors.Hand
+            };
+            btnBenchRefreshTargets.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnBenchRefreshTargets.Click += (s, e) => PopulateBenchmarkTargets();
+            pnlFrametimeLab.Controls.Add(btnBenchRefreshTargets);
+
+            Label lblDurHdr = new Label { Text = "Süre:", Font = new Font("Segoe UI", 8.0f, FontStyle.Bold), ForeColor = Color.FromArgb(148, 163, 184), Location = new Point(325, 42), AutoSize = true };
+            pnlFrametimeLab.Controls.Add(lblDurHdr);
+
+            cmbBenchDuration = new ComboBox
+            {
+                Location = new Point(362, 39),
+                Size = new Size(78, 22),
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                BackColor = Color.FromArgb(12, 15, 22),
+                ForeColor = Color.White
+            };
+            cmbBenchDuration.Items.Add("15 sn");
+            cmbBenchDuration.Items.Add("30 sn");
+            cmbBenchDuration.Items.Add("60 sn");
+            cmbBenchDuration.SelectedIndex = 1;
+            pnlFrametimeLab.Controls.Add(cmbBenchDuration);
+
+            Label lblWarmHdr = new Label { Text = "Isınma:", Font = new Font("Segoe UI", 8.0f, FontStyle.Bold), ForeColor = Color.FromArgb(148, 163, 184), Location = new Point(450, 42), AutoSize = true };
+            pnlFrametimeLab.Controls.Add(lblWarmHdr);
+
+            cmbBenchWarmup = new ComboBox
+            {
+                Location = new Point(498, 39),
+                Size = new Size(115, 22),
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                BackColor = Color.FromArgb(12, 15, 22),
+                ForeColor = Color.White
+            };
+            cmbBenchWarmup.Items.Add("3 sn (Alt+Tab Filtresi)");
+            cmbBenchWarmup.Items.Add("0 sn (Hemen Başla)");
+            cmbBenchWarmup.SelectedIndex = 0;
+            pnlFrametimeLab.Controls.Add(cmbBenchWarmup);
+
+            lblBenchLiveStatus = new Label
+            {
+                Text = "⚪ Hazır: Test A veya Test B'yi başlatabilirsiniz.",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(56, 189, 248),
+                Location = new Point(622, 42),
+                AutoSize = true
+            };
+            pnlFrametimeLab.Controls.Add(lblBenchLiveStatus);
+
+            // Box A (Test A: Stok / Referans)
+            pnlBoxA = new Panel
+            {
+                Location = new Point(12, 74),
+                Size = new Size(392, 228),
+                BackColor = Color.FromArgb(15, 23, 42)
+            };
+            pnlBoxA.Paint += (s, e) =>
+            {
+                using (Pen p = new Pen(Color.FromArgb(59, 130, 246), 1))
+                {
+                    e.Graphics.DrawRectangle(p, 0, 0, pnlBoxA.Width - 1, pnlBoxA.Height - 1);
+                }
+            };
+            pnlFrametimeLab.Controls.Add(pnlBoxA);
+
+            Label lblHdrA = new Label
+            {
+                Text = "TEST A: REFERANS / STOK DURUM (Argon Öncesi)",
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(96, 165, 250),
+                Location = new Point(10, 8),
+                AutoSize = true
+            };
+            pnlBoxA.Controls.Add(lblHdrA);
+
+            btnRunTestA = CreateActionButton(pnlBoxA, 10, 30, 372, 30, "▶ Test A'yı Başlat (Stok Ölçüm)", Color.FromArgb(37, 99, 235));
+            btnRunTestA.ForeColor = Color.White;
+            btnRunTestA.Click += (s, e) => RunFrametimeBenchmarkSession(false);
+
+            lblTestA_AvgFps = new Label { Text = "Ortalama FPS: -- FPS", Font = new Font("Segoe UI", 9.0f, FontStyle.Bold), ForeColor = Color.White, Location = new Point(12, 72), AutoSize = true };
+            pnlBoxA.Controls.Add(lblTestA_AvgFps);
+
+            lblTestA_1Low = new Label { Text = "%1 Low FPS (Akıcılık): -- FPS", Font = new Font("Segoe UI", 8.5f, FontStyle.Bold), ForeColor = Color.FromArgb(147, 197, 253), Location = new Point(12, 100), AutoSize = true };
+            pnlBoxA.Controls.Add(lblTestA_1Low);
+
+            lblTestA_01Low = new Label { Text = "%0.1 Low FPS (Mikro Takılma): -- FPS", Font = new Font("Segoe UI", 8.5f, FontStyle.Bold), ForeColor = Color.FromArgb(191, 219, 254), Location = new Point(12, 128), AutoSize = true };
+            pnlBoxA.Controls.Add(lblTestA_01Low);
+
+            lblTestA_Jitter = new Label { Text = "Kare Sapması (Jitter): -- ms", Font = new Font("Segoe UI", 8.0f, FontStyle.Regular), ForeColor = Color.FromArgb(148, 163, 184), Location = new Point(12, 158), AutoSize = true };
+            pnlBoxA.Controls.Add(lblTestA_Jitter);
+
+            lblTestA_Frames = new Label { Text = "Örneklenen Kare / Düşen: --", Font = new Font("Segoe UI", 7.8f, FontStyle.Regular), ForeColor = Color.FromArgb(100, 116, 139), Location = new Point(12, 188), AutoSize = true };
+            pnlBoxA.Controls.Add(lblTestA_Frames);
+
+            // Box B (Test B: Argon Devrede)
+            pnlBoxB = new Panel
+            {
+                Location = new Point(416, 74),
+                Size = new Size(392, 228),
+                BackColor = Color.FromArgb(11, 30, 25)
+            };
+            pnlBoxB.Paint += (s, e) =>
+            {
+                using (Pen p = new Pen(Color.FromArgb(16, 185, 129), 1))
+                {
+                    e.Graphics.DrawRectangle(p, 0, 0, pnlBoxB.Width - 1, pnlBoxB.Height - 1);
+                }
+            };
+            pnlFrametimeLab.Controls.Add(pnlBoxB);
+
+            Label lblHdrB = new Label
+            {
+                Text = "TEST B: ARGON OPTİMİZASYONU AKTİF (Espor Profili)",
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(52, 211, 153),
+                Location = new Point(10, 8),
+                AutoSize = true
+            };
+            pnlBoxB.Controls.Add(lblHdrB);
+
+            btnRunTestB = CreateActionButton(pnlBoxB, 10, 30, 372, 30, "▶ Test B'yi Başlat (Argon Devrede)", Color.FromArgb(16, 185, 129));
+            btnRunTestB.ForeColor = Color.Black;
+            btnRunTestB.Click += (s, e) => RunFrametimeBenchmarkSession(true);
+
+            lblTestB_AvgFps = new Label { Text = "Ortalama FPS: -- FPS", Font = new Font("Segoe UI", 9.0f, FontStyle.Bold), ForeColor = Color.White, Location = new Point(12, 72), AutoSize = true };
+            pnlBoxB.Controls.Add(lblTestB_AvgFps);
+
+            lblTestB_1Low = new Label { Text = "%1 Low FPS (Akıcılık): -- FPS", Font = new Font("Segoe UI", 8.5f, FontStyle.Bold), ForeColor = Color.FromArgb(110, 231, 183), Location = new Point(12, 100), AutoSize = true };
+            pnlBoxB.Controls.Add(lblTestB_1Low);
+
+            lblTestB_01Low = new Label { Text = "%0.1 Low FPS (Mikro Takılma): -- FPS", Font = new Font("Segoe UI", 8.5f, FontStyle.Bold), ForeColor = Color.FromArgb(167, 243, 208), Location = new Point(12, 128), AutoSize = true };
+            pnlBoxB.Controls.Add(lblTestB_01Low);
+
+            lblTestB_Jitter = new Label { Text = "Kare Sapması (Jitter): -- ms", Font = new Font("Segoe UI", 8.0f, FontStyle.Regular), ForeColor = Color.FromArgb(148, 163, 184), Location = new Point(12, 158), AutoSize = true };
+            pnlBoxB.Controls.Add(lblTestB_Jitter);
+
+            lblTestB_Frames = new Label { Text = "Örneklenen Kare / Düşen: --", Font = new Font("Segoe UI", 7.8f, FontStyle.Regular), ForeColor = Color.FromArgb(100, 116, 139), Location = new Point(12, 188), AutoSize = true };
+            pnlBoxB.Controls.Add(lblTestB_Frames);
+
+            // Alt Delta Bar & Verdict (Y: 312)
+            lblDeltaAvg = new Label { Text = "Δ Ort. FPS: --", Font = new Font("Segoe UI", 8.2f, FontStyle.Bold), ForeColor = Color.FromArgb(148, 163, 184), Location = new Point(14, 314), AutoSize = true };
+            pnlFrametimeLab.Controls.Add(lblDeltaAvg);
+
+            lblDelta1Low = new Label { Text = "Δ %1 Low: --", Font = new Font("Segoe UI", 8.2f, FontStyle.Bold), ForeColor = Color.FromArgb(148, 163, 184), Location = new Point(145, 314), AutoSize = true };
+            pnlFrametimeLab.Controls.Add(lblDelta1Low);
+
+            lblDelta01Low = new Label { Text = "Δ %0.1 Low: --", Font = new Font("Segoe UI", 8.2f, FontStyle.Bold), ForeColor = Color.FromArgb(148, 163, 184), Location = new Point(285, 314), AutoSize = true };
+            pnlFrametimeLab.Controls.Add(lblDelta01Low);
+
+            lblDeltaJitter = new Label { Text = "Δ Jitter: --", Font = new Font("Segoe UI", 8.2f, FontStyle.Bold), ForeColor = Color.FromArgb(148, 163, 184), Location = new Point(435, 314), AutoSize = true };
+            pnlFrametimeLab.Controls.Add(lblDeltaJitter);
+
+            btnCopyBenchReport = CreateActionButton(pnlFrametimeLab, 500, 310, 140, 26, "📋 Raporu Kopyala", Color.FromArgb(30, 41, 59));
+            btnCopyBenchReport.Click += (s, e) => CopyBenchmarkMarkdownReport();
+
+            btnExportCsv = CreateActionButton(pnlFrametimeLab, 646, 310, 96, 26, "💾 CSV İndir", Color.FromArgb(30, 41, 59));
+            btnExportCsv.Click += (s, e) => ExportBenchmarkCsv();
+
+            btnResetBench = CreateActionButton(pnlFrametimeLab, 748, 310, 60, 26, "🔄 Sıfırla", Color.FromArgb(51, 65, 85));
+            btnResetBench.Click += (s, e) => ResetBenchmarkLab();
+
+            lblBenchVerdict = new Label
+            {
+                Text = "İpucu: Önce oyunu açıp 'Test A' ile stok performansı ölçün. Ardından Argon optimizasyonunu açıp aynı oyun sahnesinde 'Test B'yi çalıştırarak farkı doğrulayın.",
+                Font = new Font("Consolas", 8.0f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(203, 213, 225),
+                Location = new Point(14, 348),
+                Size = new Size(794, 76)
+            };
+            pnlFrametimeLab.Controls.Add(lblBenchVerdict);
+
+            PopulateBenchmarkTargets();
+
             viewBenchmark.Resize += (s, e) =>
             {
                 int availW = Math.Max(680, viewBenchmark.ClientSize.Width - 24);
@@ -11233,7 +16116,550 @@ namespace ArgonLatencyStudio
                 pnlMouseTestArea.Width = availW - 24;
                 lblMouseHzLive.Width = pnlMouseTestArea.Width - 24;
                 lblMouseDeltaLive.Width = pnlMouseTestArea.Width - 24;
+
+                pnlPresentationModeBench.Location = new Point(10, 495);
+                pnlPresentationModeBench.Width = availW;
+                btnOpenGraphicsSettings.Location = new Point(availW - btnOpenGraphicsSettings.Width - 12, 6);
+                int thirdPresW = (availW - 40) / 3;
+                btnRunPresentationDiag.Location = new Point(12, 36);
+                btnRunPresentationDiag.Width = thirdPresW;
+                btnDelayedGamePresCapture.Location = new Point(12 + thirdPresW + 8, 36);
+                btnDelayedGamePresCapture.Width = thirdPresW;
+                btnOpenPresentationAdvisor.Location = new Point(12 + (thirdPresW + 8) * 2, 36);
+                btnOpenPresentationAdvisor.Width = availW - 24 - (thirdPresW + 8) * 2;
+                lblPresentationReport.Width = availW - 24;
+
+                pnlFrametimeLab.Location = new Point(10, 765);
+                pnlFrametimeLab.Width = availW;
+                lblBenchEngineBadge.Location = new Point(pnlFrametimeLab.ClientSize.Width - 220, 10);
+                int halfSubW = (availW - 36) / 2;
+                pnlBoxA.Width = halfSubW;
+                pnlBoxB.Location = new Point(halfSubW + 24, 74);
+                pnlBoxB.Width = halfSubW;
+                btnRunTestA.Width = halfSubW - 20;
+                btnRunTestB.Width = halfSubW - 20;
+                btnResetBench.Location = new Point(availW - 74, 310);
+                btnExportCsv.Location = new Point(availW - 176, 310);
+                btnCopyBenchReport.Location = new Point(availW - 324, 310);
+                lblBenchVerdict.Width = availW - 28;
             };
+        }
+
+        private string FindPresentMonBinary()
+        {
+            try
+            {
+                string appDir = AppDomain.CurrentDomain.BaseDirectory;
+                string[] candidates = new string[]
+                {
+                    Path.Combine(appDir, "PresentMon.exe"),
+                    Path.Combine(appDir, "tools", "PresentMon.exe"),
+                    Path.Combine(appDir, "lib", "PresentMon.exe"),
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Intel", "PresentMon", "PresentMon.exe")
+                };
+                foreach (string c in candidates)
+                {
+                    if (File.Exists(c)) return c;
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        private void PopulateBenchmarkTargets()
+        {
+            if (cmbBenchTarget == null) return;
+            string prev = cmbBenchTarget.SelectedItem as string;
+            cmbBenchTarget.Items.Clear();
+
+            HashSet<string> added = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            try
+            {
+                Process[] allProcs = Process.GetProcesses();
+                foreach (Process p in allProcs)
+                {
+                    try
+                    {
+                        if (p.Id <= 4) continue;
+                        string name = p.ProcessName.ToLowerInvariant();
+                        if (added.Contains(name)) continue;
+
+                        bool isGameCandidate = false;
+                        if (watchdogConfig != null)
+                        {
+                            foreach (var r in watchdogConfig.Rules)
+                            {
+                                if (string.Equals(r.ProcessName, name, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    isGameCandidate = true;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (!isGameCandidate && p.MainWindowHandle != IntPtr.Zero && !string.IsNullOrEmpty(p.MainWindowTitle))
+                        {
+                            long memMb = p.WorkingSet64 / (1024 * 1024);
+                            if (memMb > 120 && !name.Equals("devenv") && !name.Equals("explorer") && !name.Equals("taskmgr") && !name.Contains("argon"))
+                                isGameCandidate = true;
+                        }
+
+                        if (isGameCandidate)
+                        {
+                            cmbBenchTarget.Items.Add(name + ".exe");
+                            added.Add(name);
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+
+            string[] defaults = new string[] { "cs2.exe", "pathofexile.exe", "pathofexile_x64.exe", "valorant-win64-shipping.exe", "dota2.exe", "r5apex.exe", "overwatch.exe" };
+            foreach (string d in defaults)
+            {
+                string clean = d.Replace(".exe", "").ToLowerInvariant();
+                if (!added.Contains(clean))
+                {
+                    cmbBenchTarget.Items.Add(d);
+                    added.Add(clean);
+                }
+            }
+
+            if (!string.IsNullOrEmpty(prev) && cmbBenchTarget.Items.Contains(prev))
+                cmbBenchTarget.SelectedItem = prev;
+            else if (cmbBenchTarget.Items.Count > 0)
+                cmbBenchTarget.SelectedIndex = 0;
+        }
+
+        private void RunFrametimeBenchmarkSession(bool isTestB)
+        {
+            if (benchIsRunning) return;
+
+            string targetStr = cmbBenchTarget != null ? cmbBenchTarget.SelectedItem as string : null;
+            if (string.IsNullOrEmpty(targetStr))
+            {
+                MessageBox.Show("Lütfen ölçüm yapmak istediğiniz hedef oyunu (.exe) seçin.", "Hedef Seçilmedi", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            string procName = targetStr.Replace(".exe", "").Trim().ToLowerInvariant();
+            Process[] procs = Process.GetProcessesByName(procName);
+            if (procs.Length == 0)
+            {
+                MessageBox.Show(string.Format("'{0}.exe' oyunu şu anda çalışmıyor. Lütfen oyunu başlattıktan sonra tekrar deneyin.", procName), "Oyun Bulunamadı", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            Process targetProc = procs[0];
+            int durationSec = 30;
+            if (cmbBenchDuration != null)
+            {
+                if (cmbBenchDuration.SelectedIndex == 0) durationSec = 15;
+                else if (cmbBenchDuration.SelectedIndex == 2) durationSec = 60;
+            }
+
+            int warmupSec = (cmbBenchWarmup != null && cmbBenchWarmup.SelectedIndex == 0) ? 3 : 0;
+            string runLabel = isTestB ? "Test B (Argon)" : "Test A (Stok)";
+
+            benchIsRunning = true;
+            if (btnRunTestA != null) btnRunTestA.Enabled = false;
+            if (btnRunTestB != null) btnRunTestB.Enabled = false;
+            if (btnResetBench != null) btnResetBench.Enabled = false;
+
+            string pmBinary = FindPresentMonBinary();
+
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                List<double> samples = new List<double>();
+                int droppedFrames = 0;
+                string engineUsed = !string.IsNullOrEmpty(pmBinary) ? "Intel PresentMon ETW" : "Native DWM/QPC";
+
+                try
+                {
+                    if (!string.IsNullOrEmpty(pmBinary))
+                    {
+                        // PresentMon.exe CLI Execution
+                        string tempCsv = Path.Combine(Path.GetTempPath(), "argon_pm_" + Guid.NewGuid().ToString("N") + ".csv");
+                        string args = string.Format("-process_name {0}.exe -timed {1} -output_file \"{2}\" -no_top", procName, durationSec, tempCsv);
+
+                        for (int w = warmupSec; w > 0; w--)
+                        {
+                            this.BeginInvoke((MethodInvoker)delegate
+                            {
+                                if (lblBenchLiveStatus != null)
+                                    lblBenchLiveStatus.Text = string.Format("🔥 Isınma: {0} sn (Oyuna odaklanın)...", w);
+                            });
+                            Thread.Sleep(1000);
+                        }
+
+                        this.BeginInvoke((MethodInvoker)delegate
+                        {
+                            if (lblBenchLiveStatus != null)
+                                lblBenchLiveStatus.Text = string.Format("⏱️ {0}: PresentMon ETW oturumu çalışıyor ({1} sn)...", runLabel, durationSec);
+                        });
+
+                        ProcessStartInfo psi = new ProcessStartInfo
+                        {
+                            FileName = pmBinary,
+                            Arguments = args,
+                            CreateNoWindow = true,
+                            UseShellExecute = false,
+                            RedirectStandardOutput = true,
+                            RedirectStandardError = true
+                        };
+                        using (Process pmProc = Process.Start(psi))
+                        {
+                            pmProc.WaitForExit((durationSec + 10) * 1000);
+                        }
+
+                        if (File.Exists(tempCsv))
+                        {
+                            string[] lines = File.ReadAllLines(tempCsv);
+                            int dtColIdx = -1;
+                            if (lines.Length > 0)
+                            {
+                                string[] headers = lines[0].Split(',');
+                                for (int h = 0; h < headers.Length; h++)
+                                {
+                                    string nh = headers[h].Trim().ToLowerInvariant();
+                                    if (nh.Contains("msbetweenpresents") || nh.Contains("frametime") || nh.Contains("msinpresentapi"))
+                                    {
+                                        dtColIdx = h;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            for (int li = 1; li < lines.Length; li++)
+                            {
+                                if (string.IsNullOrWhiteSpace(lines[li])) continue;
+                                string[] row = lines[li].Split(',');
+                                if (dtColIdx >= 0 && row.Length > dtColIdx)
+                                {
+                                    double val;
+                                    if (double.TryParse(row[dtColIdx].Trim(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out val) && val > 0.1 && val < 500.0)
+                                        samples.Add(val);
+                                }
+                            }
+                            try { File.Delete(tempCsv); } catch { }
+                        }
+                    }
+
+                    // Fallback to Native DWM / High-Precision QPC Sampling if PresentMon returned no samples
+                    if (samples.Count == 0)
+                    {
+                        engineUsed = "Native DWM/QPC";
+
+                        NativeMethods.DWM_TIMING_INFO ti = new NativeMethods.DWM_TIMING_INFO();
+                        ti.cbSize = (uint)Marshal.SizeOf(typeof(NativeMethods.DWM_TIMING_INFO));
+                        ulong lastFrame = 0;
+                        ulong lastDropped = 0;
+
+                        if (NativeMethods.DwmGetCompositionTimingInfo(IntPtr.Zero, ref ti) == 0)
+                        {
+                            lastFrame = ti.cFrame;
+                            lastDropped = ti.cFramesDropped;
+                        }
+
+                        // Warm-up phase
+                        if (warmupSec > 0)
+                        {
+                            Stopwatch swWarm = Stopwatch.StartNew();
+                            while (swWarm.Elapsed.TotalSeconds < warmupSec)
+                            {
+                                int left = (int)Math.Ceiling(warmupSec - swWarm.Elapsed.TotalSeconds);
+                                this.BeginInvoke((MethodInvoker)delegate
+                                {
+                                    if (lblBenchLiveStatus != null)
+                                        lblBenchLiveStatus.Text = string.Format("🔥 Isınma: {0} sn (Oyuna odaklanın)...", left);
+                                });
+                                NativeMethods.DwmFlush();
+                                Thread.Sleep(50);
+                            }
+                            if (NativeMethods.DwmGetCompositionTimingInfo(IntPtr.Zero, ref ti) == 0)
+                            {
+                                lastFrame = ti.cFrame;
+                                lastDropped = ti.cFramesDropped;
+                            }
+                        }
+
+                        // Active measurement loop
+                        Stopwatch swTest = Stopwatch.StartNew();
+                        long lastTicks = Stopwatch.GetTimestamp();
+                        double freq = (double)Stopwatch.Frequency;
+
+                        while (swTest.Elapsed.TotalSeconds < durationSec)
+                        {
+                            NativeMethods.DwmFlush();
+                            long nowTicks = Stopwatch.GetTimestamp();
+                            double deltaMs = ((nowTicks - lastTicks) * 1000.0) / freq;
+                            lastTicks = nowTicks;
+
+                            if (deltaMs > 0.1 && deltaMs < 500.0)
+                            {
+                                if (NativeMethods.DwmGetCompositionTimingInfo(IntPtr.Zero, ref ti) == 0)
+                                {
+                                    if (ti.cFrame > lastFrame)
+                                    {
+                                        ulong fDiff = ti.cFrame - lastFrame;
+                                        double perFrame = deltaMs / Math.Max(1, fDiff);
+                                        for (ulong k = 0; k < fDiff; k++)
+                                            samples.Add(perFrame);
+
+                                        if (ti.cFramesDropped > lastDropped)
+                                            droppedFrames += (int)(ti.cFramesDropped - lastDropped);
+
+                                        lastFrame = ti.cFrame;
+                                        lastDropped = ti.cFramesDropped;
+                                    }
+                                    else
+                                    {
+                                        samples.Add(deltaMs);
+                                    }
+                                }
+                                else
+                                {
+                                    samples.Add(deltaMs);
+                                }
+                            }
+
+                            int rem = (int)Math.Max(0, durationSec - swTest.Elapsed.TotalSeconds);
+                            this.BeginInvoke((MethodInvoker)delegate
+                            {
+                                if (lblBenchLiveStatus != null)
+                                    lblBenchLiveStatus.Text = string.Format("⏱️ {0}: {1} sn kaldı ({2} kare kaydedildi)...", runLabel, rem, samples.Count);
+                            });
+
+                            Thread.Sleep(1);
+                        }
+                    }
+
+                    FrametimeBenchmarkResult res = new FrametimeBenchmarkResult();
+                    res.RunLabel = runLabel;
+                    res.ProcessName = procName;
+                    res.ProcessId = targetProc.Id;
+                    res.CalculateMetrics(samples, durationSec, engineUsed, droppedFrames);
+
+                    this.BeginInvoke((MethodInvoker)delegate
+                    {
+                        if (isTestB) benchResultB = res;
+                        else benchResultA = res;
+
+                        UpdateBenchmarkComparisonUI();
+
+                        benchIsRunning = false;
+                        if (btnRunTestA != null) btnRunTestA.Enabled = true;
+                        if (btnRunTestB != null) btnRunTestB.Enabled = true;
+                        if (btnResetBench != null) btnResetBench.Enabled = true;
+
+                        if (lblBenchLiveStatus != null)
+                        {
+                            lblBenchLiveStatus.Text = string.Format("✔️ {0} tamamlandı! ({1} kare, {2:F1} FPS)", runLabel, res.TotalFrames, res.AverageFps);
+                            lblBenchLiveStatus.ForeColor = Color.FromArgb(52, 211, 153);
+                        }
+
+                        try { System.Media.SystemSounds.Asterisk.Play(); } catch { }
+                    });
+                }
+                catch (Exception ex)
+                {
+                    this.BeginInvoke((MethodInvoker)delegate
+                    {
+                        benchIsRunning = false;
+                        if (btnRunTestA != null) btnRunTestA.Enabled = true;
+                        if (btnRunTestB != null) btnRunTestB.Enabled = true;
+                        if (btnResetBench != null) btnResetBench.Enabled = true;
+                        if (lblBenchLiveStatus != null)
+                        {
+                            lblBenchLiveStatus.Text = "⚠️ Ölçüm hatası: " + ex.Message;
+                            lblBenchLiveStatus.ForeColor = Color.FromArgb(248, 113, 113);
+                        }
+                    });
+                }
+            });
+        }
+
+        private void UpdateBenchmarkComparisonUI()
+        {
+            if (benchResultA != null)
+            {
+                lblTestA_AvgFps.Text = string.Format("Ortalama FPS: {0:F1} FPS", benchResultA.AverageFps);
+                lblTestA_1Low.Text = string.Format("%1 Low FPS (Akıcılık): {0:F1} FPS", benchResultA.OnePercentLowFps);
+                lblTestA_01Low.Text = string.Format("%0.1 Low FPS (Mikro Takılma): {0:F1} FPS", benchResultA.ZeroPointOnePercentLowFps);
+                lblTestA_Jitter.Text = string.Format("Frametime Sapması (Jitter): ±{0:F2} ms", benchResultA.FrametimeJitterMs);
+                lblTestA_Frames.Text = string.Format("Toplam: {0:N0} kare | Düşen: {1} | Motor: {2}", benchResultA.TotalFrames, benchResultA.DroppedFrames, benchResultA.EngineUsed);
+            }
+
+            if (benchResultB != null)
+            {
+                lblTestB_AvgFps.Text = string.Format("Ortalama FPS: {0:F1} FPS", benchResultB.AverageFps);
+                lblTestB_1Low.Text = string.Format("%1 Low FPS (Akıcılık): {0:F1} FPS", benchResultB.OnePercentLowFps);
+                lblTestB_01Low.Text = string.Format("%0.1 Low FPS (Mikro Takılma): {0:F1} FPS", benchResultB.ZeroPointOnePercentLowFps);
+                lblTestB_Jitter.Text = string.Format("Frametime Sapması (Jitter): ±{0:F2} ms", benchResultB.FrametimeJitterMs);
+                lblTestB_Frames.Text = string.Format("Toplam: {0:N0} kare | Düşen: {1} | Motor: {2}", benchResultB.TotalFrames, benchResultB.DroppedFrames, benchResultB.EngineUsed);
+            }
+
+            if (benchResultA != null && benchResultB != null)
+            {
+                double dAvg = benchResultA.AverageFps > 0 ? ((benchResultB.AverageFps - benchResultA.AverageFps) / benchResultA.AverageFps) * 100.0 : 0;
+                double d1Low = benchResultA.OnePercentLowFps > 0 ? ((benchResultB.OnePercentLowFps - benchResultA.OnePercentLowFps) / benchResultA.OnePercentLowFps) * 100.0 : 0;
+                double d01Low = benchResultA.ZeroPointOnePercentLowFps > 0 ? ((benchResultB.ZeroPointOnePercentLowFps - benchResultA.ZeroPointOnePercentLowFps) / benchResultA.ZeroPointOnePercentLowFps) * 100.0 : 0;
+                double dJitter = benchResultB.FrametimeJitterMs - benchResultA.FrametimeJitterMs;
+
+                lblDeltaAvg.Text = string.Format("Δ Ort. FPS: {0}{1:F1}%", dAvg >= 0 ? "+" : "", dAvg);
+                lblDeltaAvg.ForeColor = dAvg >= 0 ? Color.FromArgb(52, 211, 153) : Color.FromArgb(248, 113, 113);
+
+                lblDelta1Low.Text = string.Format("Δ %1 Low: {0}{1:F1}%", d1Low >= 0 ? "+" : "", d1Low);
+                lblDelta1Low.ForeColor = d1Low >= 0 ? Color.FromArgb(52, 211, 153) : Color.FromArgb(248, 113, 113);
+
+                lblDelta01Low.Text = string.Format("Δ %0.1 Low: {0}{1:F1}%", d01Low >= 0 ? "+" : "", d01Low);
+                lblDelta01Low.ForeColor = d01Low >= 0 ? Color.FromArgb(52, 211, 153) : Color.FromArgb(248, 113, 113);
+
+                lblDeltaJitter.Text = string.Format("Δ Jitter: {0}{1:F2} ms", dJitter <= 0 ? "" : "+", dJitter);
+                lblDeltaJitter.ForeColor = dJitter <= 0 ? Color.FromArgb(52, 211, 153) : Color.FromArgb(248, 113, 113);
+
+                lblBenchVerdict.Text = string.Format(
+                    "✔️ A/B ANALİZİ: {0} sürecinde Argon optimizasyonu ile %1 Low (akıcılık) {1}{2:F1}%, 0.1% Low (mikro takılma) {3}{4:F1}% ve ortalama FPS {5}{6:F1}% değişim göstermiştir.\n" +
+                    "• Test A: {7:F1} FPS | %1 Low: {8:F1} FPS | Jitter: ±{9:F2} ms ({10} sn)\n" +
+                    "• Test B: {11:F1} FPS | %1 Low: {12:F1} FPS | Jitter: ±{13:F2} ms ({14} sn)",
+                    benchResultA.ProcessName,
+                    d1Low >= 0 ? "+" : "", d1Low,
+                    d01Low >= 0 ? "+" : "", d01Low,
+                    dAvg >= 0 ? "+" : "", dAvg,
+                    benchResultA.AverageFps, benchResultA.OnePercentLowFps, benchResultA.FrametimeJitterMs, benchResultA.DurationSeconds,
+                    benchResultB.AverageFps, benchResultB.OnePercentLowFps, benchResultB.FrametimeJitterMs, benchResultB.DurationSeconds);
+                lblBenchVerdict.ForeColor = Color.FromArgb(52, 211, 153);
+            }
+        }
+
+        private void CopyBenchmarkMarkdownReport()
+        {
+            if (benchResultA == null && benchResultB == null)
+            {
+                MessageBox.Show("Henüz tamamlanmış bir benchmark ölçümü bulunmuyor.", "Rapor Yok", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("### 🔬 Argon Latency Studio — A/B Frametime Benchmark Raporu");
+            sb.AppendLine("- **Tarih:** " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+            sb.AppendLine("- **Hedef Oyun:** " + (benchResultA != null ? benchResultA.ProcessName : benchResultB.ProcessName) + ".exe");
+            sb.AppendLine("- **Ölçüm Motoru:** " + (benchResultA != null ? benchResultA.EngineUsed : benchResultB.EngineUsed));
+            sb.AppendLine();
+            sb.AppendLine("| Metrik | Test A (Stok) | Test B (Argon) | Değişim (Delta) |");
+            sb.AppendLine("|---|---|---|---|");
+
+            string aAvg = benchResultA != null ? string.Format("{0:F1} FPS", benchResultA.AverageFps) : "--";
+            string bAvg = benchResultB != null ? string.Format("{0:F1} FPS", benchResultB.AverageFps) : "--";
+            string dAvgStr = (benchResultA != null && benchResultB != null && benchResultA.AverageFps > 0) ? string.Format("{0}{1:F1}%", ((benchResultB.AverageFps - benchResultA.AverageFps) / benchResultA.AverageFps) >= 0 ? "+" : "", ((benchResultB.AverageFps - benchResultA.AverageFps) / benchResultA.AverageFps) * 100.0) : "--";
+            sb.AppendLine(string.Format("| **Ortalama FPS** | {0} | {1} | **{2}** |", aAvg, bAvg, dAvgStr));
+
+            string a1Low = benchResultA != null ? string.Format("{0:F1} FPS", benchResultA.OnePercentLowFps) : "--";
+            string b1Low = benchResultB != null ? string.Format("{0:F1} FPS", benchResultB.OnePercentLowFps) : "--";
+            string d1LowStr = (benchResultA != null && benchResultB != null && benchResultA.OnePercentLowFps > 0) ? string.Format("{0}{1:F1}%", ((benchResultB.OnePercentLowFps - benchResultA.OnePercentLowFps) / benchResultA.OnePercentLowFps) >= 0 ? "+" : "", ((benchResultB.OnePercentLowFps - benchResultA.OnePercentLowFps) / benchResultA.OnePercentLowFps) * 100.0) : "--";
+            sb.AppendLine(string.Format("| **%1 Low FPS** | {0} | {1} | **{2}** |", a1Low, b1Low, d1LowStr));
+
+            string a01Low = benchResultA != null ? string.Format("{0:F1} FPS", benchResultA.ZeroPointOnePercentLowFps) : "--";
+            string b01Low = benchResultB != null ? string.Format("{0:F1} FPS", benchResultB.ZeroPointOnePercentLowFps) : "--";
+            string d01LowStr = (benchResultA != null && benchResultB != null && benchResultA.ZeroPointOnePercentLowFps > 0) ? string.Format("{0}{1:F1}%", ((benchResultB.ZeroPointOnePercentLowFps - benchResultA.ZeroPointOnePercentLowFps) / benchResultA.ZeroPointOnePercentLowFps) >= 0 ? "+" : "", ((benchResultB.ZeroPointOnePercentLowFps - benchResultA.ZeroPointOnePercentLowFps) / benchResultA.ZeroPointOnePercentLowFps) * 100.0) : "--";
+            sb.AppendLine(string.Format("| **%0.1 Low FPS** | {0} | {1} | **{2}** |", a01Low, b01Low, d01LowStr));
+
+            string aJit = benchResultA != null ? string.Format("±{0:F2} ms", benchResultA.FrametimeJitterMs) : "--";
+            string bJit = benchResultB != null ? string.Format("±{0:F2} ms", benchResultB.FrametimeJitterMs) : "--";
+            string dJitStr = (benchResultA != null && benchResultB != null) ? string.Format("{0}{1:F2} ms", (benchResultB.FrametimeJitterMs - benchResultA.FrametimeJitterMs) <= 0 ? "" : "+", benchResultB.FrametimeJitterMs - benchResultA.FrametimeJitterMs) : "--";
+            sb.AppendLine(string.Format("| **Frametime Jitter** | {0} | {1} | **{2}** |", aJit, bJit, dJitStr));
+
+            string aFrames = benchResultA != null ? benchResultA.TotalFrames.ToString("N0") : "--";
+            string bFrames = benchResultB != null ? benchResultB.TotalFrames.ToString("N0") : "--";
+            sb.AppendLine(string.Format("| **Toplam Kare** | {0} | {1} | -- |", aFrames, bFrames));
+
+            sb.AppendLine();
+            sb.AppendLine("> *Rapor Argon Latency Studio v4.0 A/B Frametime Benchmark Motoru tarafından üretilmiştir.*");
+
+            try
+            {
+                Clipboard.SetText(sb.ToString());
+                MessageBox.Show("A/B Benchmark raporu panoya (Clipboard) kopyalandı!", "Rapor Kopyalandı", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch { }
+        }
+
+        private void ResetBenchmarkLab()
+        {
+            benchResultA = null;
+            benchResultB = null;
+
+            lblTestA_AvgFps.Text = "Ortalama FPS: -- FPS";
+            lblTestA_1Low.Text = "%1 Low FPS (Akıcılık): -- FPS";
+            lblTestA_01Low.Text = "%0.1 Low FPS (Mikro Takılma): -- FPS";
+            lblTestA_Jitter.Text = "Frametime Sapması (Jitter): -- ms";
+            lblTestA_Frames.Text = "Örneklenen Kare / Düşen: --";
+
+            lblTestB_AvgFps.Text = "Ortalama FPS: -- FPS";
+            lblTestB_1Low.Text = "%1 Low FPS (Akıcılık): -- FPS";
+            lblTestB_01Low.Text = "%0.1 Low FPS (Mikro Takılma): -- FPS";
+            lblTestB_Jitter.Text = "Frametime Sapması (Jitter): -- ms";
+            lblTestB_Frames.Text = "Örneklenen Kare / Düşen: --";
+
+            lblDeltaAvg.Text = "Δ Ort. FPS: --";
+            lblDeltaAvg.ForeColor = Color.FromArgb(148, 163, 184);
+            lblDelta1Low.Text = "Δ %1 Low: --";
+            lblDelta1Low.ForeColor = Color.FromArgb(148, 163, 184);
+            lblDelta01Low.Text = "Δ %0.1 Low: --";
+            lblDelta01Low.ForeColor = Color.FromArgb(148, 163, 184);
+            lblDeltaJitter.Text = "Δ Jitter: --";
+            lblDeltaJitter.ForeColor = Color.FromArgb(148, 163, 184);
+
+            lblBenchVerdict.Text = "İpucu: Önce oyunu açıp 'Test A' ile stok performansı ölçün. Ardından Argon optimizasyonunu açıp aynı oyun sahnesinde 'Test B'yi çalıştırarak farkı doğrulayın.";
+            lblBenchVerdict.ForeColor = Color.FromArgb(203, 213, 225);
+
+            lblBenchLiveStatus.Text = "⚪ Hazır: Test A veya Test B'yi başlatabilirsiniz.";
+            lblBenchLiveStatus.ForeColor = Color.FromArgb(56, 189, 248);
+        }
+
+        private void ExportBenchmarkCsv()
+        {
+            if (benchResultA == null && benchResultB == null)
+            {
+                MessageBox.Show("Dışa aktarılacak tamamlanmış bir benchmark sonucu bulunmuyor.", "Veri Yok", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            using (SaveFileDialog sfd = new SaveFileDialog())
+            {
+                sfd.Filter = "CSV Dosyası (*.csv)|*.csv";
+                sfd.FileName = string.Format("argon_bench_{0}_{1:yyyyMMdd_HHmm}.csv",
+                    (benchResultA != null ? benchResultA.ProcessName : benchResultB.ProcessName),
+                    DateTime.Now);
+                sfd.Title = "Frametime Benchmark Verilerini Kaydet";
+
+                if (sfd.ShowDialog(this) == DialogResult.OK)
+                {
+                    try
+                    {
+                        List<string> lines = new List<string>();
+                        lines.Add("FrameIndex,RunLabel,ProcessName,FrametimeMs");
+                        if (benchResultA != null)
+                        {
+                            for (int i = 0; i < benchResultA.FrameTimesMs.Count; i++)
+                                lines.Add(string.Format("{0},TestA,{1},{2:F3}", i + 1, benchResultA.ProcessName, benchResultA.FrameTimesMs[i]));
+                        }
+                        if (benchResultB != null)
+                        {
+                            for (int i = 0; i < benchResultB.FrameTimesMs.Count; i++)
+                                lines.Add(string.Format("{0},TestB,{1},{2:F3}", i + 1, benchResultB.ProcessName, benchResultB.FrameTimesMs[i]));
+                        }
+                        StateVault.WriteAllLinesAtomic(sfd.FileName, lines.ToArray());
+                        MessageBox.Show("Benchmark kare zamanı verileri başarıyla CSV olarak kaydedildi!\n\n" + sfd.FileName, "CSV Kaydedildi", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show("CSV kaydetme hatası: " + ex.Message, "Hata", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
+            }
         }
 
         private Label lblSettingsSensorDiag;
@@ -11310,6 +16736,91 @@ namespace ArgonLatencyStudio
                 lblWuDesc.Width = Math.Max(420, btnCreateRestorePoint.Left - 24);
             };
 
+            // Windows Hızlı Sistem Araçları Paneli (ChrisTitusTech/winutil & Quick Access Architecture)
+            Panel pnlQuickTools = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 44,
+                BackColor = Color.FromArgb(18, 23, 34),
+                Padding = new Padding(8, 6, 8, 6)
+            };
+            pnlQuickTools.Paint += (s, e) =>
+            {
+                using (Pen p = new Pen(Color.FromArgb(45, 55, 75), 1))
+                {
+                    e.Graphics.DrawRectangle(p, 0, 0, pnlQuickTools.Width - 1, pnlQuickTools.Height - 1);
+                }
+            };
+            viewWinUtil.Controls.Add(pnlQuickTools);
+
+            Label lblQuickHdr = new Label
+            {
+                Text = "⚡ Hızlı Araçlar:",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(56, 189, 248),
+                AutoSize = true,
+                Location = new Point(10, 13)
+            };
+            pnlQuickTools.Controls.Add(lblQuickHdr);
+
+            int qx = 110;
+            Action<string, string, string> addToolBtn = (btnText, cmd, args) =>
+            {
+                Button btn = new Button
+                {
+                    Text = btnText,
+                    Font = new Font("Segoe UI", 7.6f, FontStyle.Bold),
+                    FlatStyle = FlatStyle.Flat,
+                    BackColor = Color.FromArgb(28, 35, 50),
+                    ForeColor = Color.FromArgb(203, 213, 225),
+                    Location = new Point(qx, 8),
+                    AutoSize = true,
+                    Height = 26,
+                    Cursor = Cursors.Hand
+                };
+                btn.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+                btn.Click += (s, e) =>
+                {
+                    try
+                    {
+                        if (string.IsNullOrEmpty(args))
+                            Process.Start(cmd);
+                        else
+                            Process.Start(cmd, args);
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show("Araç başlatılamadı: " + ex.Message, "Windows Sistem Aracı", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    }
+                };
+                pnlQuickTools.Controls.Add(btn);
+                qx += btn.PreferredSize.Width + 6;
+            };
+
+            addToolBtn("🌐 Ağ (ncpa.cpl)", "ncpa.cpl", null);
+            addToolBtn("⚙️ Aygıtlar (devmgmt.msc)", "devmgmt.msc", null);
+            addToolBtn("🛠️ Hizmetler (services.msc)", "services.msc", null);
+            addToolBtn("🎮 Grafik (Ayarlar)", "ms-settings:display-advancedgraphics", null);
+            addToolBtn("⚡ Güç (powercfg.cpl)", "powercfg.cpl", null);
+            addToolBtn("🖥️ DirectX (dxdiag)", "dxdiag.exe", null);
+            addToolBtn("📊 Görev Yöneticisi", "taskmgr.exe", null);
+
+            Button btnPowerGov = new Button
+            {
+                Text = "⚡ İşlemci Güç Yöneticisi",
+                Font = new Font("Segoe UI", 7.6f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(16, 185, 129),
+                ForeColor = Color.Black,
+                Location = new Point(qx, 9),
+                Size = new Size(165, 26),
+                Cursor = Cursors.Hand
+            };
+            btnPowerGov.FlatAppearance.BorderSize = 0;
+            btnPowerGov.Click += (s, e) => ShowAdvancedPowerPolicyDialog();
+            pnlQuickTools.Controls.Add(btnPowerGov);
+            qx += btnPowerGov.PreferredSize.Width + 6;
+
             Panel pnlWuColHdr = CreateTweakTableColumnHeader("WinUtil Mimari & Sistem Politikaları");
             pnlWuColHdr.Dock = DockStyle.Top;
             viewWinUtil.Controls.Add(pnlWuColHdr);
@@ -11325,6 +16836,7 @@ namespace ArgonLatencyStudio
             };
             viewWinUtil.Controls.Add(flowWinUtilCards);
             pnlWuColHdr.SendToBack();
+            pnlQuickTools.SendToBack();
             pnlWuBanner.SendToBack();
             flowWinUtilCards.BringToFront();
 
@@ -12081,8 +17593,18 @@ namespace ArgonLatencyStudio
             viewSnapshotAudit.Visible = (index == 9);
             if (viewSettings != null) viewSettings.Visible = (index == 10);
 
-            if (index == 6) RefreshProcessTable();
+            if (index == 6)
+            {
+                RefreshProcessTable();
+                RefreshWatchdogGamesListView();
+            }
             if (index == 7) RefreshAutomationQoLView();
+            if (index == 8)
+            {
+                PopulateBenchmarkTargets();
+                if (presCountdownTimer == null || !presCountdownTimer.Enabled)
+                    RunPresentationModeDiagnostics();
+            }
             if (index == 9) RefreshSnapshotAuditView();
             if (index == 10)
             {
@@ -13071,6 +18593,74 @@ namespace ArgonLatencyStudio
             }
         }
 
+        private void ShowAdvancedPowerPolicyDialog()
+        {
+            try
+            {
+                using (AdvancedPowerPolicyDialog dlg = new AdvancedPowerPolicyDialog(vault))
+                {
+                    dlg.ShowDialog(this);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Güç Yöneticisi açılırken hata: " + ex.Message, "Hata", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private void ShowPresentationAdvisorDialog()
+        {
+            try
+            {
+                using (PresentationAdvisorDialog dlg = new PresentationAdvisorDialog(vault, isAdmin, FindPresentMonBinary(), RefreshPresentationPipelineAfterAdvisor))
+                {
+                    dlg.ShowDialog(this);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Sunum Danışmanı açılırken hata: " + ex.Message, "Hata", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private void RefreshPresentationPipelineAfterAdvisor()
+        {
+            try
+            {
+                ProbeAllTweaksLiveOsTruthAndOptionallySync(false);
+                foreach (var card in allCards)
+                {
+                    string id = card.Tweak.Id;
+                    if (id == "FPS_FSO_FLIP" || id == "WU_MPO_CONTROL" || id == "FPS_HAGS")
+                    {
+                        if (card.Tweak.IsDetectedActiveInOs)
+                        {
+                            card.Tweak.IsEnabled = true;
+                            if (card.Tweak.DetectedVariationInOs >= 0 && card.Tweak.DetectedVariationInOs < card.Tweak.Variations.Count)
+                                card.Tweak.SelectedVariationIndex = card.Tweak.DetectedVariationInOs;
+                            card.Tweak.CurrentAppliedText = string.Format("Mod {0}: {1}", card.Tweak.SelectedVariationIndex + 1, card.Tweak.Variations[card.Tweak.SelectedVariationIndex].ShortLabel);
+                        }
+                        else
+                        {
+                            card.Tweak.IsEnabled = false;
+                            card.Tweak.IsVerifiedInOs = false;
+                            card.Tweak.VerifiedSystemValue = "";
+                            card.Tweak.CurrentAppliedText = "Pasif (Orijinal)";
+                        }
+                        AutoResolveRebootAndReloadState(card.Tweak);
+                        card.RefreshVisualState();
+                    }
+                }
+                VerifyAllTweaksLive(false);
+                UpdateActiveCountsAndNavBadges();
+                UpdateRebootAndReloadBannerVisibility();
+                RefreshSnapshotAuditView();
+                RunPresentationModeDiagnostics();
+                if (!isLoadingProfile) SaveUserProfileState();
+            }
+            catch { }
+        }
+
         private void RevertAllActiveTweaksToOriginal()
         {
             foreach (var card in allCards)
@@ -13461,9 +19051,12 @@ namespace ArgonLatencyStudio
                 {
                     string dvr = vault.ReadRegistryDisplay("HKCU", @"System\GameConfigStore", "GameDVR_Enabled", "");
                     string fse = vault.ReadRegistryDisplay("HKCU", @"System\GameConfigStore", "GameDVR_FSEBehaviorMode", "");
-                    ok = (dvr == "0" && (fse == "2" || vault.ReadRegistryDisplay("HKCU", @"Software\Microsoft\DirectX\UserGlobalSettings", "DirectXUserGlobalSettings", "").Contains("SwapEffectUpgradeEnable")));
-                    val = ok ? "GameDVR=0, FSE=" + fse : "";
-                    if (ok) detectedMod = (fse == "0" ? 1 : 0);
+                    string dxRaw = vault.ReadRegistryDisplay("HKCU", StateVault.DirectXUserGpuPreferencesPath, StateVault.DirectXGlobalValueName, "");
+                    var dxToks = StateVault.ParseSemicolonSettings(dxRaw);
+                    bool flipOn = dxToks.ContainsKey("SwapEffectUpgradeEnable") && dxToks["SwapEffectUpgradeEnable"] == "1";
+                    ok = (dvr == "0" && (fse == "2" || flipOn));
+                    val = ok ? string.Format("GameDVR=0, FSE={0}{1}", string.IsNullOrEmpty(fse) ? "0" : fse, flipOn ? ", WinOpt=1" : "") : "";
+                    if (ok) detectedMod = (fse == "2" ? 0 : 1);
                 }
                 else if (id == "FPS_HAGS")
                 {
@@ -14024,6 +19617,7 @@ namespace ArgonLatencyStudio
         // must never outlive Argon, regardless of the "revert on exit" option.
         private void RestoreLiveStateOnExit()
         {
+            try { RestoreAllWatchdogSessionProcesses(); } catch { }
             try { RevertLiveEcoQosAndBackgroundCage(); } catch { }
             try { RevertAudioAndDwmIsolation(); } catch { }
             try { vault.RestoreAllProcessBackups(); } catch { }
@@ -14051,6 +19645,12 @@ namespace ArgonLatencyStudio
             {
                 SaveUserProfileState();
                 if (telemetryTimer != null) telemetryTimer.Stop();
+                if (presCountdownTimer != null)
+                {
+                    presCountdownTimer.Stop();
+                    presCountdownTimer.Dispose();
+                    presCountdownTimer = null;
+                }
                 StopSyntheticPulseThread();
                 if (sensorEngine != null)
                 {
@@ -14402,6 +20002,18 @@ namespace ArgonLatencyStudio
                 for (int i = 2; i < total; i += 2)
                     physNo0 |= (1L << i);
                 return physNo0 != 0 ? physNo0 : (allMask & ~3L);
+            }
+            else if (mode == 4)
+            {
+                int ccdThreads = Math.Max(2, total / 2);
+                long ccd0Mask = (1L << ccdThreads) - 1L;
+                return ccd0Mask != 0 ? ccd0Mask : allMask;
+            }
+            else if (mode == 5)
+            {
+                int pThreads = (detectedHw != null && detectedHw.PhysicalCores > 0) ? Math.Min(total, detectedHw.PhysicalCores * 2) : Math.Max(2, (total * 2) / 3);
+                long pMask = (pThreads >= 64) ? -1L : ((1L << pThreads) - 1L);
+                return pMask != 0 ? pMask : allMask;
             }
             return allMask;
         }
@@ -14875,6 +20487,118 @@ namespace ArgonLatencyStudio
             });
         }
 
+        // Windows 11 Presentation Mode & DXGI Display Pipeline Diagnostics (Supported DXGI + PresentMon)
+        private void RunPresentationModeDiagnostics()
+        {
+            try
+            {
+                PresentationPolicySnapshot snap = PresentationAdvisorEngine.CaptureSnapshot(vault);
+                StringBuilder report = new StringBuilder();
+                report.AppendLine("═════════════════════════════════════════════════════════════════════════════════════════════");
+                report.AppendLine(string.Format("• İŞLETİM SİSTEMİ & DWM     : {0}{1}",
+                    snap.OsFriendlyName,
+                    snap.Hardware.DwmTimingOk ? string.Format(" | DWM Compose: {0:0.0}Hz (Dropped:{1}, Missed:{2})", snap.Hardware.DwmComposeHz, snap.Hardware.DwmFramesDropped, snap.Hardware.DwmFramesMissed) : ""));
+
+                if (snap.Hardware.Outputs.Count > 0)
+                {
+                    for (int i = 0; i < snap.Hardware.Outputs.Count && i < 2; i++)
+                    {
+                        var o = snap.Hardware.Outputs[i];
+                        report.AppendLine(string.Format("• DXGI ÇIKIŞ [{0}]         : {1}x{2}@{3}Hz ({4}b {5}) | MPO={6} | HWComp(Win:{7}, FSE:{8})",
+                            o.DeviceName.Replace("\\\\.\\", ""), o.Width, o.Height, o.RefreshRateHz,
+                            o.BitsPerColor, o.IsHdrActive ? "HDR" : "SDR",
+                            o.SupportsOverlaysMpo ? "AÇIK" : "KAPALI",
+                            o.HwCompWindowed ? "Evet" : "Hayır",
+                            o.HwCompFullscreen ? "Evet" : "Hayır"));
+                    }
+                    if (snap.Hardware.Outputs.Count > 2)
+                        report.AppendLine(string.Format("  (+ {0} ek monitör — tamamını görmek için 'Flip-Model & MPO Danışmanı'nı açın)", snap.Hardware.Outputs.Count - 2));
+                }
+
+                report.AppendLine(string.Format("• DWM / DIRECTX POLİTİKASI  : WinOpt(SwapEffect)={0} | VRR={1} | HAGS={2} | FSEMode={3} | MPOEngeli={4}",
+                    snap.SwapEffectUpgradeEnable == 1 ? "Açık" : (snap.SwapEffectUpgradeEnable == 0 ? "Kapalı" : "Vars."),
+                    snap.VrrOptimizeEnable == 1 ? "Açık" : (snap.VrrOptimizeEnable == 0 ? "Kapalı" : "Vars."),
+                    snap.HagsMode == 2 ? "Açık(2)" : (snap.HagsMode == 1 ? "Kapalı(1)" : "Vars."),
+                    string.IsNullOrEmpty(snap.FseBehaviorMode) ? "0" : snap.FseBehaviorMode,
+                    snap.MpoRegistryBlocked ? ("EVET(" + snap.OverlayTestMode + ")") : "Yok"));
+
+                report.AppendLine("─────────────────────────────────────────────────────────────────────────────────────────────");
+                if (snap.Conflicts.Count > 0)
+                {
+                    report.AppendLine("⚠️ ÇAKIŞMA / UYARI: " + snap.Conflicts[0]);
+                }
+                else
+                {
+                    report.AppendLine("✅ YAPILANDIRMA TUTARLI: Kayıt defteri DWM / DirectX politikaları arasında çakışma algılanmadı.");
+                }
+                report.AppendLine("ℹ️ Canlı oyun swapchain PresentMode kanıtı için '5 Sn Gecikmeli Ön Plan Oyunu Yakala'ya tıklayıp oyuna geçin.");
+                report.AppendLine("═════════════════════════════════════════════════════════════════════════════════════════════");
+
+                if (lblPresentationReport != null)
+                    lblPresentationReport.Text = report.ToString();
+            }
+            catch (Exception ex)
+            {
+                if (lblPresentationReport != null)
+                    lblPresentationReport.Text = "Ekran sunum tanısı çalıştırılırken hata oluştu: " + ex.Message;
+            }
+        }
+
+        private void RunDelayedForegroundPresentationCapture()
+        {
+            if (presCountdownTimer != null && presCountdownTimer.Enabled) return;
+            presCountdownLeft = 5;
+            if (btnDelayedGamePresCapture != null)
+            {
+                btnDelayedGamePresCapture.Enabled = false;
+                btnDelayedGamePresCapture.Text = string.Format("⏳ Oyuna Geçin... {0} sn", presCountdownLeft);
+            }
+
+            if (presCountdownTimer == null)
+            {
+                presCountdownTimer = new System.Windows.Forms.Timer { Interval = 1000 };
+                presCountdownTimer.Tick += (s, e) =>
+                {
+                    presCountdownLeft--;
+                    if (presCountdownLeft > 0)
+                    {
+                        if (btnDelayedGamePresCapture != null)
+                            btnDelayedGamePresCapture.Text = string.Format("⏳ Oyuna Geçin... {0} sn", presCountdownLeft);
+                    }
+                    else
+                    {
+                        presCountdownTimer.Stop();
+                        if (btnDelayedGamePresCapture != null)
+                            btnDelayedGamePresCapture.Text = "🔍 Yakalanıyor...";
+
+                        IntPtr fgHwnd = NativeMethods.GetForegroundWindow();
+                        string pmBin = FindPresentMonBinary();
+                        ThreadPool.QueueUserWorkItem(_ =>
+                        {
+                            PresentationPolicySnapshot snap = PresentationAdvisorEngine.CaptureSnapshot(vault);
+                            string outReport = PresentationAdvisorEngine.InspectTargetWindowAndSwapchain(fgHwnd, snap, pmBin);
+                            try
+                            {
+                                this.BeginInvoke((MethodInvoker)delegate
+                                {
+                                    if (lblPresentationReport != null)
+                                        lblPresentationReport.Text = outReport;
+                                    if (btnDelayedGamePresCapture != null)
+                                    {
+                                        btnDelayedGamePresCapture.Text = "⏱️ 5 Sn Gecikmeli Ön Plan Oyunu Yakala";
+                                        btnDelayedGamePresCapture.Enabled = true;
+                                    }
+                                    try { System.Media.SystemSounds.Asterisk.Play(); } catch { }
+                                });
+                            }
+                            catch { }
+                        });
+                    }
+                };
+            }
+            presCountdownTimer.Start();
+        }
+
         private void OnMouseTestAreaMove(object sender, MouseEventArgs e)
         {
             long now = Stopwatch.GetTimestamp();
@@ -14887,12 +20611,30 @@ namespace ArgonLatencyStudio
                     mouseHzHistory.Add(hz);
                     if (mouseHzHistory.Count > 40) mouseHzHistory.RemoveAt(0);
 
+                    mouseDeltaHistory.Add(deltaMs);
+                    if (mouseDeltaHistory.Count > 40) mouseDeltaHistory.RemoveAt(0);
+
                     double sum = 0, peak = 0;
                     foreach (double h in mouseHzHistory) { sum += h; if (h > peak) peak = h; }
                     double avg = sum / mouseHzHistory.Count;
 
+                    // InputLab Jitter & Stability Metrics (moneks1106-code/InputLab)
+                    double sumDelta = 0;
+                    foreach (double d in mouseDeltaHistory) sumDelta += d;
+                    double avgDelta = sumDelta / mouseDeltaHistory.Count;
+
+                    double varSum = 0;
+                    foreach (double d in mouseDeltaHistory)
+                    {
+                        double diff = d - avgDelta;
+                        varSum += diff * diff;
+                    }
+                    double jitter = Math.Sqrt(varSum / mouseDeltaHistory.Count);
+                    double stability = Math.Max(0.0, Math.Min(100.0, 100.0 - (jitter / Math.Max(0.1, avgDelta) * 50.0)));
+                    string rating = (jitter < 0.25) ? "🟢 Espor Kararlı" : (jitter < 0.65 ? "🟡 Kabul Edilebilir" : "🔴 Jitter Dalgalanması");
+
                     lblMouseHzLive.Text = string.Format("Anlık: {0:0} Hz   |   Ortalama: {1:0} Hz   |   Tepe: {2:0} Hz", hz, avg, peak);
-                    lblMouseDeltaLive.Text = string.Format("Raporlama Gecikmesi: {0:0.00} ms", deltaMs);
+                    lblMouseDeltaLive.Text = string.Format("Raporlama Aralığı: {0:0.00} ms (Hedef: {1:0.00} ms) | Jitter: ±{2:0.00} ms | Tutarlılık: %{3:0.0} | {4}", deltaMs, avgDelta, jitter, stability, rating);
 
                     // Automatic conflict protection if 2000Hz+ mouse detected while Queue is set to low value (32)
                     if (avg >= 1750)
@@ -14992,31 +20734,141 @@ namespace ArgonLatencyStudio
         {
             try
             {
+                if (!autoGameWatchdogActive || watchdogConfig == null) return;
+
                 if (fpsEcoQosMode > 0 && tickCounter % 18 == 0)
                     ApplyLiveEcoQosAndBackgroundCage(fpsEcoQosMode);
                 if (fpsAudioIsoMode > 0 && tickCounter % 18 == 0)
                     ApplyAudioAndDwmIsolation(fpsAudioIsoMode);
 
-                string[] targets = new string[] { "haxball", "haxball client", "cs2" };
-                foreach (string t in targets)
+                // Collect currently running processes
+                Process[] allProcs = Process.GetProcesses();
+                Dictionary<string, List<Process>> runningByName = new Dictionary<string, List<Process>>(StringComparer.OrdinalIgnoreCase);
+                foreach (Process p in allProcs)
                 {
-                    foreach (Process p in Process.GetProcessesByName(t))
+                    try
                     {
-                        try
+                        List<Process> list;
+                        if (!runningByName.TryGetValue(p.ProcessName, out list))
                         {
-                            if (p.PriorityClass != ProcessPriorityClass.High && p.PriorityClass != ProcessPriorityClass.RealTime)
-                            {
-                                BackupProcessBeforeModify(p);
-                                p.PriorityClass = ProcessPriorityClass.High;
-                                p.PriorityBoostEnabled = true;
-                                ApplyLowLevelProcessBoost(p, 3, 5, true);
-                                if (standbyIsolationMode > 0)
-                                    p.ProcessorAffinity = (IntPtr)CalculateCpuTopologyMask(standbyIsolationMode);
-                            }
+                            list = new List<Process>();
+                            runningByName[p.ProcessName] = list;
                         }
-                        catch { }
+                        list.Add(p);
+                    }
+                    catch { }
+                }
+
+                // Check active games
+                List<GameWatchdogRule> matchedRules = new List<GameWatchdogRule>();
+                HashSet<int> currentLivingGamePids = new HashSet<int>();
+                bool shouldCageBackground = false;
+
+                foreach (var rule in watchdogConfig.Rules)
+                {
+                    if (!rule.IsEnabled) continue;
+
+                    List<Process> procs;
+                    if (runningByName.TryGetValue(rule.ProcessName, out procs) && procs.Count > 0)
+                    {
+                        matchedRules.Add(rule);
+                        if (rule.EnableEcoCage) shouldCageBackground = true;
+
+                        foreach (Process p in procs)
+                        {
+                            try
+                            {
+                                if (p.HasExited) continue;
+                                currentLivingGamePids.Add(p.Id);
+
+                                if (!activeBoostedGamePids.Contains(p.Id))
+                                {
+                                    BackupProcessBeforeModify(p);
+
+                                    if (p.PriorityClass != rule.TargetPriority)
+                                        p.PriorityClass = rule.TargetPriority;
+
+                                    p.PriorityBoostEnabled = true;
+
+                                    if (rule.EnableIoBoost)
+                                        ApplyLowLevelProcessBoost(p, 3, 5, true);
+
+                                    if (rule.AffinityMode > 0)
+                                        p.ProcessorAffinity = (IntPtr)CalculateCpuTopologyMask(rule.AffinityMode);
+                                    else if (standbyIsolationMode > 0)
+                                        p.ProcessorAffinity = (IntPtr)CalculateCpuTopologyMask(standbyIsolationMode);
+
+                                    activeBoostedGamePids.Add(p.Id);
+                                    activeDetectedGameName = rule.GameTitle;
+
+                                    if (watchdogConfig.NotifyOnGameLaunch)
+                                    {
+                                        ShowQoLToast("🎮 Argon Oyun Kalkanı Devrede",
+                                            string.Format("'{0}' tespit edildi! {1} ve {2} aktif edildi.",
+                                                rule.GameTitle, rule.TargetPriority, rule.GetAffinityModeLabel()),
+                                            "Tamam", null, Color.FromArgb(16, 185, 129), 5, false);
+                                    }
+                                }
+                            }
+                            catch { }
+                        }
                     }
                 }
+
+                // Prune dead boosted game PIDs
+                List<int> deadGamePids = new List<int>();
+                foreach (int pid in activeBoostedGamePids)
+                {
+                    if (!currentLivingGamePids.Contains(pid))
+                        deadGamePids.Add(pid);
+                }
+                foreach (int pid in deadGamePids)
+                {
+                    activeBoostedGamePids.Remove(pid);
+                }
+
+                // Apply Background Cage if a game is active
+                if (currentLivingGamePids.Count > 0 && shouldCageBackground)
+                {
+                    foreach (string bgTarget in watchdogConfig.BackgroundCageTargets)
+                    {
+                        List<Process> bgProcs;
+                        if (runningByName.TryGetValue(bgTarget, out bgProcs))
+                        {
+                            foreach (Process bg in bgProcs)
+                            {
+                                try
+                                {
+                                    if (bg.HasExited || currentLivingGamePids.Contains(bg.Id)) continue;
+
+                                    if (!activeCagedBgPids.Contains(bg.Id))
+                                    {
+                                        BackupProcessBeforeModify(bg);
+                                        bg.PriorityClass = ProcessPriorityClass.BelowNormal;
+                                        ApplyProcessEcoQoS(bg, true);
+                                        activeCagedBgPids.Add(bg.Id);
+                                    }
+                                }
+                                catch { }
+                            }
+                        }
+                    }
+                }
+                else if (currentLivingGamePids.Count == 0 && (activeCagedBgPids.Count > 0 || deadGamePids.Count > 0))
+                {
+                    // ALL GAMES EXITED: RESTORE BACKGROUND PROCESSES AND SYSTEM TO DEFAULT!
+                    string previousGameName = activeDetectedGameName;
+                    RestoreAllWatchdogSessionProcesses();
+
+                    if (watchdogConfig.NotifyOnGameExit && !string.IsNullOrEmpty(previousGameName))
+                    {
+                        ShowQoLToast("🔄 Oyun Sona Erdi",
+                            string.Format("'{0}' kapandı. Arka plan süreçleri ve sistem öncelikleri orijinal haline döndürüldü.", previousGameName),
+                            "Tamam", null, Color.FromArgb(56, 189, 248), 4, false);
+                    }
+                }
+
+                UpdateWatchdogStatusBadge();
             }
             catch { }
         }

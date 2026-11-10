@@ -9,15 +9,7 @@ if not exist %CSC% (
     set CSC="C:\Windows\Microsoft.NET\Framework\v4.0.30319\csc.exe"
 )
 
-if not exist "bin\Release" mkdir "bin\Release"
-if exist "lib\*.dll" (
-    copy /Y "lib\*.dll" "bin\Release\" >nul 2>&1
-)
-if exist "app.ico" (
-    copy /Y "app.ico" "bin\Release\" >nul 2>&1
-)
-
-set OUT_EXE=bin\Release\Argon_UltraLowLatency_v4.0.exe
+set OUT_EXE=Argon_UltraLowLatency_v4.0.exe
 
 :: If the target EXE is locked by a running instance, rename it aside so CSC can write a fresh binary
 if exist "%OUT_EXE%.old" del /f /q "%OUT_EXE%.old" >nul 2>&1

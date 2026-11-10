@@ -59,12 +59,12 @@ Uygulama; arka planı belirsiz toplu kayıt defteri betikleri yerine, her bir si
 | **Donanım (Hardware)** | AMD CPU, Intel CPU, AMD GPU ve NVIDIA GPU mimari optimizasyon matrisi. |
 | **Ağ (Network)** | TCPACKFrequency, TCPNoDelay, NetAdapter offload ayarları ve Winsock yapılandırması. |
 | **Timer** | NT Timer resolution, Win32 Quantum, C-States, çekirdek park etme ve HID kuyruk boyutu. |
-| **Grafik (Graphics)** | DWM Multiplane Overlay (MPO), FSO, DXGI flip modeli ve EcoQoS yapılandırması. |
-| **Sistem (System)** | Güvenli ChrisTitusTech/winutil türevi sistem ayarları, hazırda bekletme ve IPv4 önceliklendirmesi. |
+| **Grafik (Graphics)** | DWM Multiplane Overlay (MPO), FSO, DXGI flip modeli, oyun bazlı GPU tercihleri ve EcoQoS yapılandırması. |
+| **Sistem (System)** | Güvenli ChrisTitusTech/winutil türevi sistem ayarları, Gelişmiş İşlemci Güç Yöneticisi (EPP/Boost/Core Parking), hazırda bekletme ve IPv4 önceliklendirmesi. |
 | **Kernel** | Sentetik darbe thread'i (Anti-C1E), SMT mantıksal çekirdek izolasyonu ve TCP congestion sağlayıcıları. |
-| **İşlemler (Processes)** | Çalışan süreçlerin CPU önceliği, çekirdek ataması (Affinity) ve bellek izlemesi. |
+| **İşlemler (Processes)** | Otomatik Oyun Nöbetçisi (Per-Game Watchdog + Arka Plan EcoQoS Kafesi), CPU önceliği ve 3D V-Cache / P-Core çekirdek ataması. |
 | **Otomasyon (Automation)** | Güç zamanlayıcısı, periyodik kripto/rutin alarmları, oyun notları ve bellek otomasyonu. |
-| **Tanı Test (Diagnostics)** | 25 iterasyonlu NT Sleep kararlılık analizi, çift hedefli Ping RTT testi ve HID yoklama ölçümü. |
+| **Tanı Test (Diagnostics)** | 25 iterasyonlu NT Sleep kararlılık analizi, çift hedefli Ping RTT testi, HID yoklama ölçümü, DXGI / Flip-Model Sunum Tanısı ve PresentMon destekli A/B Kare Zamanı (%1 / %0.1 Low) Laboratuvarı. |
 | **Günlük (Event Log)** | İşlem günlüğü, oturum bildirimleri ve StateVault durum denetim kayıtları. |
 | **Ayarlar (Settings)** | Sensör yoklama sıklığı, pencere geometrisi, özel profil yönetimi (`.argon`) ve dil seçimi. |
 
@@ -78,8 +78,8 @@ Proje, harici bir paket yöneticisi gerektirmeksizin Windows üzerinde standart 
 build.bat
 ```
 
-Derleme işlemi sonrasında çalıştırılabilir dosya doğrudan üretilir:
-`bin\Release\Argon_UltraLowLatency_v4.0.exe`
+Derleme işlemi sonrasında çalıştırılabilir dosya doğrudan ana klasörde üretilir:
+`Argon_UltraLowLatency_v4.0.exe` (bağımlı DLL dosyalarını otomatik olarak `lib\` klasöründen yükler).
 
 Visual Studio kullanıcıları `ArgonLatencyStudio.sln` çözümünü açarak **Release | x64** hedefiyle derleyebilir.
 

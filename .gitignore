@@ -2,6 +2,7 @@
 bin/
 obj/
 *.exe
+*.exe.old
 *.pdb
 *.user
 *.suo
