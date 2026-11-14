@@ -6,6 +6,14 @@ Argon, sistemde ne değiştirdiğini gizleyen toplu kayıt defteri betikleri yer
 
 ---
 
+## İndirme
+
+Hazır derlenmiş x64 sürümü [Releases](https://github.com/Mirac35/Argon-Latency-Software/releases/latest) sayfasından indirebilirsiniz.
+
+Arşivi açtıktan sonra `Argon_UltraLowLatency_v4.0.exe` dosyasını çalıştırmanız yeterlidir (`lib\` klasörü aynı dizinde bulunmalıdır).
+
+---
+
 ## Neler Yapabilirsiniz?
 
 ### Sisteminizi ve Canlı Sensörleri İzleyin
