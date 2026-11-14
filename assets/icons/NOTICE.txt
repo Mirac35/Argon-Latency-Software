@@ -1,0 +1,11 @@
+Argon Studio Icon Pack Attribution
+==================================
+
+- UI & Hardware Category Icons (*.png):
+  Lucide Icons (https://lucide.dev)
+  License: ISC License
+
+- Hardware Vendor Logos (brand_amd.png, brand_intel.png, brand_nvidia.png):
+  Simple Icons (https://simpleicons.org)
+  License: CC0 1.0 Universal (Public Domain Dedication)
+  Note: Company logos are trademarks of their respective owners and are used strictly for hardware identification.

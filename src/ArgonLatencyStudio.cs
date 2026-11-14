@@ -16,6 +16,19 @@ using System.Windows.Forms;
 using Microsoft.Win32;
 using LibreHardwareMonitor.Hardware;
 
+[assembly: AssemblyTitle("Argon Low Latency Studio")]
+[assembly: AssemblyDescription("Windows Gaming Latency & System Diagnostics Studio")]
+[assembly: AssemblyConfiguration("Release")]
+[assembly: AssemblyCompany("Argon Latency Labs")]
+[assembly: AssemblyProduct("Argon Latency Studio v4.0")]
+[assembly: AssemblyCopyright("Copyright © 2026 Argon Latency Labs")]
+[assembly: AssemblyTrademark("Argon")]
+[assembly: AssemblyCulture("")]
+[assembly: ComVisible(false)]
+[assembly: Guid("8e2b7e12-4f39-4a9c-9c12-3b4a5d6e7f80")]
+[assembly: AssemblyVersion("4.0.0.0")]
+[assembly: AssemblyFileVersion("4.0.0.0")]
+
 namespace ArgonLatencyStudio
 {
     static class Program
@@ -79,6 +92,8 @@ namespace ArgonLatencyStudio
                 string renderPath = null;
                 int renderTab = -1;
                 string renderLang = null;
+                string renderPage = null;
+                string renderTheme = null;
                 for (int i = 0; i < args.Length; i++)
                 {
                     if (string.Equals(args[i], "--render-ui", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
@@ -93,19 +108,34 @@ namespace ArgonLatencyStudio
                     {
                         renderLang = args[i + 1];
                     }
+                    else if (string.Equals(args[i], "--page", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+                    {
+                        renderPage = args[i + 1];
+                    }
+                    else if (string.Equals(args[i], "--theme", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+                    {
+                        renderTheme = args[i + 1];
+                    }
                 }
 
                 if (!string.IsNullOrEmpty(renderPath))
                 {
                     try
                     {
+                        if (!string.IsNullOrEmpty(renderTheme))
+                            ArgonTheme.IsLightMode = !string.Equals(renderTheme, "dark", StringComparison.OrdinalIgnoreCase);
+
                         using (MainForm rForm = new MainForm(args))
                         {
                             if (!string.IsNullOrEmpty(renderLang))
                             {
                                 rForm.ApplyLanguage(renderLang);
                             }
-                            if (renderTab >= 0)
+                            if (!string.IsNullOrEmpty(renderPage))
+                            {
+                                rForm.NavigateToPageKey(renderPage, false);
+                            }
+                            else if (renderTab >= 0)
                             {
                                 rForm.SwitchActiveTab(renderTab);
                             }
@@ -283,6 +313,145 @@ namespace ArgonLatencyStudio
 
         [DllImport("user32.dll")]
         public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+        // Win32 Low-Level Mouse Interop for Linux-like Scrolling Engine
+        public const int WH_MOUSE_LL = 14;
+
+        public const int WM_MOUSEMOVE = 0x0200;
+        public const int WM_LBUTTONDOWN = 0x0201;
+        public const int WM_LBUTTONUP = 0x0202;
+        public const int WM_RBUTTONDOWN = 0x0204;
+        public const int WM_RBUTTONUP = 0x0205;
+        public const int WM_MBUTTONDOWN = 0x0207;
+        public const int WM_MBUTTONUP = 0x0208;
+        public const int WM_MOUSEWHEEL = 0x020A;
+        public const int WM_XBUTTONDOWN = 0x020B;
+        public const int WM_XBUTTONUP = 0x020C;
+        public const int WM_MOUSEHWHEEL = 0x020E;
+
+        public const uint MOUSEEVENTF_MOVE = 0x0001;
+        public const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
+        public const uint MOUSEEVENTF_LEFTUP = 0x0004;
+        public const uint MOUSEEVENTF_RIGHTDOWN = 0x0008;
+        public const uint MOUSEEVENTF_RIGHTUP = 0x0010;
+        public const uint MOUSEEVENTF_MIDDLEDOWN = 0x0020;
+        public const uint MOUSEEVENTF_MIDDLEUP = 0x0040;
+        public const uint MOUSEEVENTF_XDOWN = 0x0080;
+        public const uint MOUSEEVENTF_XUP = 0x0100;
+        public const uint MOUSEEVENTF_WHEEL = 0x0800;
+        public const uint MOUSEEVENTF_HWHEEL = 0x1000;
+        public const uint INPUT_MOUSE = 0;
+        public const int WM_QUIT = 0x0012;
+        public const uint PM_NOREMOVE = 0x0000;
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct POINT
+        {
+            public int x;
+            public int y;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct MSG
+        {
+            public IntPtr hwnd;
+            public uint message;
+            public UIntPtr wParam;
+            public IntPtr lParam;
+            public uint time;
+            public POINT pt;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct MOUSEINPUT
+        {
+            public int dx;
+            public int dy;
+            public int mouseData;
+            public uint dwFlags;
+            public uint time;
+            public UIntPtr dwExtraInfo;
+        }
+
+        [StructLayout(LayoutKind.Explicit)]
+        public struct INPUTUNION
+        {
+            [FieldOffset(0)]
+            public MOUSEINPUT mi;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct INPUT
+        {
+            public uint type;
+            public INPUTUNION u;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct MSLLHOOKSTRUCT
+        {
+            public POINT pt;
+            public uint mouseData;
+            public uint flags;
+            public uint time;
+            public IntPtr dwExtraInfo;
+        }
+
+        public delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern IntPtr SetWindowsHookEx(int idHook, LowLevelMouseProc lpfn, IntPtr hMod, uint dwThreadId);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool UnhookWindowsHookEx(IntPtr hhk);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+        public static extern IntPtr GetModuleHandle(string lpModuleName);
+
+        [DllImport("kernel32.dll")]
+        public static extern uint GetCurrentThreadId();
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern void mouse_event(uint dwFlags, uint dx, uint dy, int dwData, UIntPtr dwExtraInfo);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool GetCursorPos(out POINT lpPoint);
+
+        [DllImport("user32.dll")]
+        public static extern int GetMessage(out MSG lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool PeekMessage(out MSG lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax, uint wRemoveMsg);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool TranslateMessage(ref MSG lpMsg);
+
+        [DllImport("user32.dll")]
+        public static extern IntPtr DispatchMessage(ref MSG lpMsg);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool PostThreadMessage(uint idThread, uint Msg, UIntPtr wParam, IntPtr lParam);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern IntPtr WindowFromPoint(POINT Point);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern IntPtr GetAncestor(IntPtr hWnd, uint gaFlags);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool SetForegroundWindow(IntPtr hWnd);
 
         [DllImport("user32.dll", SetLastError = true)]
         public static extern bool SystemParametersInfo(uint uiAction, uint uiParam, IntPtr pvParam, uint fWinIni);
@@ -620,6 +789,89 @@ namespace ArgonLatencyStudio
             public float MaxLuminance;
             public float MaxFullFrameLuminance;
         }
+
+        // Win32 Raw Input API (user32.dll) for InputLab Host Delivery Timing & HID Enumeration
+        public const int WM_INPUT = 0x00FF;
+        public const uint RID_INPUT = 0x10000003;
+        public const uint RIDI_DEVICENAME = 0x20000007;
+        public const uint RIM_TYPEMOUSE = 0;
+        public const uint RIM_TYPEKEYBOARD = 1;
+        public const uint RIM_TYPEHID = 2;
+        public const ushort HID_USAGE_PAGE_GENERIC = 0x01;
+        public const ushort HID_USAGE_GENERIC_MOUSE = 0x02;
+        public const uint RIDEV_REMOVE = 0x00000001;
+        public const uint RIDEV_INPUTSINK = 0x00000100;
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct RAWINPUTDEVICELIST
+        {
+            public IntPtr hDevice;
+            public uint dwType;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct RAWINPUTDEVICE
+        {
+            public ushort usUsagePage;
+            public ushort usUsage;
+            public uint dwFlags;
+            public IntPtr hwndTarget;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct RAWINPUTHEADER
+        {
+            public uint dwType;
+            public uint dwSize;
+            public IntPtr hDevice;
+            public IntPtr wParam;
+        }
+
+        // Matches Win32 tagRAWMOUSE union alignment strictly (2-byte padding after usFlags)
+        [StructLayout(LayoutKind.Sequential)]
+        public struct RAWMOUSE
+        {
+            public ushort usFlags;
+            private ushort usPadding;
+            public ushort usButtonFlags;
+            public ushort usButtonData;
+            public uint ulRawButtons;
+            public int lLastX;
+            public int lLastY;
+            public uint ulExtraInformation;
+        }
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern uint GetRawInputDeviceList(IntPtr pRawInputDeviceList, ref uint puiNumDevices, uint cbSize);
+
+        [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        public static extern uint GetRawInputDeviceInfo(IntPtr hDevice, uint uiCommand, IntPtr pData, ref uint pcbSize);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern bool RegisterRawInputDevices([MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)] RAWINPUTDEVICE[] pRawInputDevices, uint uiNumDevices, uint cbSize);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern uint GetRawInputData(IntPtr hRawInput, uint uiCommand, IntPtr pData, ref uint pcbSize, uint cbSizeHeader);
+
+        public static string GetRawInputDeviceNameSafe(IntPtr hDevice)
+        {
+            if (hDevice == IntPtr.Zero) return "";
+            uint charCount = 0;
+            GetRawInputDeviceInfo(hDevice, RIDI_DEVICENAME, IntPtr.Zero, ref charCount);
+            if (charCount == 0 || charCount > 4096) return "";
+            IntPtr pData = Marshal.AllocHGlobal((int)(charCount * 2 + 4));
+            try
+            {
+                if (GetRawInputDeviceInfo(hDevice, RIDI_DEVICENAME, pData, ref charCount) != uint.MaxValue)
+                    return Marshal.PtrToStringUni(pData) ?? "";
+            }
+            catch { }
+            finally
+            {
+                Marshal.FreeHGlobal(pData);
+            }
+            return "";
+        }
     }
 
     #endregion
@@ -644,20 +896,236 @@ namespace ArgonLatencyStudio
     public class DetectedHardwareInfo
     {
         public string CpuName = "Bilinmeyen İşlemci";
+        public string CpuManufacturer = "";
+        public string CpuSocket = "";
+        public int CpuMaxClockMhz = 0;
+        public int CpuL2CacheKb = 0;
+        public int CpuL3CacheKb = 0;
         public int PhysicalCores = 6;
         public int LogicalThreads = 12;
+
         public string GpuName = "Bilinmeyen Ekran Kartı";
+        public string GpuDriverVersion = "";
+        public string GpuDriverDate = "";
+        public ulong GpuVramMb = 0;
+
+        public string BaseboardManufacturer = "";
+        public string BaseboardProduct = "";
+        public string BiosVersion = "";
+        public string BiosDate = "";
+
+        public string RamTypeLabel = "";
+        public int RamSpeedMhz = 0;
+        public List<string> RamModules = new List<string>();
+        public List<string> StorageDrives = new List<string>();
+        public List<string> Displays = new List<string>();
+
         public string NicName = "Ethernet";
+        public long NicLinkSpeedMbps = 0;
         public double TotalRamGb = 16.0;
+        public string OsDisplayTitle = "";
         public string CurrentBootStamp = "";
+        public bool ExtendedProbed = false;
         public CpuProfileType RecommendedCpuProfile = CpuProfileType.AmdRyzenStandard;
         public GpuProfileType RecommendedGpuProfile = GpuProfileType.AmdRadeon;
+
+        private static string DecodeSmbiosMemoryType(int code)
+        {
+            if (code == 24) return "DDR3";
+            if (code == 26) return "DDR4";
+            if (code == 34) return "DDR5";
+            if (code == 20) return "DDR";
+            if (code == 21) return "DDR2";
+            if (code == 30) return "LPDDR4";
+            if (code == 35) return "LPDDR5";
+            return "";
+        }
+
+        private static string FormatWmiDate(string dmtf)
+        {
+            if (string.IsNullOrEmpty(dmtf) || dmtf.Length < 8) return "";
+            return dmtf.Substring(0, 4) + "-" + dmtf.Substring(4, 2) + "-" + dmtf.Substring(6, 2);
+        }
+
+        public void ProbeExtendedHardwareSpecs()
+        {
+            try
+            {
+                using (ManagementObjectSearcher mos = new ManagementObjectSearcher("SELECT Manufacturer, SocketDesignation, MaxClockSpeed, L2CacheSize, L3CacheSize FROM Win32_Processor"))
+                {
+                    foreach (ManagementObject mo in mos.Get())
+                    {
+                        CpuManufacturer = Convert.ToString(mo["Manufacturer"] ?? "").Trim();
+                        CpuSocket = Convert.ToString(mo["SocketDesignation"] ?? "").Trim();
+                        if (mo["MaxClockSpeed"] != null) CpuMaxClockMhz = Convert.ToInt32(mo["MaxClockSpeed"]);
+                        if (mo["L2CacheSize"] != null) CpuL2CacheKb = Convert.ToInt32(mo["L2CacheSize"]);
+                        if (mo["L3CacheSize"] != null) CpuL3CacheKb = Convert.ToInt32(mo["L3CacheSize"]);
+                        break;
+                    }
+                }
+            }
+            catch { }
+
+            try
+            {
+                using (ManagementObjectSearcher mos = new ManagementObjectSearcher("SELECT Name, DriverVersion, DriverDate, AdapterRAM FROM Win32_VideoController"))
+                {
+                    foreach (ManagementObject mo in mos.Get())
+                    {
+                        string gName = Convert.ToString(mo["Name"] ?? "").Trim();
+                        if (string.IsNullOrEmpty(gName)) continue;
+                        if (string.Equals(gName, GpuName, StringComparison.OrdinalIgnoreCase) || string.IsNullOrEmpty(GpuDriverVersion))
+                        {
+                            GpuDriverVersion = Convert.ToString(mo["DriverVersion"] ?? "").Trim();
+                            GpuDriverDate = FormatWmiDate(Convert.ToString(mo["DriverDate"] ?? "").Trim());
+                            if (mo["AdapterRAM"] != null)
+                            {
+                                ulong bytes = Convert.ToUInt64(mo["AdapterRAM"]);
+                                if (bytes > 0 && GpuVramMb == 0) GpuVramMb = bytes / (1024UL * 1024UL);
+                            }
+                            if (string.Equals(gName, GpuName, StringComparison.OrdinalIgnoreCase)) break;
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            try
+            {
+                DxgiHardwareReport dxgiRep = DxgiPresentationProbe.ProbeSystemDisplays();
+                List<DxgiAdapterInfo> dxgi = dxgiRep != null ? dxgiRep.Adapters : new List<DxgiAdapterInfo>();
+                foreach (var a in dxgi)
+                {
+                    if (!a.IsSoftware && a.DedicatedVramMb > 0)
+                    {
+                        if (GpuVramMb < a.DedicatedVramMb || (!string.IsNullOrEmpty(GpuName) && a.Description.IndexOf(GpuName, StringComparison.OrdinalIgnoreCase) >= 0))
+                        {
+                            GpuVramMb = a.DedicatedVramMb;
+                            break;
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            try
+            {
+                using (ManagementObjectSearcher mos = new ManagementObjectSearcher("SELECT Manufacturer, Product FROM Win32_BaseBoard"))
+                {
+                    foreach (ManagementObject mo in mos.Get())
+                    {
+                        BaseboardManufacturer = Convert.ToString(mo["Manufacturer"] ?? "").Trim();
+                        BaseboardProduct = Convert.ToString(mo["Product"] ?? "").Trim();
+                        break;
+                    }
+                }
+            }
+            catch { }
+
+            try
+            {
+                using (ManagementObjectSearcher mos = new ManagementObjectSearcher("SELECT SMBIOSBIOSVersion, ReleaseDate FROM Win32_BIOS"))
+                {
+                    foreach (ManagementObject mo in mos.Get())
+                    {
+                        BiosVersion = Convert.ToString(mo["SMBIOSBIOSVersion"] ?? "").Trim();
+                        BiosDate = FormatWmiDate(Convert.ToString(mo["ReleaseDate"] ?? "").Trim());
+                        break;
+                    }
+                }
+            }
+            catch { }
+
+            try
+            {
+                List<string> mods = new List<string>();
+                int bestSpeed = 0;
+                string bestType = "";
+                using (ManagementObjectSearcher mos = new ManagementObjectSearcher("SELECT DeviceLocator, Manufacturer, PartNumber, Capacity, Speed, ConfiguredClockSpeed, SMBIOSMemoryType FROM Win32_PhysicalMemory"))
+                {
+                    foreach (ManagementObject mo in mos.Get())
+                    {
+                        string slot = Convert.ToString(mo["DeviceLocator"] ?? "").Trim();
+                        string mfg = Convert.ToString(mo["Manufacturer"] ?? "").Trim();
+                        string part = Convert.ToString(mo["PartNumber"] ?? "").Trim();
+                        ulong capBytes = mo["Capacity"] != null ? Convert.ToUInt64(mo["Capacity"]) : 0UL;
+                        double capGb = capBytes / (1024.0 * 1024.0 * 1024.0);
+                        int clk = mo["ConfiguredClockSpeed"] != null ? Convert.ToInt32(mo["ConfiguredClockSpeed"]) : 0;
+                        if (clk <= 0 && mo["Speed"] != null) clk = Convert.ToInt32(mo["Speed"]);
+                        int smbios = mo["SMBIOSMemoryType"] != null ? Convert.ToInt32(mo["SMBIOSMemoryType"]) : 0;
+                        string tStr = DecodeSmbiosMemoryType(smbios);
+                        if (clk > bestSpeed) bestSpeed = clk;
+                        if (!string.IsNullOrEmpty(tStr) && string.IsNullOrEmpty(bestType)) bestType = tStr;
+                        string mfgClean = (string.IsNullOrEmpty(mfg) || mfg.Equals("Unknown", StringComparison.OrdinalIgnoreCase)) ? "" : (mfg + " ");
+                        string partClean = (string.IsNullOrEmpty(part) || part.Equals("Unknown", StringComparison.OrdinalIgnoreCase)) ? "" : (" [" + part + "]");
+                        mods.Add(string.Format("{0}: {1:0.#} GB {2}{3} @ {4} MT/s{5}",
+                            string.IsNullOrEmpty(slot) ? "DIMM" : slot, capGb, mfgClean, string.IsNullOrEmpty(tStr) ? "RAM" : tStr, clk > 0 ? clk : 0, partClean));
+                    }
+                }
+                RamModules = mods;
+                RamSpeedMhz = bestSpeed;
+                RamTypeLabel = bestType;
+            }
+            catch { }
+
+            try
+            {
+                List<string> disks = new List<string>();
+                using (ManagementObjectSearcher mos = new ManagementObjectSearcher("SELECT Model, InterfaceType, Size FROM Win32_DiskDrive"))
+                {
+                    foreach (ManagementObject mo in mos.Get())
+                    {
+                        string model = Convert.ToString(mo["Model"] ?? "").Trim();
+                        string iface = Convert.ToString(mo["InterfaceType"] ?? "").Trim();
+                        ulong szBytes = mo["Size"] != null ? Convert.ToUInt64(mo["Size"]) : 0UL;
+                        double szGb = szBytes / (1000.0 * 1000.0 * 1000.0);
+                        if (!string.IsNullOrEmpty(model))
+                            disks.Add(string.Format("{0} ({1:0} GB{2})", model, szGb, string.IsNullOrEmpty(iface) ? "" : (", " + iface)));
+                    }
+                }
+                StorageDrives = disks;
+            }
+            catch { }
+
+            try
+            {
+                List<string> disp = new List<string>();
+                foreach (Screen sc in Screen.AllScreens)
+                {
+                    uint w, h, hz, bpp;
+                    if (NativeMethods.QueryDisplayModeMetrics(sc.DeviceName, out w, out h, out hz, out bpp))
+                    {
+                        string shortName = sc.DeviceName.Replace("\\\\.\\", "");
+                        disp.Add(string.Format("{0}: {1}x{2} @ {3} Hz{4}", shortName, w, h, hz, sc.Primary ? " [Birincil]" : ""));
+                    }
+                    else
+                    {
+                        disp.Add(string.Format("{0}: {1}x{2}{3}", sc.DeviceName.Replace("\\\\.\\", ""), sc.Bounds.Width, sc.Bounds.Height, sc.Primary ? " [Birincil]" : ""));
+                    }
+                }
+                Displays = disp;
+            }
+            catch { }
+
+            ExtendedProbed = true;
+        }
 
         public static DetectedHardwareInfo ProbeSystem()
         {
             DetectedHardwareInfo info = new DetectedHardwareInfo();
             info.LogicalThreads = Environment.ProcessorCount;
             info.PhysicalCores = Math.Max(1, info.LogicalThreads / 2);
+
+            try
+            {
+                int osMaj, osMin, osBuild, osUbr;
+                string osDispVer;
+                NativeMethods.GetRealOsVersionInfo(out osMaj, out osMin, out osBuild, out osUbr, out osDispVer);
+                string osFriendly = (osMaj >= 10 && osBuild >= 22000) ? "Windows 11" : string.Format("Windows {0}.{1}", osMaj, osMin);
+                info.OsDisplayTitle = string.Format("{0} {1} (Build {2}.{3}, {4})",
+                    osFriendly, osDispVer, osBuild, osUbr, Environment.Is64BitOperatingSystem ? "64-bit" : "32-bit").Replace("  ", " ");
+            }
+            catch { }
 
             try
             {
@@ -729,6 +1197,7 @@ namespace ArgonLatencyStudio
                         ni.NetworkInterfaceType != NetworkInterfaceType.Tunnel)
                     {
                         info.NicName = ni.Description;
+                        info.NicLinkSpeedMbps = ni.Speed > 0 ? (ni.Speed / 1000000L) : 0L;
                         break;
                     }
                 }
@@ -1000,6 +1469,9 @@ namespace ArgonLatencyStudio
         public string WindowResolutionPreset = "MEDIUM"; // "COMPACT" (1280x820), "MEDIUM" (1380x890), "LARGE" (1560x960), "EXTRA_LARGE" (1720x1020)
         public bool LockFixedResolution = true;
         public string AppLanguage = "TR"; // "TR" or "EN"
+        public string UiThemeMode = "DARK"; // "DARK" (Default) or "LIGHT" (Winaero Native)
+        public bool StartMinimizedToTray = true;
+        public string BookmarkedPagesRaw = "";
 
         public void Save(string path)
         {
@@ -1021,7 +1493,10 @@ namespace ArgonLatencyStudio
                     "ConfirmCriticalTweaks|" + ConfirmCriticalTweaks,
                     "RevertOnExit|" + RevertOnExit,
                     "ActiveProfileName|" + (ActiveProfileName ?? "Varsayılan (Son Oturum)"),
-                    "AppLanguage|" + (AppLanguage ?? "TR")
+                    "AppLanguage|" + (AppLanguage ?? "TR"),
+                    "UiThemeMode|" + (UiThemeMode ?? "DARK"),
+                    "StartMinimizedToTray|" + StartMinimizedToTray,
+                    "BookmarkedPagesRaw|" + (BookmarkedPagesRaw ?? "")
                 };
                 StateVault.WriteAllLinesAtomic(path, lines.ToArray());
             }
@@ -1057,6 +1532,9 @@ namespace ArgonLatencyStudio
                     else if (k == "RevertOnExit" && bool.TryParse(v, out b)) s.RevertOnExit = b;
                     else if (k == "ActiveProfileName" && !string.IsNullOrEmpty(v)) s.ActiveProfileName = v;
                     else if (k == "AppLanguage" && !string.IsNullOrEmpty(v)) s.AppLanguage = v.Trim().ToUpperInvariant();
+                    else if (k == "UiThemeMode" && !string.IsNullOrEmpty(v)) s.UiThemeMode = v.Trim().ToUpperInvariant();
+                    else if (k == "StartMinimizedToTray" && bool.TryParse(v, out b)) s.StartMinimizedToTray = b;
+                    else if (k == "BookmarkedPagesRaw") s.BookmarkedPagesRaw = v ?? "";
                 }
             }
             catch { }
@@ -1916,6 +2394,922 @@ namespace ArgonLatencyStudio
 
     #endregion
 
+    #region Linux-like Trackball & Mouse Scrolling Engine (MarbleScrollPlus Integration)
+
+    public enum ScrollTriggerButton
+    {
+        MiddleClick = 0,
+        XButton1 = 1,
+        XButton2 = 2
+    }
+
+    public class LinuxlikeScrollAxisConfig
+    {
+        public bool Enabled = true;
+        public bool Invert = false;
+        public int Sensitivity = 1;
+        public int Speed = 10;
+        public bool Smoothing = false;
+
+        public int Multiplier
+        {
+            get { return (Invert ? -1 : 1) * Speed * Sensitivity; }
+        }
+    }
+
+    public class LinuxlikeScrollConfig
+    {
+        public bool AutoStartWithArgon = true;
+        public bool Enabled = true;
+        public ScrollTriggerButton Trigger = ScrollTriggerButton.MiddleClick;
+        public bool AxisLock = true;
+        public int AxisDetectPx = 4;
+
+        public LinuxlikeScrollAxisConfig Vertical = new LinuxlikeScrollAxisConfig
+        {
+            Enabled = true,
+            Invert = true,
+            Sensitivity = 1,
+            Speed = 8,
+            Smoothing = true
+        };
+
+        public LinuxlikeScrollAxisConfig Horizontal = new LinuxlikeScrollAxisConfig
+        {
+            Enabled = true,
+            Invert = false,
+            Sensitivity = 1,
+            Speed = 12,
+            Smoothing = true
+        };
+
+        public void ResetToDefaults()
+        {
+            AutoStartWithArgon = true;
+            Trigger = ScrollTriggerButton.MiddleClick;
+            AxisLock = true;
+            AxisDetectPx = 4;
+
+            Vertical.Enabled = true;
+            Vertical.Invert = true;
+            Vertical.Sensitivity = 1;
+            Vertical.Speed = 8;
+            Vertical.Smoothing = true;
+
+            Horizontal.Enabled = true;
+            Horizontal.Invert = false;
+            Horizontal.Sensitivity = 1;
+            Horizontal.Speed = 12;
+            Horizontal.Smoothing = true;
+        }
+
+        public void SaveToFile(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return;
+            try
+            {
+                List<string> lines = new List<string>
+                {
+                    "ARGON_LINUXLIKE_SCROLL_CONFIG|2",
+                    "AutoStartWithArgon|" + AutoStartWithArgon,
+                    "Enabled|" + Enabled,
+                    "Trigger|" + Trigger,
+                    "AxisLock|" + AxisLock,
+                    "AxisDetectPx|" + Math.Max(2, Math.Min(16, AxisDetectPx)),
+                    "VertEnabled|" + Vertical.Enabled,
+                    "VertInvert|" + Vertical.Invert,
+                    "VertSens|" + Vertical.Sensitivity,
+                    "VertSpeed|" + Vertical.Speed,
+                    "VertSmoothing|" + Vertical.Smoothing,
+                    "HorizEnabled|" + Horizontal.Enabled,
+                    "HorizInvert|" + Horizontal.Invert,
+                    "HorizSens|" + Horizontal.Sensitivity,
+                    "HorizSpeed|" + Horizontal.Speed,
+                    "HorizSmoothing|" + Horizontal.Smoothing
+                };
+                StateVault.WriteAllLinesAtomic(path, lines.ToArray());
+            }
+            catch { }
+        }
+
+        public static LinuxlikeScrollConfig LoadFromFile(string path)
+        {
+            LinuxlikeScrollConfig cfg = new LinuxlikeScrollConfig();
+            try
+            {
+                if (!File.Exists(path))
+                {
+                    // Auto-import user's existing MarbleScrollPlus registry preferences on first run
+                    try
+                    {
+                        using (RegistryKey root = Registry.CurrentUser.OpenSubKey(@"Software\thp.io\MarbleScrollPlus"))
+                        {
+                            if (root != null)
+                            {
+                                object ax = root.GetValue("axislock");
+                                if (ax != null) cfg.AxisLock = (Convert.ToInt32(ax) != 0);
+
+                                using (RegistryKey vk = root.OpenSubKey("Vertical"))
+                                {
+                                    if (vk != null)
+                                    {
+                                        object en = vk.GetValue("enabled");
+                                        if (en != null) cfg.Vertical.Enabled = (Convert.ToInt32(en) != 0);
+                                        object inv = vk.GetValue("invert");
+                                        if (inv != null) cfg.Vertical.Invert = (Convert.ToInt32(inv) != 0);
+                                    }
+                                }
+
+                                using (RegistryKey hk = root.OpenSubKey("Horizontal"))
+                                {
+                                    if (hk != null)
+                                    {
+                                        object en = hk.GetValue("enabled");
+                                        if (en != null) cfg.Horizontal.Enabled = (Convert.ToInt32(en) != 0);
+                                        object inv = hk.GetValue("invert");
+                                        if (inv != null) cfg.Horizontal.Invert = (Convert.ToInt32(inv) != 0);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+
+                    // Do not silently contend if standalone MarbleScrollPlus is actively running
+                    if (LinuxlikeScrollEngine.DetectExternalProcess())
+                    {
+                        cfg.Enabled = false;
+                    }
+
+                    cfg.SaveToFile(path);
+                    return cfg;
+                }
+
+                int configVersion = 1;
+                foreach (string line in File.ReadAllLines(path, Encoding.UTF8))
+                {
+                    if (string.IsNullOrWhiteSpace(line)) continue;
+                    string[] parts = line.Split('|');
+                    if (parts.Length < 2) continue;
+                    string key = parts[0].Trim();
+                    string val = parts[1].Trim();
+
+                    if (key == "ARGON_LINUXLIKE_SCROLL_CONFIG")
+                    {
+                        int.TryParse(val, out configVersion);
+                    }
+                    else if (key == "AutoStartWithArgon") bool.TryParse(val, out cfg.AutoStartWithArgon);
+                    else if (key == "Enabled") bool.TryParse(val, out cfg.Enabled);
+                    else if (key == "Trigger")
+                    {
+                        try { cfg.Trigger = (ScrollTriggerButton)Enum.Parse(typeof(ScrollTriggerButton), val, true); } catch { }
+                    }
+                    else if (key == "AxisLock") bool.TryParse(val, out cfg.AxisLock);
+                    else if (key == "AxisDetectPx")
+                    {
+                        int v;
+                        if (int.TryParse(val, out v)) cfg.AxisDetectPx = Math.Max(2, Math.Min(16, v));
+                    }
+                    else if (key == "VertEnabled") bool.TryParse(val, out cfg.Vertical.Enabled);
+                    else if (key == "VertInvert") bool.TryParse(val, out cfg.Vertical.Invert);
+                    else if (key == "VertSens")
+                    {
+                        int v;
+                        if (int.TryParse(val, out v)) cfg.Vertical.Sensitivity = Math.Max(1, Math.Min(20, v));
+                    }
+                    else if (key == "VertSpeed")
+                    {
+                        int v;
+                        if (int.TryParse(val, out v)) cfg.Vertical.Speed = Math.Max(1, Math.Min(30, v));
+                    }
+                    else if (key == "VertSmoothing") bool.TryParse(val, out cfg.Vertical.Smoothing);
+                    else if (key == "HorizEnabled") bool.TryParse(val, out cfg.Horizontal.Enabled);
+                    else if (key == "HorizInvert") bool.TryParse(val, out cfg.Horizontal.Invert);
+                    else if (key == "HorizSens")
+                    {
+                        int v;
+                        if (int.TryParse(val, out v)) cfg.Horizontal.Sensitivity = Math.Max(1, Math.Min(20, v));
+                    }
+                    else if (key == "HorizSpeed")
+                    {
+                        int v;
+                        if (int.TryParse(val, out v)) cfg.Horizontal.Speed = Math.Max(1, Math.Min(30, v));
+                    }
+                    else if (key == "HorizSmoothing") bool.TryParse(val, out cfg.Horizontal.Smoothing);
+                }
+
+                // Upgrade untouched v1 quantized defaults cleanly to sharp 1:1 pixel mode
+                if (configVersion < 2 && cfg.Vertical.Sensitivity == 3 && cfg.Vertical.Speed == 7 && !cfg.Vertical.Smoothing)
+                {
+                    cfg.Vertical.Sensitivity = 1;
+                    cfg.Vertical.Speed = 8;
+                    cfg.Vertical.Smoothing = true;
+                    cfg.Horizontal.Sensitivity = 1;
+                    cfg.Horizontal.Speed = 12;
+                    cfg.Horizontal.Smoothing = true;
+                    cfg.AxisDetectPx = 4;
+                    cfg.SaveToFile(path);
+                }
+            }
+            catch { }
+            return cfg;
+        }
+    }
+
+    /// <summary>
+    /// High-responsiveness Windows WH_MOUSE_LL 1:1 scroll engine with fast directional axis lock,
+    /// sub-pixel accumulation, zero-inertia reversal, and direct synchronous wheel dispatch.
+    /// </summary>
+    public class LinuxlikeScrollEngine : IDisposable
+    {
+        private IntPtr hookId = IntPtr.Zero;
+        private uint hookThreadId = 0;
+        private Thread hookThread;
+        private Thread dispatchThread;
+        private ManualResetEvent hookReadyEvent;
+        private readonly AutoResetEvent dispatchWakeEvent = new AutoResetEvent(false);
+        private volatile bool hookInstallSucceeded = false;
+        private volatile bool stopRequested = false;
+
+        private NativeMethods.LowLevelMouseProc hookCallback;
+        private bool isScroll = false;
+        private bool disableTriggerUp = false;
+        private ScrollTriggerButton activeTrigger = ScrollTriggerButton.MiddleClick;
+        private int startX, startY;
+        private double fracX, fracY;
+        private int lastDirX, lastDirY;
+        private int lockedAxis; // 0: Undecided, 1: Horizontal (X), 2: Vertical (Y)
+        private int netX, netY;
+        private double recX, recY;
+
+        private int pendingWheelX = 0;
+        private int pendingWheelY = 0;
+        private int pendingTapButton = 0; // 0: none, 1: Middle, 2: X1, 3: X2
+        private int lastUiNotifyTick = 0;
+        private int uiAccumX = 0;
+        private int uiAccumY = 0;
+
+        private readonly object syncLock = new object();
+
+        private const int WHEEL_DELTA = 120;
+        private const int MAX_STEP_PX = 120;
+        private const double AXIS_LOCK_RATIO = 1.35;
+        private const double AXIS_SOFT_WINDOW = 14.0;
+        private const double AXIS_SWITCH_MIN = 8.0;
+        private const double AXIS_SWITCH_RATIO = 1.75;
+
+        private const ulong SYNTHETIC_TAG = 0x4152474EUL; // 'ARGN'
+        private static readonly UIntPtr ARGON_SYNTHETIC_MARKER = new UIntPtr(SYNTHETIC_TAG);
+        private static readonly int INPUT_SIZE = Marshal.SizeOf(typeof(NativeMethods.INPUT));
+
+        public LinuxlikeScrollConfig Config { get; set; }
+        public bool IsRunning
+        {
+            get { return !stopRequested && hookId != IntPtr.Zero && hookThread != null && hookThread.IsAlive; }
+        }
+
+        public event Action<bool> StateChanged;
+        public event Action<int, int> Scrolled;
+
+        public LinuxlikeScrollEngine(LinuxlikeScrollConfig config)
+        {
+            this.Config = config ?? new LinuxlikeScrollConfig();
+            this.hookCallback = new NativeMethods.LowLevelMouseProc(this.HookProc);
+        }
+
+        /// <summary>
+        /// Installs the global WH_MOUSE_LL hook on a dedicated STA native message-loop thread
+        /// and dispatches coalesced SendInput events on a separate worker thread to prevent UI freezes.
+        /// </summary>
+        public bool Start()
+        {
+            bool startedOk = false;
+            lock (syncLock)
+            {
+                if (!stopRequested && hookId != IntPtr.Zero && hookThread != null && hookThread.IsAlive)
+                {
+                    return true;
+                }
+
+                StopLocked();
+
+                stopRequested = false;
+                hookInstallSucceeded = false;
+                hookId = IntPtr.Zero;
+                hookThreadId = 0;
+                isScroll = false;
+                disableTriggerUp = false;
+                pendingWheelX = 0;
+                pendingWheelY = 0;
+                pendingTapButton = 0;
+                uiAccumX = 0;
+                uiAccumY = 0;
+
+                if (hookReadyEvent != null)
+                {
+                    try { hookReadyEvent.Close(); } catch { }
+                    hookReadyEvent = null;
+                }
+                hookReadyEvent = new ManualResetEvent(false);
+
+                dispatchThread = new Thread(DispatchLoop);
+                dispatchThread.Name = "Argon-ScrollDispatch";
+                dispatchThread.IsBackground = true;
+                dispatchThread.Priority = ThreadPriority.AboveNormal;
+                dispatchThread.Start();
+
+                hookThread = new Thread(HookThreadLoop);
+                hookThread.Name = "Argon-MouseHook";
+                hookThread.IsBackground = true;
+                hookThread.Priority = ThreadPriority.Highest;
+                hookThread.SetApartmentState(ApartmentState.STA);
+                hookThread.Start();
+
+                hookReadyEvent.WaitOne(2500);
+                startedOk = hookInstallSucceeded && hookId != IntPtr.Zero;
+
+                if (!startedOk)
+                {
+                    StopLocked();
+                }
+            }
+
+            Action<bool> handler = StateChanged;
+            if (handler != null)
+            {
+                try { handler(startedOk); } catch { }
+            }
+            return startedOk;
+        }
+
+        public void Stop()
+        {
+            lock (syncLock)
+            {
+                StopLocked();
+            }
+
+            Action<bool> handler = StateChanged;
+            if (handler != null)
+            {
+                try { handler(false); } catch { }
+            }
+        }
+
+        private void StopLocked()
+        {
+            stopRequested = true;
+            isScroll = false;
+            disableTriggerUp = false;
+            Interlocked.Exchange(ref pendingWheelX, 0);
+            Interlocked.Exchange(ref pendingWheelY, 0);
+            Interlocked.Exchange(ref pendingTapButton, 0);
+
+            uint tid = hookThreadId;
+            if (tid != 0)
+            {
+                try { NativeMethods.PostThreadMessage(tid, NativeMethods.WM_QUIT, UIntPtr.Zero, IntPtr.Zero); } catch { }
+            }
+
+            try { dispatchWakeEvent.Set(); } catch { }
+
+            if (hookThread != null && Thread.CurrentThread != hookThread)
+            {
+                try { hookThread.Join(600); } catch { }
+            }
+            if (dispatchThread != null && Thread.CurrentThread != dispatchThread)
+            {
+                try { dispatchThread.Join(600); } catch { }
+            }
+
+            if (hookId != IntPtr.Zero)
+            {
+                try { NativeMethods.UnhookWindowsHookEx(hookId); } catch { }
+                hookId = IntPtr.Zero;
+            }
+
+            hookThread = null;
+            dispatchThread = null;
+            hookThreadId = 0;
+
+            if (hookReadyEvent != null)
+            {
+                try { hookReadyEvent.Close(); } catch { }
+                hookReadyEvent = null;
+            }
+        }
+
+        private void HookThreadLoop()
+        {
+            IntPtr installedHook = IntPtr.Zero;
+            try
+            {
+                NativeMethods.MSG initMsg;
+                NativeMethods.PeekMessage(out initMsg, IntPtr.Zero, 0, 0, NativeMethods.PM_NOREMOVE);
+                hookThreadId = NativeMethods.GetCurrentThreadId();
+
+                using (Process curProcess = Process.GetCurrentProcess())
+                using (ProcessModule curModule = curProcess.MainModule)
+                {
+                    IntPtr hMod = NativeMethods.GetModuleHandle(curModule.ModuleName);
+                    installedHook = NativeMethods.SetWindowsHookEx(NativeMethods.WH_MOUSE_LL, hookCallback, hMod, 0);
+                }
+
+                hookId = installedHook;
+                hookInstallSucceeded = (installedHook != IntPtr.Zero);
+            }
+            catch
+            {
+                installedHook = IntPtr.Zero;
+                hookId = IntPtr.Zero;
+                hookInstallSucceeded = false;
+            }
+            finally
+            {
+                ManualResetEvent ev = hookReadyEvent;
+                if (ev != null)
+                {
+                    try { ev.Set(); } catch { }
+                }
+            }
+
+            if (installedHook == IntPtr.Zero)
+            {
+                return;
+            }
+
+            try
+            {
+                NativeMethods.MSG msg;
+                int ret;
+                while (!stopRequested && (ret = NativeMethods.GetMessage(out msg, IntPtr.Zero, 0, 0)) > 0)
+                {
+                    NativeMethods.TranslateMessage(ref msg);
+                    NativeMethods.DispatchMessage(ref msg);
+                }
+            }
+            catch { }
+            finally
+            {
+                if (installedHook != IntPtr.Zero)
+                {
+                    try { NativeMethods.UnhookWindowsHookEx(installedHook); } catch { }
+                    if (hookId == installedHook) hookId = IntPtr.Zero;
+                }
+            }
+        }
+
+        private void DispatchLoop()
+        {
+            while (!stopRequested)
+            {
+                try
+                {
+                    dispatchWakeEvent.WaitOne(250);
+                }
+                catch
+                {
+                    break;
+                }
+
+                if (stopRequested) break;
+
+                int tap = Interlocked.Exchange(ref pendingTapButton, 0);
+                if (tap != 0)
+                {
+                    SendSyntheticClick(tap);
+                }
+
+                while (!stopRequested)
+                {
+                    int dx = Interlocked.Exchange(ref pendingWheelX, 0);
+                    int dy = Interlocked.Exchange(ref pendingWheelY, 0);
+                    if (dx == 0 && dy == 0) break;
+
+                    SendWheelBatch(dx, dy);
+
+                    uiAccumX += dx;
+                    uiAccumY += dy;
+                    int nowTick = Environment.TickCount;
+                    if (Math.Abs(nowTick - lastUiNotifyTick) >= 50)
+                    {
+                        lastUiNotifyTick = nowTick;
+                        int repX = uiAccumX;
+                        int repY = uiAccumY;
+                        uiAccumX = 0;
+                        uiAccumY = 0;
+                        Action<int, int> scHandler = Scrolled;
+                        if (scHandler != null)
+                        {
+                            try { scHandler(repX, repY); } catch { }
+                        }
+                    }
+
+                    // Coalesce ultra-high polling rate bursts (~250Hz max dispatch cadence)
+                    if (!stopRequested && (Thread.VolatileRead(ref pendingWheelX) != 0 || Thread.VolatileRead(ref pendingWheelY) != 0))
+                    {
+                        Thread.Sleep(4);
+                    }
+                }
+            }
+        }
+
+        private static void SendWheelBatch(int dx, int dy)
+        {
+            int count = (dx != 0 ? 1 : 0) + (dy != 0 ? 1 : 0);
+            if (count == 0) return;
+
+            NativeMethods.INPUT[] inputs = new NativeMethods.INPUT[count];
+            int idx = 0;
+            if (dx != 0)
+            {
+                inputs[idx].type = NativeMethods.INPUT_MOUSE;
+                inputs[idx].u.mi = new NativeMethods.MOUSEINPUT
+                {
+                    dx = 0,
+                    dy = 0,
+                    mouseData = dx,
+                    dwFlags = NativeMethods.MOUSEEVENTF_HWHEEL,
+                    time = 0,
+                    dwExtraInfo = ARGON_SYNTHETIC_MARKER
+                };
+                idx++;
+            }
+            if (dy != 0)
+            {
+                inputs[idx].type = NativeMethods.INPUT_MOUSE;
+                inputs[idx].u.mi = new NativeMethods.MOUSEINPUT
+                {
+                    dx = 0,
+                    dy = 0,
+                    mouseData = dy,
+                    dwFlags = NativeMethods.MOUSEEVENTF_WHEEL,
+                    time = 0,
+                    dwExtraInfo = ARGON_SYNTHETIC_MARKER
+                };
+            }
+
+            NativeMethods.SendInput((uint)count, inputs, INPUT_SIZE);
+        }
+
+        private static void SendSyntheticClick(int tapCode)
+        {
+            uint downFlag = NativeMethods.MOUSEEVENTF_MIDDLEDOWN;
+            uint upFlag = NativeMethods.MOUSEEVENTF_MIDDLEUP;
+            int mouseData = 0;
+
+            if (tapCode == 2)
+            {
+                downFlag = NativeMethods.MOUSEEVENTF_XDOWN;
+                upFlag = NativeMethods.MOUSEEVENTF_XUP;
+                mouseData = 1;
+            }
+            else if (tapCode == 3)
+            {
+                downFlag = NativeMethods.MOUSEEVENTF_XDOWN;
+                upFlag = NativeMethods.MOUSEEVENTF_XUP;
+                mouseData = 2;
+            }
+
+            NativeMethods.INPUT[] inputs = new NativeMethods.INPUT[2];
+            inputs[0].type = NativeMethods.INPUT_MOUSE;
+            inputs[0].u.mi = new NativeMethods.MOUSEINPUT
+            {
+                dx = 0,
+                dy = 0,
+                mouseData = mouseData,
+                dwFlags = downFlag,
+                time = 0,
+                dwExtraInfo = ARGON_SYNTHETIC_MARKER
+            };
+            inputs[1].type = NativeMethods.INPUT_MOUSE;
+            inputs[1].u.mi = new NativeMethods.MOUSEINPUT
+            {
+                dx = 0,
+                dy = 0,
+                mouseData = mouseData,
+                dwFlags = upFlag,
+                time = 0,
+                dwExtraInfo = ARGON_SYNTHETIC_MARKER
+            };
+            NativeMethods.SendInput(2U, inputs, INPUT_SIZE);
+        }
+
+        private IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam)
+        {
+            if (nCode < 0 || stopRequested)
+            {
+                return NativeMethods.CallNextHookEx(hookId, nCode, wParam, lParam);
+            }
+
+            try
+            {
+                NativeMethods.MSLLHOOKSTRUCT hookStruct = (NativeMethods.MSLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(NativeMethods.MSLLHOOKSTRUCT));
+
+                // Always pass through synthetic mouse events emitted by Argon itself
+                if (unchecked((ulong)hookStruct.dwExtraInfo.ToInt64()) == SYNTHETIC_TAG)
+                {
+                    return NativeMethods.CallNextHookEx(hookId, nCode, wParam, lParam);
+                }
+
+                LinuxlikeScrollConfig cfg = Config;
+                if (cfg == null)
+                {
+                    return NativeMethods.CallNextHookEx(hookId, nCode, wParam, lParam);
+                }
+
+                int msg = unchecked((int)wParam.ToInt64());
+                ScrollTriggerButton trigger = cfg.Trigger;
+                bool isTriggerDown = false;
+                bool isTriggerUp = false;
+
+                if (trigger == ScrollTriggerButton.MiddleClick)
+                {
+                    isTriggerDown = (msg == NativeMethods.WM_MBUTTONDOWN);
+                    isTriggerUp = (msg == NativeMethods.WM_MBUTTONUP);
+                }
+                else if (trigger == ScrollTriggerButton.XButton1)
+                {
+                    int btn = (int)((hookStruct.mouseData >> 16) & 0xFFFF);
+                    isTriggerDown = (msg == NativeMethods.WM_XBUTTONDOWN && btn == 1);
+                    isTriggerUp = (msg == NativeMethods.WM_XBUTTONUP && btn == 1);
+                }
+                else if (trigger == ScrollTriggerButton.XButton2)
+                {
+                    int btn = (int)((hookStruct.mouseData >> 16) & 0xFFFF);
+                    isTriggerDown = (msg == NativeMethods.WM_XBUTTONDOWN && btn == 2);
+                    isTriggerUp = (msg == NativeMethods.WM_XBUTTONUP && btn == 2);
+                }
+
+                if (isTriggerDown)
+                {
+                    isScroll = true;
+                    disableTriggerUp = false;
+                    activeTrigger = trigger;
+                    startX = hookStruct.pt.x;
+                    startY = hookStruct.pt.y;
+                    fracX = 0.0;
+                    fracY = 0.0;
+                    lastDirX = 0;
+                    lastDirY = 0;
+                    lockedAxis = 0;
+                    netX = 0;
+                    netY = 0;
+                    recX = 0.0;
+                    recY = 0.0;
+                    Interlocked.Exchange(ref pendingWheelX, 0);
+                    Interlocked.Exchange(ref pendingWheelY, 0);
+                    return new IntPtr(1);
+                }
+
+                // Ensure release still matches even if trigger dropdown changed mid-drag
+                if (!isTriggerUp && isScroll)
+                {
+                    if (activeTrigger == ScrollTriggerButton.MiddleClick && msg == NativeMethods.WM_MBUTTONUP)
+                        isTriggerUp = true;
+                    else if (activeTrigger == ScrollTriggerButton.XButton1 && msg == NativeMethods.WM_XBUTTONUP && ((int)((hookStruct.mouseData >> 16) & 0xFFFF) == 1))
+                        isTriggerUp = true;
+                    else if (activeTrigger == ScrollTriggerButton.XButton2 && msg == NativeMethods.WM_XBUTTONUP && ((int)((hookStruct.mouseData >> 16) & 0xFFFF) == 2))
+                        isTriggerUp = true;
+                }
+
+                if (isTriggerUp && (isScroll || trigger == activeTrigger))
+                {
+                    bool wasDragged = disableTriggerUp;
+                    ScrollTriggerButton tapped = activeTrigger;
+                    isScroll = false;
+                    disableTriggerUp = false;
+
+                    if (wasDragged)
+                    {
+                        return new IntPtr(1);
+                    }
+                    else
+                    {
+                        int tapCode = 1;
+                        if (tapped == ScrollTriggerButton.XButton1) tapCode = 2;
+                        else if (tapped == ScrollTriggerButton.XButton2) tapCode = 3;
+                        Interlocked.Exchange(ref pendingTapButton, tapCode);
+                        dispatchWakeEvent.Set();
+                        return new IntPtr(1);
+                    }
+                }
+                else if (isScroll && msg == NativeMethods.WM_MOUSEMOVE)
+                {
+                    // Measure single-packet displacement against live OS cursor position to eliminate anchor-drift feedback loops
+                    NativeMethods.POINT curPt;
+                    int baseX = startX;
+                    int baseY = startY;
+                    if (NativeMethods.GetCursorPos(out curPt))
+                    {
+                        baseX = curPt.x;
+                        baseY = curPt.y;
+                    }
+
+                    int stepX = hookStruct.pt.x - baseX;
+                    int stepY = hookStruct.pt.y - baseY;
+
+                    if (stepX > MAX_STEP_PX) stepX = MAX_STEP_PX;
+                    else if (stepX < -MAX_STEP_PX) stepX = -MAX_STEP_PX;
+                    if (stepY > MAX_STEP_PX) stepY = MAX_STEP_PX;
+                    else if (stepY < -MAX_STEP_PX) stepY = -MAX_STEP_PX;
+
+                    if (stepX == 0 && stepY == 0)
+                    {
+                        return new IntPtr(1);
+                    }
+
+                    double decay = Math.Exp(-(Math.Abs(stepX) + Math.Abs(stepY)) / AXIS_SOFT_WINDOW);
+                    recX = recX * decay + stepX;
+                    recY = recY * decay + stepY;
+
+                    bool axisLockEnabled = cfg.AxisLock && cfg.Horizontal.Enabled && cfg.Vertical.Enabled;
+                    bool allowX = true;
+                    bool allowY = true;
+                    bool axisUndecided = false;
+                    int moveX = stepX;
+                    int moveY = stepY;
+
+                    if (axisLockEnabled)
+                    {
+                        if (lockedAxis == 0)
+                        {
+                            netX += stepX;
+                            netY += stepY;
+                            int absNetX = Math.Abs(netX);
+                            int absNetY = Math.Abs(netY);
+                            int totalNet = absNetX + absNetY;
+                            int lockMin = Math.Max(2, Math.Min(16, cfg.AxisDetectPx));
+                            int lockForce = Math.Max(4, lockMin * 2);
+                            bool dominant = (absNetY >= AXIS_LOCK_RATIO * absNetX) || (absNetX >= AXIS_LOCK_RATIO * absNetY);
+                            if ((totalNet >= lockMin && dominant) || totalNet >= lockForce)
+                            {
+                                lockedAxis = (absNetY >= absNetX) ? 2 : 1; // 1 = Horizontal (X), 2 = Vertical (Y)
+                                moveX = (lockedAxis == 1) ? netX : 0;
+                                moveY = (lockedAxis == 2) ? netY : 0;
+                                disableTriggerUp = true;
+                            }
+                        }
+                        else
+                        {
+                            double absRecX = Math.Abs(recX);
+                            double absRecY = Math.Abs(recY);
+                            int switchTarget = 0;
+
+                            if (lockedAxis == 2 && absRecX >= AXIS_SWITCH_MIN && absRecX >= AXIS_SWITCH_RATIO * absRecY)
+                            {
+                                switchTarget = 1;
+                            }
+                            else if (lockedAxis == 1 && absRecY >= AXIS_SWITCH_MIN && absRecY >= AXIS_SWITCH_RATIO * absRecX)
+                            {
+                                switchTarget = 2;
+                            }
+
+                            if (switchTarget != 0)
+                            {
+                                lockedAxis = switchTarget;
+                                fracX = 0.0;
+                                fracY = 0.0;
+                                lastDirX = 0;
+                                lastDirY = 0;
+                                if (switchTarget == 2) moveY = (int)Math.Round(recY);
+                                else moveX = (int)Math.Round(recX);
+                            }
+                        }
+
+                        axisUndecided = (lockedAxis == 0);
+                        allowX = (lockedAxis == 1);
+                        allowY = (lockedAxis == 2);
+                    }
+                    else
+                    {
+                        if (stepX != 0 || stepY != 0) disableTriggerUp = true;
+                    }
+
+                    bool didQueue = false;
+
+                    if (cfg.Horizontal.Enabled && allowX && !axisUndecided && moveX != 0)
+                    {
+                        int scrollDelta = ComputeAxisWheelDelta(cfg.Horizontal, moveX, ref fracX, ref lastDirX);
+                        if (scrollDelta != 0)
+                        {
+                            Interlocked.Add(ref pendingWheelX, scrollDelta);
+                            didQueue = true;
+                            disableTriggerUp = true;
+                        }
+                    }
+
+                    if (cfg.Vertical.Enabled && allowY && !axisUndecided && moveY != 0)
+                    {
+                        int scrollDelta = ComputeAxisWheelDelta(cfg.Vertical, moveY, ref fracY, ref lastDirY);
+                        if (scrollDelta != 0)
+                        {
+                            Interlocked.Add(ref pendingWheelY, scrollDelta);
+                            didQueue = true;
+                            disableTriggerUp = true;
+                        }
+                    }
+
+                    if (didQueue)
+                    {
+                        try { dispatchWakeEvent.Set(); } catch { }
+                    }
+
+                    return new IntPtr(1);
+                }
+            }
+            catch { }
+
+            return NativeMethods.CallNextHookEx(hookId, nCode, wParam, lParam);
+        }
+
+        private static int ComputeAxisWheelDelta(LinuxlikeScrollAxisConfig axis, int movePx, ref double frac, ref int lastDir)
+        {
+            int dir = movePx > 0 ? 1 : -1;
+            if (lastDir != 0 && dir != lastDir) frac = 0.0;
+            lastDir = dir;
+
+            double rawUnits = (axis.Invert ? -1.0 : 1.0) * movePx * (double)axis.Speed / Math.Max(1.0, (double)axis.Sensitivity);
+            frac += rawUnits;
+
+            int scrollDelta = 0;
+            if (axis.Smoothing)
+            {
+                scrollDelta = (int)Math.Truncate(frac);
+                frac -= scrollDelta;
+            }
+            else
+            {
+                int notches = (int)Math.Truncate(frac / WHEEL_DELTA);
+                if (notches != 0)
+                {
+                    scrollDelta = notches * WHEEL_DELTA;
+                    frac -= scrollDelta;
+                }
+            }
+            return scrollDelta;
+        }
+
+        public static bool DetectExternalProcess()
+        {
+            try
+            {
+                Process[] p1 = Process.GetProcessesByName("MarbleScrollPlus");
+                if (p1 != null && p1.Length > 0) return true;
+                Process[] p2 = Process.GetProcessesByName("MarbleScroll");
+                if (p2 != null && p2.Length > 0) return true;
+            }
+            catch { }
+            return false;
+        }
+
+        public static bool StopExternalProcessAndTask(out string message)
+        {
+            message = "";
+            try
+            {
+                foreach (Process p in Process.GetProcessesByName("MarbleScrollPlus"))
+                {
+                    try { p.Kill(); p.WaitForExit(1500); } catch { }
+                }
+                foreach (Process p in Process.GetProcessesByName("MarbleScroll"))
+                {
+                    try { p.Kill(); p.WaitForExit(1500); } catch { }
+                }
+
+                try
+                {
+                    ProcessStartInfo psi = new ProcessStartInfo("schtasks", "/Delete /TN \"MarbleScrollPlus\" /F")
+                    {
+                        CreateNoWindow = true,
+                        UseShellExecute = false
+                    };
+                    using (Process p = Process.Start(psi))
+                    {
+                        if (p != null) p.WaitForExit(3000);
+                    }
+                }
+                catch { }
+
+                message = "Harici MarbleScrollPlus süreci durduruldu ve zamanlanmış görevi kaldırıldı.";
+                return true;
+            }
+            catch (Exception ex)
+            {
+                message = "Harici süreç durdurulurken hata: " + ex.Message;
+                return false;
+            }
+        }
+
+        public void Dispose()
+        {
+            Stop();
+            try { dispatchWakeEvent.Close(); } catch { }
+        }
+    }
+
+    #endregion
+
     public class LibreHardwareSensorEngine : IDisposable
     {
         private Computer computer;
@@ -1924,13 +3318,25 @@ namespace ArgonLatencyStudio
 
         public float CpuPackageTemp = -1f;
         public float CpuTotalLoad = -1f;
+        public float CpuClockAvgMhz = -1f;
+        public float CpuEffectiveClockMhz = -1f;
+        public float CpuPowerWatts = -1f;
+        public float CpuCoreVoltage = -1f;
         public float GpuCoreTemp = -1f;
         public float GpuMemoryTemp = -1f;
         public float GpuHotspotTemp = -1f;
         public float GpuCoreLoad = -1f;
+        public float GpuCoreClockMhz = -1f;
+        public float GpuMemClockMhz = -1f;
+        public float GpuFanRpm = -1f;
+        public float GpuCoreVoltage = -1f;
         public float GpuMemUsedMb = 0f;
         public float GpuMemTotalMb = 0f;
         public float GpuPowerWatts = 0f;
+        public float MemoryUsedGb = -1f;
+        public float MemoryTotalGb = -1f;
+        public float MemoryLoadPct = -1f;
+        public List<string> StorageTemps = new List<string>();
         public string CpuHwName = "";
         public string GpuHwName = "";
 
@@ -1955,8 +3361,8 @@ namespace ArgonLatencyStudio
                         IsCpuEnabled = true,
                         IsGpuEnabled = true,
                         IsMotherboardEnabled = true,
-                        IsMemoryEnabled = false,
-                        IsStorageEnabled = false,
+                        IsMemoryEnabled = true,
+                        IsStorageEnabled = true,
                         IsNetworkEnabled = false,
                         IsControllerEnabled = false
                     };
@@ -1980,10 +3386,13 @@ namespace ArgonLatencyStudio
             {
                 if (!isInitialized) Initialize();
 
-                float cTemp = -1f, cLoad = -1f;
+                float cTemp = -1f, cLoad = -1f, cClock = -1f, cEffClock = -1f, cWatts = -1f, cVolt = -1f;
                 float gCoreTemp = -1f, gMemTemp = -1f, gHotTemp = -1f, gCoreLoad = -1f, gWatts = 0f;
+                float gClock = -1f, gMemClock = -1f, gFan = -1f, gVolt = -1f;
                 float memUsed = 0f, memTotal = 0f;
+                float ramUsed = -1f, ramAvail = -1f, ramPct = -1f;
                 float mbCpuTemp = -1f;
+                List<string> driveTemps = new List<string>();
 
                 if (computer != null)
                 {
@@ -1995,6 +3404,7 @@ namespace ArgonLatencyStudio
                             {
                                 hw.Update();
                                 CpuHwName = hw.Name;
+                                float maxCoreClock = -1f;
                                 foreach (ISensor s in hw.Sensors)
                                 {
                                     if (!s.Value.HasValue) continue;
@@ -2011,7 +3421,29 @@ namespace ArgonLatencyStudio
                                             cTemp = val;
                                         }
                                     }
+                                    else if (s.SensorType == SensorType.Clock && val > 50f)
+                                    {
+                                        if (s.Name.IndexOf("Average Effective", StringComparison.OrdinalIgnoreCase) >= 0)
+                                            cEffClock = val;
+                                        else if (s.Name.IndexOf("Average", StringComparison.OrdinalIgnoreCase) >= 0)
+                                            cClock = val;
+                                        else if (s.Name.IndexOf("Core", StringComparison.OrdinalIgnoreCase) >= 0 && s.Name.IndexOf("Bus", StringComparison.OrdinalIgnoreCase) < 0)
+                                            maxCoreClock = Math.Max(maxCoreClock, val);
+                                    }
+                                    else if (s.SensorType == SensorType.Power && val > 0f)
+                                    {
+                                        if (s.Name.IndexOf("Package", StringComparison.OrdinalIgnoreCase) >= 0 || cWatts < 0f)
+                                            cWatts = val;
+                                    }
+                                    else if (s.SensorType == SensorType.Voltage && val > 0.2f && val < 2.5f)
+                                    {
+                                        if (s.Name.IndexOf("Core", StringComparison.OrdinalIgnoreCase) >= 0 && s.Name.IndexOf("VID", StringComparison.OrdinalIgnoreCase) < 0)
+                                            cVolt = val;
+                                        else if (cVolt < 0f && s.Name.IndexOf("VID", StringComparison.OrdinalIgnoreCase) >= 0)
+                                            cVolt = val;
+                                    }
                                 }
+                                if (cClock < 0f && maxCoreClock > 0f) cClock = maxCoreClock;
                             }
                             else if (hw.HardwareType == HardwareType.Motherboard && readCpu && cTemp <= 1f)
                             {
@@ -2028,6 +3460,38 @@ namespace ArgonLatencyStudio
                                         }
                                     }
                                 }
+                            }
+                            else if (hw.HardwareType == HardwareType.Memory)
+                            {
+                                hw.Update();
+                                if (hw.Name.IndexOf("Virtual", StringComparison.OrdinalIgnoreCase) < 0)
+                                {
+                                    foreach (ISensor s in hw.Sensors)
+                                    {
+                                        if (!s.Value.HasValue) continue;
+                                        if (s.SensorType == SensorType.Data && s.Name.Equals("Memory Used", StringComparison.OrdinalIgnoreCase))
+                                            ramUsed = s.Value.Value;
+                                        else if (s.SensorType == SensorType.Data && s.Name.Equals("Memory Available", StringComparison.OrdinalIgnoreCase))
+                                            ramAvail = s.Value.Value;
+                                        else if (s.SensorType == SensorType.Load && s.Name.Equals("Memory", StringComparison.OrdinalIgnoreCase))
+                                            ramPct = s.Value.Value;
+                                    }
+                                }
+                            }
+                            else if (hw.HardwareType == HardwareType.Storage)
+                            {
+                                hw.Update();
+                                float sTemp = -1f;
+                                foreach (ISensor s in hw.Sensors)
+                                {
+                                    if (s.SensorType == SensorType.Temperature && s.Value.HasValue && s.Value.Value > 0f && s.Value.Value < 120f)
+                                    {
+                                        if (s.Name.Equals("Temperature", StringComparison.OrdinalIgnoreCase) || sTemp < 0f)
+                                            sTemp = s.Value.Value;
+                                    }
+                                }
+                                if (sTemp > 0f)
+                                    driveTemps.Add(string.Format("{0}: {1:0}°C", hw.Name, sTemp));
                             }
                             else if ((hw.HardwareType == HardwareType.GpuAmd || hw.HardwareType == HardwareType.GpuNvidia || hw.HardwareType == HardwareType.GpuIntel) &&
                                      (readGpuCore || readGpuMemHotspot))
@@ -2054,6 +3518,21 @@ namespace ArgonLatencyStudio
                                             gCoreLoad = Math.Max(gCoreLoad, val);
                                         else if (s.Name.IndexOf("D3D", StringComparison.OrdinalIgnoreCase) >= 0)
                                             d3dMax = Math.Max(d3dMax, val);
+                                    }
+                                    else if (s.SensorType == SensorType.Clock)
+                                    {
+                                        if (s.Name.IndexOf("Core", StringComparison.OrdinalIgnoreCase) >= 0)
+                                            gClock = val;
+                                        else if (s.Name.IndexOf("Memory", StringComparison.OrdinalIgnoreCase) >= 0)
+                                            gMemClock = val;
+                                    }
+                                    else if (s.SensorType == SensorType.Fan && gFan < 0f)
+                                    {
+                                        gFan = val;
+                                    }
+                                    else if (s.SensorType == SensorType.Voltage && val > 0.1f && val < 3.0f && gVolt < 0f)
+                                    {
+                                        gVolt = val;
                                     }
                                     else if (s.SensorType == SensorType.SmallData)
                                     {
@@ -2083,6 +3562,10 @@ namespace ArgonLatencyStudio
                     }
                     CpuPackageTemp = cTemp;
                     CpuTotalLoad = cLoad >= 0f ? Math.Max(0f, Math.Min(100f, cLoad)) : -1f;
+                    CpuClockAvgMhz = cClock;
+                    CpuEffectiveClockMhz = cEffClock;
+                    CpuPowerWatts = cWatts;
+                    CpuCoreVoltage = cVolt;
                 }
 
                 if (readGpuCore || readGpuMemHotspot)
@@ -2091,10 +3574,22 @@ namespace ArgonLatencyStudio
                     GpuMemoryTemp = gMemTemp;
                     GpuHotspotTemp = gHotTemp;
                     GpuCoreLoad = gCoreLoad >= 0f ? Math.Max(0f, Math.Min(100f, gCoreLoad)) : -1f;
+                    GpuCoreClockMhz = gClock;
+                    GpuMemClockMhz = gMemClock;
+                    GpuFanRpm = gFan;
+                    GpuCoreVoltage = gVolt;
                     GpuMemUsedMb = memUsed;
                     GpuMemTotalMb = memTotal;
                     GpuPowerWatts = gWatts;
                 }
+
+                if (ramUsed >= 0f && ramAvail >= 0f)
+                {
+                    MemoryUsedGb = ramUsed;
+                    MemoryTotalGb = ramUsed + ramAvail;
+                    MemoryLoadPct = ramPct;
+                }
+                StorageTemps = driveTemps;
             }
         }
 
@@ -2490,6 +3985,26 @@ namespace ArgonLatencyStudio
             catch { }
         }
 
+        private static string SerializeRegistryValue(object obj, RegistryValueKind kind)
+        {
+            if (obj == null) return "";
+            if (kind == RegistryValueKind.Binary && obj is byte[])
+                return Convert.ToBase64String((byte[])obj);
+            if (kind == RegistryValueKind.MultiString && obj is string[])
+                return string.Join("\0", (string[])obj);
+            return Convert.ToString(obj);
+        }
+
+        private static string FormatRegistryDisplaySummary(object obj)
+        {
+            if (obj == null) return "";
+            if (obj is byte[])
+                return "0x" + BitConverter.ToString((byte[])obj).Replace("-", "");
+            if (obj is string[])
+                return string.Join("; ", (string[])obj);
+            return Convert.ToString(obj);
+        }
+
         public bool SetRegistryTracked(string friendlyTweakName, string hiveName, string subKey, string valueName, object newValue, RegistryValueKind kind)
         {
             string keyId = hiveName + "\\" + subKey + "\\" + valueName;
@@ -2518,7 +4033,7 @@ namespace ArgonLatencyStudio
                             {
                                 backup.ExistedBefore = true;
                                 backup.Kind = existingKey.GetValueKind(valueName);
-                                backup.SerializedValue = Convert.ToString(oldObj);
+                                backup.SerializedValue = SerializeRegistryValue(oldObj, backup.Kind);
                             }
                         }
                     }
@@ -2531,7 +4046,7 @@ namespace ArgonLatencyStudio
                     writeKey.SetValue(valueName, newValue, kind);
                 }
 
-                RegistryBackups[keyId].CurrentAppliedSummary = Convert.ToString(newValue);
+                RegistryBackups[keyId].CurrentAppliedSummary = FormatRegistryDisplaySummary(newValue);
                 SaveJournal();
                 return true;
             }
@@ -2569,7 +4084,7 @@ namespace ArgonLatencyStudio
                             {
                                 backup.ExistedBefore = true;
                                 backup.Kind = existingKey.GetValueKind(valueName);
-                                backup.SerializedValue = Convert.ToString(oldObj);
+                                backup.SerializedValue = SerializeRegistryValue(oldObj, backup.Kind);
                             }
                         }
                     }
@@ -2704,6 +4219,16 @@ namespace ArgonLatencyStudio
                             if (long.TryParse(serializedValue, out v))
                                 writeKey.SetValue(valueName, v, RegistryValueKind.QWord);
                         }
+                        else if (kind == RegistryValueKind.Binary)
+                        {
+                            byte[] bytes = string.IsNullOrEmpty(serializedValue) ? new byte[0] : Convert.FromBase64String(serializedValue);
+                            writeKey.SetValue(valueName, bytes, RegistryValueKind.Binary);
+                        }
+                        else if (kind == RegistryValueKind.MultiString)
+                        {
+                            string[] items = string.IsNullOrEmpty(serializedValue) ? new string[0] : serializedValue.Split(new char[] { '\0' }, StringSplitOptions.RemoveEmptyEntries);
+                            writeKey.SetValue(valueName, items, RegistryValueKind.MultiString);
+                        }
                         else
                         {
                             writeKey.SetValue(valueName, serializedValue, RegistryValueKind.String);
@@ -2724,7 +4249,7 @@ namespace ArgonLatencyStudio
                     if (k == null) return fallback;
                     object val = k.GetValue(valueName, null);
                     if (val == null) return fallback;
-                    return Convert.ToString(val);
+                    return FormatRegistryDisplaySummary(val);
                 }
             }
             catch
@@ -3736,7 +5261,1189 @@ namespace ArgonLatencyStudio
 
     #endregion
 
+    #region InputLab Raw Input & USB Topology Engine
+
+    public struct InputEventSample
+    {
+        public double DeltaMs;
+        public int Dx;
+        public int Dy;
+        public IntPtr DeviceHandle;
+    }
+
+    public class InputDeliveryMetrics
+    {
+        public int SampleCount = 0;
+        public double AvgDeltaMs = 0;
+        public double MedianDeltaMs = 0;
+        public double P95DeltaMs = 0;
+        public double P99DeltaMs = 0;
+        public double MinDeltaMs = 0;
+        public double MaxDeltaMs = 0;
+        public double JitterStdDevMs = 0;
+        public double EquivalentAvgHz = 0;
+        public double EquivalentMedianHz = 0;
+        public double BatchPercent = 0;
+        public int GapCount = 0;
+        public double ConsistencyScore = 0;
+        public IntPtr ActiveDeviceHandle = IntPtr.Zero;
+        public string ActiveDeviceName = "";
+        public List<double> RecentDeltasMs = new List<double>();
+    }
+
+    public class RawInputSampleTracker : IDisposable
+    {
+        private readonly object syncLock = new object();
+        private readonly List<InputEventSample> samples = new List<InputEventSample>(4096);
+        private readonly int maxCapacity;
+        private long lastTick = 0;
+        private IntPtr lastDeviceHandle = IntPtr.Zero;
+        private string cachedLastDeviceName = "";
+        private IntPtr reusableBuffer = IntPtr.Zero;
+        private uint reusableBufferSize = 256;
+
+        public RawInputSampleTracker(int maxCapacity)
+        {
+            this.maxCapacity = Math.Max(128, maxCapacity);
+            this.reusableBuffer = Marshal.AllocHGlobal((int)reusableBufferSize);
+        }
+
+        public void Reset()
+        {
+            lock (syncLock)
+            {
+                samples.Clear();
+                lastTick = 0;
+            }
+        }
+
+        public void Dispose()
+        {
+            lock (syncLock)
+            {
+                if (reusableBuffer != IntPtr.Zero)
+                {
+                    Marshal.FreeHGlobal(reusableBuffer);
+                    reusableBuffer = IntPtr.Zero;
+                }
+            }
+        }
+
+        public void RecordRawMouseMessage(IntPtr hRawInput)
+        {
+            long now = Stopwatch.GetTimestamp();
+            uint hdrSize = (uint)Marshal.SizeOf(typeof(NativeMethods.RAWINPUTHEADER));
+            uint dwSize = 0;
+            if (NativeMethods.GetRawInputData(hRawInput, NativeMethods.RID_INPUT, IntPtr.Zero, ref dwSize, hdrSize) == uint.MaxValue || dwSize == 0)
+                return;
+
+            IntPtr buf;
+            bool tempAlloc = false;
+            lock (syncLock)
+            {
+                if (dwSize <= reusableBufferSize && reusableBuffer != IntPtr.Zero)
+                {
+                    buf = reusableBuffer;
+                }
+                else
+                {
+                    buf = Marshal.AllocHGlobal((int)dwSize);
+                    tempAlloc = true;
+                }
+
+                try
+                {
+                    uint readBytes = NativeMethods.GetRawInputData(hRawInput, NativeMethods.RID_INPUT, buf, ref dwSize, hdrSize);
+                    if (readBytes == uint.MaxValue || readBytes < hdrSize + Marshal.SizeOf(typeof(NativeMethods.RAWMOUSE)))
+                        return;
+
+                    NativeMethods.RAWINPUTHEADER header = (NativeMethods.RAWINPUTHEADER)Marshal.PtrToStructure(buf, typeof(NativeMethods.RAWINPUTHEADER));
+                    if (header.dwType != NativeMethods.RIM_TYPEMOUSE)
+                        return;
+
+                    IntPtr mousePtr = new IntPtr(buf.ToInt64() + hdrSize);
+                    NativeMethods.RAWMOUSE mouse = (NativeMethods.RAWMOUSE)Marshal.PtrToStructure(mousePtr, typeof(NativeMethods.RAWMOUSE));
+
+                    // Skip zero-delta status packets with no button action
+                    if (mouse.lLastX == 0 && mouse.lLastY == 0 && mouse.usButtonFlags == 0)
+                        return;
+
+                    if (header.hDevice != lastDeviceHandle)
+                    {
+                        lastDeviceHandle = header.hDevice;
+                        cachedLastDeviceName = NativeMethods.GetRawInputDeviceNameSafe(header.hDevice);
+                    }
+
+                    if (lastTick != 0)
+                    {
+                        double deltaMs = ((now - lastTick) * 1000.0) / Stopwatch.Frequency;
+                        if (deltaMs >= 0.01 && deltaMs <= 120.0)
+                        {
+                            if (samples.Count >= maxCapacity)
+                                samples.RemoveAt(0);
+                            samples.Add(new InputEventSample
+                            {
+                                DeltaMs = deltaMs,
+                                Dx = mouse.lLastX,
+                                Dy = mouse.lLastY,
+                                DeviceHandle = header.hDevice
+                            });
+                        }
+                    }
+                    lastTick = now;
+                }
+                finally
+                {
+                    if (tempAlloc) Marshal.FreeHGlobal(buf);
+                }
+            }
+        }
+
+        public InputDeliveryMetrics ComputeMetrics(int windowCount)
+        {
+            InputDeliveryMetrics m = new InputDeliveryMetrics();
+            List<double> rawVals;
+            lock (syncLock)
+            {
+                m.ActiveDeviceHandle = lastDeviceHandle;
+                m.ActiveDeviceName = cachedLastDeviceName ?? "";
+                if (samples.Count == 0) return m;
+
+                int start = (windowCount > 0 && samples.Count > windowCount) ? (samples.Count - windowCount) : 0;
+                int count = samples.Count - start;
+                rawVals = new List<double>(count);
+                for (int i = start; i < samples.Count; i++)
+                {
+                    rawVals.Add(samples[i].DeltaMs);
+                    m.RecentDeltasMs.Add(samples[i].DeltaMs);
+                }
+            }
+
+            m.SampleCount = rawVals.Count;
+            if (m.SampleCount == 0) return m;
+
+            double sum = 0;
+            int batchCount = 0;
+            for (int i = 0; i < rawVals.Count; i++)
+            {
+                double v = rawVals[i];
+                sum += v;
+                if (v < 0.12) batchCount++;
+            }
+            m.AvgDeltaMs = sum / m.SampleCount;
+            m.EquivalentAvgHz = m.AvgDeltaMs > 0 ? (1000.0 / m.AvgDeltaMs) : 0;
+            m.BatchPercent = (batchCount * 100.0) / m.SampleCount;
+
+            List<double> sorted = new List<double>(rawVals);
+            sorted.Sort();
+            m.MinDeltaMs = sorted[0];
+            m.MaxDeltaMs = sorted[sorted.Count - 1];
+            m.MedianDeltaMs = sorted[sorted.Count / 2];
+            m.P95DeltaMs = sorted[Math.Min(sorted.Count - 1, (int)(sorted.Count * 0.95))];
+            m.P99DeltaMs = sorted[Math.Min(sorted.Count - 1, (int)(sorted.Count * 0.99))];
+            m.EquivalentMedianHz = m.MedianDeltaMs > 0 ? (1000.0 / m.MedianDeltaMs) : 0;
+
+            double gapThreshold = Math.Max(2.2, m.MedianDeltaMs * 2.5);
+            double varSum = 0;
+            int gaps = 0;
+            for (int i = 0; i < rawVals.Count; i++)
+            {
+                double v = rawVals[i];
+                double diff = v - m.AvgDeltaMs;
+                varSum += diff * diff;
+                if (v > gapThreshold) gaps++;
+            }
+            m.GapCount = gaps;
+            m.JitterStdDevMs = Math.Sqrt(varSum / Math.Max(1, m.SampleCount - 1));
+            double baselineDelta = m.MedianDeltaMs > 0 ? m.MedianDeltaMs : m.AvgDeltaMs;
+            m.ConsistencyScore = Math.Max(0.0, Math.Min(100.0, 100.0 - ((m.JitterStdDevMs / Math.Max(0.1, baselineDelta)) * 45.0) - (gaps * 1.5)));
+
+            return m;
+        }
+
+        public bool ExportCsv(string filePath)
+        {
+            List<InputEventSample> copy;
+            lock (syncLock)
+            {
+                copy = new List<InputEventSample>(samples);
+            }
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("SampleIndex,DeltaMs,Dx,Dy,DeviceHandleHex");
+            for (int i = 0; i < copy.Count; i++)
+            {
+                sb.AppendLine(string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                    "{0},{1:0.0000},{2},{3},0x{4:X}",
+                    i + 1, copy[i].DeltaMs, copy[i].Dx, copy[i].Dy, copy[i].DeviceHandle.ToInt64()));
+            }
+            File.WriteAllText(filePath, sb.ToString(), Encoding.UTF8);
+            return true;
+        }
+    }
+
+    public class RawInputHookNativeWindow : NativeWindow
+    {
+        private readonly Action<IntPtr> onRawInput;
+        private bool registered = false;
+
+        public RawInputHookNativeWindow(Action<IntPtr> onRawInputCallback)
+        {
+            this.onRawInput = onRawInputCallback;
+        }
+
+        public bool AttachAndRegister(IntPtr hwnd)
+        {
+            if (hwnd == IntPtr.Zero) return false;
+            try
+            {
+                if (this.Handle != hwnd)
+                {
+                    if (this.Handle != IntPtr.Zero) ReleaseHandle();
+                    AssignHandle(hwnd);
+                }
+
+                NativeMethods.RAWINPUTDEVICE[] rid = new NativeMethods.RAWINPUTDEVICE[1];
+                rid[0].usUsagePage = NativeMethods.HID_USAGE_PAGE_GENERIC;
+                rid[0].usUsage = NativeMethods.HID_USAGE_GENERIC_MOUSE;
+                rid[0].dwFlags = 0; // Active only while application window has focus
+                rid[0].hwndTarget = hwnd;
+
+                registered = NativeMethods.RegisterRawInputDevices(rid, 1, (uint)Marshal.SizeOf(typeof(NativeMethods.RAWINPUTDEVICE)));
+                return registered;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public void UnregisterAndDetach()
+        {
+            try
+            {
+                if (registered)
+                {
+                    NativeMethods.RAWINPUTDEVICE[] rid = new NativeMethods.RAWINPUTDEVICE[1];
+                    rid[0].usUsagePage = NativeMethods.HID_USAGE_PAGE_GENERIC;
+                    rid[0].usUsage = NativeMethods.HID_USAGE_GENERIC_MOUSE;
+                    rid[0].dwFlags = NativeMethods.RIDEV_REMOVE;
+                    rid[0].hwndTarget = IntPtr.Zero;
+                    NativeMethods.RegisterRawInputDevices(rid, 1, (uint)Marshal.SizeOf(typeof(NativeMethods.RAWINPUTDEVICE)));
+                    registered = false;
+                }
+            }
+            catch { }
+
+            try
+            {
+                if (this.Handle != IntPtr.Zero) ReleaseHandle();
+            }
+            catch { }
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == NativeMethods.WM_INPUT && onRawInput != null)
+            {
+                onRawInput(m.LParam);
+            }
+            base.WndProc(ref m);
+        }
+    }
+
+    public class UsbAttachedDeviceInfo
+    {
+        public string ControllerName = "";
+        public string ControllerPnpId = "";
+        public string DeviceName = "";
+        public string DeviceClass = "";
+        public string PnpId = "";
+        public string RoleTag = ""; // "Fare / Mouse", "Klavye", "Hub", "Ses/Kamera", "Bluetooth", "Diğer"
+        public string PowerFlagsSummary = "";
+        public bool HasPowerSavingOn = false;
+        public bool IsRawInputMouse = false;
+        public bool IsRawInputKeyboard = false;
+    }
+
+    public class UsbTopologyReport
+    {
+        public List<string> Controllers = new List<string>();
+        public List<UsbAttachedDeviceInfo> Devices = new List<UsbAttachedDeviceInfo>();
+        public List<string> Findings = new List<string>();
+        public string MouseQueueSize = "";
+        public string KeyboardQueueSize = "";
+        public bool UsbSelectiveSuspendDisabled = false;
+        public string ScanError = "";
+    }
+
+    public static class UsbInputTopologyScanner
+    {
+        private class PnpInfo
+        {
+            public string PnpId;
+            public string Name;
+            public string PnpClass;
+        }
+
+        private static string ExtractDeviceIdFromWmiRef(string wmiRef)
+        {
+            if (string.IsNullOrEmpty(wmiRef)) return "";
+            int idx = wmiRef.IndexOf("DeviceID=", StringComparison.OrdinalIgnoreCase);
+            if (idx < 0) return "";
+            string sub = wmiRef.Substring(idx + 9).Trim().Trim('"');
+            return sub.Replace("\\\\", "\\");
+        }
+
+        private static string ExtractVidPid(string id)
+        {
+            if (string.IsNullOrEmpty(id)) return "";
+            string up = id.ToUpperInvariant();
+            int vIdx = up.IndexOf("VID_");
+            if (vIdx < 0) return "";
+            int pIdx = up.IndexOf("PID_", vIdx);
+            if (pIdx < 0 || pIdx + 8 > up.Length) return "";
+            return up.Substring(vIdx, Math.Min(17, pIdx + 8 - vIdx));
+        }
+
+        public static UsbTopologyReport ScanUsbTopology(StateVault vault)
+        {
+            UsbTopologyReport report = new UsbTopologyReport();
+            try
+            {
+                // 1. Enumerate Raw Input Mice & Keyboards
+                HashSet<string> rawMouseVidPids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                HashSet<string> rawKbdVidPids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                uint rawCount = 0;
+                uint rawStructSize = (uint)Marshal.SizeOf(typeof(NativeMethods.RAWINPUTDEVICELIST));
+                if (NativeMethods.GetRawInputDeviceList(IntPtr.Zero, ref rawCount, rawStructSize) == 0 && rawCount > 0 && rawCount < 512)
+                {
+                    IntPtr pList = Marshal.AllocHGlobal((int)(rawCount * rawStructSize));
+                    try
+                    {
+                        uint actual = NativeMethods.GetRawInputDeviceList(pList, ref rawCount, rawStructSize);
+                        if (actual != uint.MaxValue)
+                        {
+                            for (int i = 0; i < (int)actual; i++)
+                            {
+                                IntPtr cur = new IntPtr(pList.ToInt64() + i * rawStructSize);
+                                NativeMethods.RAWINPUTDEVICELIST item = (NativeMethods.RAWINPUTDEVICELIST)Marshal.PtrToStructure(cur, typeof(NativeMethods.RAWINPUTDEVICELIST));
+                                string devName = NativeMethods.GetRawInputDeviceNameSafe(item.hDevice);
+                                string vp = ExtractVidPid(devName);
+                                if (!string.IsNullOrEmpty(vp))
+                                {
+                                    if (item.dwType == NativeMethods.RIM_TYPEMOUSE) rawMouseVidPids.Add(vp);
+                                    else if (item.dwType == NativeMethods.RIM_TYPEKEYBOARD) rawKbdVidPids.Add(vp);
+                                }
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        Marshal.FreeHGlobal(pList);
+                    }
+                }
+
+                // 2. Single fast WMI query for active PnP devices
+                Dictionary<string, PnpInfo> pnpMap = new Dictionary<string, PnpInfo>(StringComparer.OrdinalIgnoreCase);
+                using (ManagementObjectSearcher sPnp = new ManagementObjectSearcher("SELECT PNPDeviceID, Name, PNPClass FROM Win32_PnPEntity WHERE Status = 'OK'"))
+                {
+                    foreach (ManagementObject obj in sPnp.Get())
+                    {
+                        string id = Convert.ToString(obj["PNPDeviceID"] ?? "");
+                        if (string.IsNullOrEmpty(id)) continue;
+                        pnpMap[id] = new PnpInfo
+                        {
+                            PnpId = id,
+                            Name = Convert.ToString(obj["Name"] ?? id),
+                            PnpClass = Convert.ToString(obj["PNPClass"] ?? "")
+                        };
+                    }
+                }
+
+                // 3. Single fast WMI query for USB Controller -> Attached Device tree
+                Dictionary<string, string> controllerDisplayNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                Dictionary<string, int> controllerDeviceCount = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                Dictionary<string, List<string>> controllerMiceNames = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+                Dictionary<string, int> controllerHeavyPeers = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+                using (ManagementObjectSearcher sUsb = new ManagementObjectSearcher("SELECT Antecedent, Dependent FROM Win32_USBControllerDevice"))
+                {
+                    foreach (ManagementObject rel in sUsb.Get())
+                    {
+                        string ctlId = ExtractDeviceIdFromWmiRef(Convert.ToString(rel["Antecedent"] ?? ""));
+                        string depId = ExtractDeviceIdFromWmiRef(Convert.ToString(rel["Dependent"] ?? ""));
+                        if (string.IsNullOrEmpty(ctlId) || string.IsNullOrEmpty(depId)) continue;
+
+                        string ctlDisplayName;
+                        if (!controllerDisplayNames.TryGetValue(ctlId, out ctlDisplayName))
+                        {
+                            PnpInfo ctlInfo;
+                            string baseCtlName = pnpMap.TryGetValue(ctlId, out ctlInfo) ? ctlInfo.Name : ctlId;
+                            string tag = "";
+                            int devIdx = ctlId.IndexOf("DEV_", StringComparison.OrdinalIgnoreCase);
+                            if (devIdx >= 0 && devIdx + 8 <= ctlId.Length)
+                                tag = ctlId.Substring(devIdx, 8).ToUpperInvariant();
+                            string candidateName = string.IsNullOrEmpty(tag)
+                                ? string.Format("{0} (#{1})", baseCtlName, controllerDisplayNames.Count + 1)
+                                : string.Format("{0} [{1}]", baseCtlName, tag);
+                            if (report.Controllers.Contains(candidateName))
+                                candidateName = string.Format("{0} (#{1})", candidateName, controllerDisplayNames.Count + 1);
+                            ctlDisplayName = candidateName;
+                            controllerDisplayNames[ctlId] = ctlDisplayName;
+                            report.Controllers.Add(ctlDisplayName);
+                        }
+
+                        PnpInfo depInfo;
+                        if (!pnpMap.TryGetValue(depId, out depInfo)) continue;
+
+                        string cls = depInfo.PnpClass ?? "";
+                        string nameLower = (depInfo.Name ?? "").ToLowerInvariant();
+                        string vp = ExtractVidPid(depId);
+                        bool isMouse = string.Equals(cls, "Mouse", StringComparison.OrdinalIgnoreCase) || (!string.IsNullOrEmpty(vp) && rawMouseVidPids.Contains(vp));
+                        bool isKbd = string.Equals(cls, "Keyboard", StringComparison.OrdinalIgnoreCase) || (!string.IsNullOrEmpty(vp) && rawKbdVidPids.Contains(vp));
+                        bool isHub = depId.IndexOf("ROOT_HUB", StringComparison.OrdinalIgnoreCase) >= 0 || nameLower.Contains("hub");
+                        bool isBt = string.Equals(cls, "Bluetooth", StringComparison.OrdinalIgnoreCase) || nameLower.Contains("bluetooth");
+                        bool isHeavy = string.Equals(cls, "MEDIA", StringComparison.OrdinalIgnoreCase) || string.Equals(cls, "Camera", StringComparison.OrdinalIgnoreCase) ||
+                                       string.Equals(cls, "AudioEndpoint", StringComparison.OrdinalIgnoreCase) || string.Equals(cls, "DiskDrive", StringComparison.OrdinalIgnoreCase) ||
+                                       string.Equals(cls, "Net", StringComparison.OrdinalIgnoreCase) || isBt;
+
+                        string role = isMouse ? "🖱️ Fare / Mouse"
+                                    : (isKbd ? "⌨️ Klavye"
+                                    : (isHub ? "🔌 USB Hub"
+                                    : (isBt ? "📶 Bluetooth"
+                                    : (isHeavy ? "🎧 Bant Genişliği (Ses/Kamera/Ağ)"
+                                    : (!string.IsNullOrEmpty(cls) ? cls : "USB Bileşeni")))));
+
+                        // Inspect Registry Device Parameters Power Flags
+                        bool powSave = false;
+                        List<string> powTokens = new List<string>();
+                        try
+                        {
+                            using (RegistryKey dpKey = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Enum\" + depId + @"\Device Parameters", false))
+                            {
+                                if (dpKey != null)
+                                {
+                                    object epm = dpKey.GetValue("EnhancedPowerManagementEnabled", null);
+                                    if (epm != null)
+                                    {
+                                        int ev = Convert.ToInt32(epm);
+                                        powTokens.Add("EnhPwrMgmt=" + ev);
+                                        if (ev == 1) powSave = true;
+                                    }
+                                    object idle = dpKey.GetValue("AllowIdleIrpInD3", null);
+                                    if (idle != null)
+                                    {
+                                        int iv = Convert.ToInt32(idle);
+                                        powTokens.Add("IdleD3=" + iv);
+                                        if (iv == 1) powSave = true;
+                                    }
+                                    object sel = dpKey.GetValue("SelectiveSuspendEnabled", null);
+                                    if (sel != null)
+                                    {
+                                        int sv = Convert.ToInt32(sel);
+                                        powTokens.Add("SelSusp=" + sv);
+                                        if (sv == 1) powSave = true;
+                                    }
+                                }
+                            }
+                        }
+                        catch { }
+
+                        if (!controllerDeviceCount.ContainsKey(ctlId)) controllerDeviceCount[ctlId] = 0;
+                        controllerDeviceCount[ctlId]++;
+
+                        if (isMouse)
+                        {
+                            if (!controllerMiceNames.ContainsKey(ctlId)) controllerMiceNames[ctlId] = new List<string>();
+                            if (!controllerMiceNames[ctlId].Contains(depInfo.Name)) controllerMiceNames[ctlId].Add(depInfo.Name);
+                        }
+                        if (isHeavy)
+                        {
+                            if (!controllerHeavyPeers.ContainsKey(ctlId)) controllerHeavyPeers[ctlId] = 0;
+                            controllerHeavyPeers[ctlId]++;
+                        }
+
+                        report.Devices.Add(new UsbAttachedDeviceInfo
+                        {
+                            ControllerName = ctlDisplayName,
+                            ControllerPnpId = ctlId,
+                            DeviceName = depInfo.Name,
+                            DeviceClass = cls,
+                            PnpId = depId,
+                            RoleTag = role,
+                            PowerFlagsSummary = powTokens.Count > 0 ? string.Join(", ", powTokens.ToArray()) : "Standart",
+                            HasPowerSavingOn = powSave,
+                            IsRawInputMouse = isMouse,
+                            IsRawInputKeyboard = isKbd
+                        });
+                    }
+                }
+
+                // 4. Read HID Queue & USB Suspend settings
+                report.MouseQueueSize = vault.ReadRegistryDisplay("HKLM", @"SYSTEM\CurrentControlSet\Services\mouclass\Parameters", "MouseDataQueueSize", "100 (Varsayılan)");
+                report.KeyboardQueueSize = vault.ReadRegistryDisplay("HKLM", @"SYSTEM\CurrentControlSet\Services\kbdclass\Parameters", "KeyboardDataQueueSize", "100 (Varsayılan)");
+                string usbSusp = vault.ReadRegistryDisplay("HKLM", @"SYSTEM\CurrentControlSet\Services\USB", "DisableSelectiveSuspend", "");
+                report.UsbSelectiveSuspendDisabled = (usbSusp == "1");
+
+                // 5. Generate evidence-based topology findings
+                if (report.Controllers.Count >= 2)
+                {
+                    report.Findings.Add(string.Format("ℹ️ Sistemde {0} adet ayrı USB xHCI Host Denetleyicisi algılandı.", report.Controllers.Count));
+                    foreach (var kv in controllerMiceNames)
+                    {
+                        int heavyCount = controllerHeavyPeers.ContainsKey(kv.Key) ? controllerHeavyPeers[kv.Key] : 0;
+                        string ctlLabel = controllerDisplayNames.ContainsKey(kv.Key) ? controllerDisplayNames[kv.Key] : kv.Key;
+                        if (heavyCount > 0)
+                        {
+                            report.Findings.Add(string.Format(
+                                "⚠️ Fare denetleyici paylaşımı: '{0}' denetleyicisi hem farenizi hem de {1} adet Bluetooth/Ses/Kamera/Ağ aygıtını taşıyor. Mümkünse fareyi diğer boş USB denetleyici port grubuna takıp InputLab Jitter farkını test edin.",
+                                ctlLabel, heavyCount));
+                        }
+                    }
+                }
+
+                int idleWarnCount = 0;
+                foreach (var d in report.Devices)
+                {
+                    if ((d.IsRawInputMouse || d.IsRawInputKeyboard) && d.HasPowerSavingOn)
+                        idleWarnCount++;
+                }
+                if (idleWarnCount > 0)
+                {
+                    report.Findings.Add(string.Format("⚠️ {0} giriş/HID bileşeninde EnhancedPowerManagement veya AllowIdleIrpInD3 etkin (uyku uyanma mikro-gecikme riski).", idleWarnCount));
+                }
+                if (!report.UsbSelectiveSuspendDisabled)
+                {
+                    report.Findings.Add("ℹ️ Global USB Selective Suspend kapatılmamış (DisableSelectiveSuspend yok). Timer sekmesinden USB uyku korumasını yönetebilirsiniz.");
+                }
+            }
+            catch (Exception ex)
+            {
+                report.ScanError = ex.Message;
+            }
+            return report;
+        }
+    }
+
+    #endregion
+
+    #region PCI Interrupt & MSI Mode Engine
+
+    public class PciInterruptDeviceInfo
+    {
+        public string FriendlyName = "";
+        public string ClassName = "";
+        public string ClassTag = ""; // Display, Net, USB, Storage, HDC, MEDIA
+        public string InstancePath = ""; // PCI\VEN_...
+        public string RegistrySubKey = ""; // SYSTEM\CurrentControlSet\Enum\PCI\...
+        public int? MsiSupported = null;
+        public int? MessageNumberLimit = null;
+        public int? DevicePolicy = null;
+        public int? DevicePriority = null;
+        public ulong AssignmentMask = 0;
+        public bool HasAssignmentBytes = false;
+        public bool IsPresentInOs = false;
+        public string SafetyAdvisory = "";
+    }
+
+    public static class PciInterruptScanner
+    {
+        private static readonly Dictionary<string, string> ClassGuidMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            { "{4d36e968-e325-11ce-bfc1-08002be10318}", "Display" },
+            { "{4d36e972-e325-11ce-bfc1-08002be10318}", "Net" },
+            { "{36fc9e60-c465-11cf-8056-444553540000}", "USB" },
+            { "{4d36e97b-e325-11ce-bfc1-08002be10318}", "Storage" },
+            { "{4d36e96a-e325-11ce-bfc1-08002be10318}", "HDC" },
+            { "{4d36e96c-e325-11ce-bfc1-08002be10318}", "MEDIA" }
+        };
+
+        public static string GetDevicePolicyLabel(int? policy)
+        {
+            if (!policy.HasValue) return "Sistem Varsayılanı";
+            switch (policy.Value)
+            {
+                case 0: return "0 - Makine Varsayılanı (MachineDefault)";
+                case 1: return "1 - Yakın Çekirdekler (AllClose)";
+                case 2: return "2 - Tek Yakın Çekirdek (OneClose)";
+                case 3: return "3 - Tüm Çekirdekler (AllProcessors)";
+                case 4: return "4 - Özel Çekirdek Maskesi (Specified)";
+                case 5: return "5 - MSI-X Mesajlarını Yay (Spread)";
+                default: return policy.Value.ToString();
+            }
+        }
+
+        public static string DecodeMaskToCoreList(ulong mask)
+        {
+            if (mask == 0) return "-";
+            List<string> cores = new List<string>();
+            int limit = Math.Min(64, Environment.ProcessorCount);
+            for (int i = 0; i < limit; i++)
+            {
+                if ((mask & (1UL << i)) != 0)
+                    cores.Add("CPU " + i);
+            }
+            if (cores.Count == 0) return "0x" + mask.ToString("X");
+            return string.Join(", ", cores.ToArray()) + string.Format(" (0x{0:X})", mask);
+        }
+
+        public static List<PciInterruptDeviceInfo> ScanPciDevices(bool includeStorageAndAudio)
+        {
+            List<PciInterruptDeviceInfo> list = new List<PciInterruptDeviceInfo>();
+            Dictionary<string, string> activeNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            try
+            {
+                using (ManagementObjectSearcher s = new ManagementObjectSearcher("SELECT PNPDeviceID, Name, Status FROM Win32_PnPEntity WHERE Status = 'OK'"))
+                {
+                    foreach (ManagementObject obj in s.Get())
+                    {
+                        string id = Convert.ToString(obj["PNPDeviceID"] ?? "");
+                        if (id.StartsWith("PCI\\", StringComparison.OrdinalIgnoreCase))
+                        {
+                            activeNames[id] = Convert.ToString(obj["Name"] ?? id);
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            try
+            {
+                using (RegistryKey pciRoot = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Enum\PCI", false))
+                {
+                    if (pciRoot == null) return list;
+                    foreach (string devKeyName in pciRoot.GetSubKeyNames())
+                    {
+                        using (RegistryKey devKey = pciRoot.OpenSubKey(devKeyName, false))
+                        {
+                            if (devKey == null) continue;
+                            foreach (string instName in devKey.GetSubKeyNames())
+                            {
+                                string pnpId = "PCI\\" + devKeyName + "\\" + instName;
+                                bool isPresent = activeNames.ContainsKey(pnpId);
+                                if (!isPresent && activeNames.Count > 0) continue; // Filter phantom/disconnected instances
+
+                                string regSub = @"SYSTEM\CurrentControlSet\Enum\" + pnpId;
+                                using (RegistryKey instKey = devKey.OpenSubKey(instName, false))
+                                {
+                                    if (instKey == null) continue;
+                                    string clsGuid = Convert.ToString(instKey.GetValue("ClassGUID", "")).Trim();
+                                    string clsTag;
+                                    if (!ClassGuidMap.TryGetValue(clsGuid, out clsTag)) continue;
+
+                                    if (!includeStorageAndAudio && (clsTag == "HDC" || clsTag == "MEDIA"))
+                                        continue;
+
+                                    string friendly = isPresent ? activeNames[pnpId] : Convert.ToString(instKey.GetValue("FriendlyName", "") ?? "");
+                                    if (string.IsNullOrEmpty(friendly))
+                                    {
+                                        string desc = Convert.ToString(instKey.GetValue("DeviceDesc", pnpId) ?? pnpId);
+                                        int semi = desc.LastIndexOf(';');
+                                        friendly = (semi >= 0 && semi < desc.Length - 1) ? desc.Substring(semi + 1) : desc;
+                                    }
+
+                                    PciInterruptDeviceInfo info = new PciInterruptDeviceInfo
+                                    {
+                                        FriendlyName = friendly,
+                                        ClassName = clsTag == "Display" ? "GPU / Ekran" : (clsTag == "Net" ? "Ağ Kartı" : (clsTag == "USB" ? "USB xHCI" : (clsTag == "Storage" ? "NVMe / Depolama" : (clsTag == "HDC" ? "AHCI / SATA" : "Ses / Audio")))),
+                                        ClassTag = clsTag,
+                                        InstancePath = pnpId,
+                                        RegistrySubKey = regSub,
+                                        IsPresentInOs = isPresent
+                                    };
+
+                                    using (RegistryKey msiKey = instKey.OpenSubKey(@"Device Parameters\Interrupt Management\MessageSignaledInterruptProperties", false))
+                                    {
+                                        if (msiKey != null)
+                                        {
+                                            object ms = msiKey.GetValue("MSISupported", null);
+                                            if (ms != null) info.MsiSupported = Convert.ToInt32(ms);
+                                            object ml = msiKey.GetValue("MessageNumberLimit", null);
+                                            if (ml != null) info.MessageNumberLimit = Convert.ToInt32(ml);
+                                        }
+                                    }
+
+                                    using (RegistryKey affKey = instKey.OpenSubKey(@"Device Parameters\Interrupt Management\Affinity Policy", false))
+                                    {
+                                        if (affKey != null)
+                                        {
+                                            object dp = affKey.GetValue("DevicePolicy", null);
+                                            if (dp != null) info.DevicePolicy = Convert.ToInt32(dp);
+                                            object pr = affKey.GetValue("DevicePriority", null);
+                                            if (pr != null) info.DevicePriority = Convert.ToInt32(pr);
+
+                                            object ao = affKey.GetValue("AssignmentSetOverride", null);
+                                            if (ao is byte[])
+                                            {
+                                                byte[] b = (byte[])ao;
+                                                ulong m = 0;
+                                                for (int bi = 0; bi < b.Length && bi < 8; bi++)
+                                                    m |= ((ulong)b[bi]) << (bi * 8);
+                                                info.AssignmentMask = m;
+                                                info.HasAssignmentBytes = true;
+                                            }
+                                            else if (ao != null)
+                                            {
+                                                try
+                                                {
+                                                    info.AssignmentMask = Convert.ToUInt64(ao);
+                                                    info.HasAssignmentBytes = true;
+                                                }
+                                                catch { }
+                                            }
+                                        }
+                                    }
+
+                                    // Safety advisory
+                                    if (clsTag == "Display" || clsTag == "Net" || clsTag == "USB")
+                                    {
+                                        if (!info.MsiSupported.HasValue || info.MsiSupported.Value == 0)
+                                            info.SafetyAdvisory = "⚠️ Line-Based IRQ veya tanımsız: Modern GPU/NIC/USB aygıtlarında MSI (1) paylaşımlı IRQ çatışmasını önler (Restart gerekir).";
+                                        else
+                                            info.SafetyAdvisory = "✅ MSI Modu Etkin (1). Yalnızca spesifik çekirdek izolasyonu testi yapacaksanız Affinity Policy değiştirin.";
+                                    }
+                                    else if (clsTag == "Storage" || clsTag == "HDC")
+                                    {
+                                        info.SafetyAdvisory = "ℹ️ NVMe/AHCI aygıtlarında Policy=5 (Spread) çoklu I/O kuyruklarını tüm çekirdeklere dağıtır; tek çekirdeğe kilitlemek disk gecikmesini bozabilir.";
+                                    }
+                                    else
+                                    {
+                                        info.SafetyAdvisory = "ℹ️ Ses denetleyicilerinde MSI desteği bazı eski kodeklerde cızırtıya yol açabilir; önce yalnızca MSI/IRQ durumunu izleyin.";
+                                    }
+
+                                    list.Add(info);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            list.Sort((a, b) =>
+            {
+                int cmp = string.Compare(a.ClassTag, b.ClassTag, StringComparison.OrdinalIgnoreCase);
+                if (cmp != 0) return cmp;
+                return string.Compare(a.FriendlyName, b.FriendlyName, StringComparison.OrdinalIgnoreCase);
+            });
+            return list;
+        }
+
+        public static bool ApplyDeviceSettingsTracked(StateVault vault, PciInterruptDeviceInfo dev, int msiOption, int policyOption, ulong affinityMask, int priorityOption, out string verificationSummary)
+        {
+            verificationSummary = "";
+            if (vault == null || dev == null || string.IsNullOrEmpty(dev.RegistrySubKey)) return false;
+
+            string tag = "MSI/IRQ: " + dev.FriendlyName;
+            string msiPath = dev.RegistrySubKey + @"\Device Parameters\Interrupt Management\MessageSignaledInterruptProperties";
+            string affPath = dev.RegistrySubKey + @"\Device Parameters\Interrupt Management\Affinity Policy";
+
+            bool ok = true;
+            if (msiOption == -1)
+                ok &= vault.DeleteRegistryTracked(tag, "HKLM", msiPath, "MSISupported");
+            else
+                ok &= vault.SetRegistryTracked(tag, "HKLM", msiPath, "MSISupported", msiOption, RegistryValueKind.DWord);
+
+            if (policyOption == -1)
+            {
+                ok &= vault.DeleteRegistryTracked(tag, "HKLM", affPath, "DevicePolicy");
+                ok &= vault.DeleteRegistryTracked(tag, "HKLM", affPath, "AssignmentSetOverride");
+            }
+            else
+            {
+                ok &= vault.SetRegistryTracked(tag, "HKLM", affPath, "DevicePolicy", policyOption, RegistryValueKind.DWord);
+                if (policyOption == 4)
+                {
+                    if (affinityMask == 0) affinityMask = 1UL;
+                    byte[] maskBytes = BitConverter.GetBytes(affinityMask);
+                    ok &= vault.SetRegistryTracked(tag, "HKLM", affPath, "AssignmentSetOverride", maskBytes, RegistryValueKind.Binary);
+                }
+                else
+                {
+                    vault.DeleteRegistryTracked(tag, "HKLM", affPath, "AssignmentSetOverride");
+                }
+            }
+
+            if (priorityOption == -1)
+                ok &= vault.DeleteRegistryTracked(tag, "HKLM", affPath, "DevicePriority");
+            else
+                ok &= vault.SetRegistryTracked(tag, "HKLM", affPath, "DevicePriority", priorityOption, RegistryValueKind.DWord);
+
+            // Immediate read-back verification
+            string rbMsi = vault.ReadRegistryDisplay("HKLM", msiPath, "MSISupported", "Varsayılan");
+            string rbPol = vault.ReadRegistryDisplay("HKLM", affPath, "DevicePolicy", "Varsayılan");
+            string rbMask = vault.ReadRegistryDisplay("HKLM", affPath, "AssignmentSetOverride", "-");
+            verificationSummary = string.Format("Read-Back: MSISupported={0} | DevicePolicy={1} | Mask={2}", rbMsi, rbPol, rbMask);
+            return ok;
+        }
+
+        public static void RevertDeviceSettingsTracked(StateVault vault, PciInterruptDeviceInfo dev)
+        {
+            if (vault == null || dev == null || string.IsNullOrEmpty(dev.RegistrySubKey)) return;
+            string msiPath = dev.RegistrySubKey + @"\Device Parameters\Interrupt Management\MessageSignaledInterruptProperties";
+            string affPath = dev.RegistrySubKey + @"\Device Parameters\Interrupt Management\Affinity Policy";
+
+            vault.RevertRegistryTracked("HKLM", msiPath, "MSISupported");
+            vault.RevertRegistryTracked("HKLM", affPath, "DevicePolicy");
+            vault.RevertRegistryTracked("HKLM", affPath, "AssignmentSetOverride");
+            vault.RevertRegistryTracked("HKLM", affPath, "DevicePriority");
+        }
+    }
+
+    #endregion
+
     #region Professional Vector Icon Engine & Compact Utility Row Architecture (NetAdapter / QuickCPU Style)
+
+    public static class ArgonTheme
+    {
+        public static bool IsLightMode = false;
+
+        public static Color BgCanvas { get { return IsLightMode ? Color.White : Color.FromArgb(15, 18, 24); } }
+        public static Color BgSurface { get { return IsLightMode ? Color.FromArgb(245, 246, 248) : Color.FromArgb(22, 27, 36); } }
+        public static Color BgElevated { get { return IsLightMode ? Color.FromArgb(234, 238, 244) : Color.FromArgb(29, 36, 48); } }
+        public static Color BgSurfaceAlt { get { return IsLightMode ? Color.FromArgb(240, 242, 246) : Color.FromArgb(29, 36, 48); } }
+        public static Color BgSurfaceHover { get { return IsLightMode ? Color.FromArgb(229, 241, 251) : Color.FromArgb(29, 36, 48); } }
+        public static Color BgInput { get { return IsLightMode ? Color.White : Color.FromArgb(13, 16, 22); } }
+        public static Color BorderSubtle { get { return IsLightMode ? Color.FromArgb(210, 215, 223) : Color.FromArgb(38, 48, 64); } }
+        public static Color TextPrimary { get { return IsLightMode ? Color.FromArgb(24, 28, 34) : Color.FromArgb(230, 237, 243); } }
+        public static Color TextSecondary { get { return IsLightMode ? Color.FromArgb(58, 66, 78) : Color.FromArgb(182, 192, 206); } }
+        public static Color TextMuted { get { return IsLightMode ? Color.FromArgb(100, 108, 120) : Color.FromArgb(139, 148, 158); } }
+        public static Color Accent { get { return IsLightMode ? Color.FromArgb(0, 102, 204) : Color.FromArgb(79, 156, 249); } }
+        public static Color AccentSoft { get { return IsLightMode ? Color.FromArgb(229, 241, 251) : Color.FromArgb(23, 38, 58); } }
+        public static Color Alert { get { return IsLightMode ? Color.FromArgb(196, 43, 28) : Color.FromArgb(224, 82, 82); } }
+        public static Color AlertSoft { get { return IsLightMode ? Color.FromArgb(253, 236, 234) : Color.FromArgb(44, 24, 28); } }
+    }
+
+    public static class WindowsShellIcons
+    {
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct SHSTOCKICONINFO
+        {
+            public uint cbSize;
+            public IntPtr hIcon;
+            public int iSysIconIndex;
+            public int iIcon;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
+            public string szPath;
+        }
+
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+        private static extern int SHGetStockIconInfo(uint siid, uint uFlags, ref SHSTOCKICONINFO psii);
+
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+        private static extern uint ExtractIconEx(string lpszFile, int nIconIndex, IntPtr[] phiconLarge, IntPtr[] phiconSmall, uint nIcons);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool DestroyIcon(IntPtr hIcon);
+
+        private const uint SHGSI_ICON = 0x000000100;
+        private const uint SHGSI_LARGEICON = 0x000000000;
+        private const uint SHGSI_SMALLICON = 0x000000001;
+
+        private static readonly Dictionary<string, Bitmap> shellCache = new Dictionary<string, Bitmap>(StringComparer.OrdinalIgnoreCase);
+        private static readonly object shellLock = new object();
+
+        private static Bitmap ExtractStockIcon(uint siid, int size)
+        {
+            try
+            {
+                SHSTOCKICONINFO sii = new SHSTOCKICONINFO();
+                sii.cbSize = (uint)Marshal.SizeOf(typeof(SHSTOCKICONINFO));
+                uint flags = SHGSI_ICON | (size <= 20 ? SHGSI_SMALLICON : SHGSI_LARGEICON);
+                int hr = SHGetStockIconInfo(siid, flags, ref sii);
+                if (hr == 0 && sii.hIcon != IntPtr.Zero)
+                {
+                    try
+                    {
+                        using (Icon ic = Icon.FromHandle(sii.hIcon))
+                        {
+                            Bitmap src = ic.ToBitmap();
+                            if (src.Width == size && src.Height == size) return src;
+                            Bitmap resized = new Bitmap(size, size, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+                            using (Graphics g = Graphics.FromImage(resized))
+                            {
+                                g.SmoothingMode = SmoothingMode.AntiAlias;
+                                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                                g.DrawImage(src, new Rectangle(0, 0, size, size));
+                            }
+                            src.Dispose();
+                            return resized;
+                        }
+                    }
+                    finally
+                    {
+                        DestroyIcon(sii.hIcon);
+                    }
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        private static Bitmap ExtractDllIcon(string dllName, int index, int size)
+        {
+            try
+            {
+                string full = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), dllName);
+                if (!File.Exists(full)) return null;
+                IntPtr[] lg = new IntPtr[1];
+                IntPtr[] sm = new IntPtr[1];
+                uint count = ExtractIconEx(full, index, size > 20 ? lg : null, size <= 20 ? sm : null, 1);
+                IntPtr h = size > 20 ? lg[0] : sm[0];
+                if (count > 0 && h != IntPtr.Zero)
+                {
+                    try
+                    {
+                        using (Icon ic = Icon.FromHandle(h))
+                        {
+                            Bitmap src = ic.ToBitmap();
+                            if (src.Width == size && src.Height == size) return src;
+                            Bitmap resized = new Bitmap(size, size, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+                            using (Graphics g = Graphics.FromImage(resized))
+                            {
+                                g.SmoothingMode = SmoothingMode.AntiAlias;
+                                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                                g.DrawImage(src, new Rectangle(0, 0, size, size));
+                            }
+                            src.Dispose();
+                            return resized;
+                        }
+                    }
+                    finally
+                    {
+                        DestroyIcon(h);
+                    }
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        private static bool HasVisiblePixels(Bitmap bmp)
+        {
+            if (bmp == null || bmp.Width <= 0 || bmp.Height <= 0) return false;
+            int stepX = Math.Max(1, bmp.Width / 8);
+            int stepY = Math.Max(1, bmp.Height / 8);
+            for (int y = 0; y < bmp.Height; y += stepY)
+            {
+                for (int x = 0; x < bmp.Width; x += stepX)
+                {
+                    if (bmp.GetPixel(x, y).A > 20) return true;
+                }
+            }
+            return false;
+        }
+
+        public static Bitmap GetIcon(string logicalKey, int size)
+        {
+            if (string.IsNullOrEmpty(logicalKey) || size <= 0) logicalKey = "info";
+            string cKey = logicalKey + "|" + size;
+            lock (shellLock)
+            {
+                Bitmap existing;
+                if (shellCache.TryGetValue(cKey, out existing)) return existing;
+
+                Bitmap bmp = null;
+                string k = logicalKey.ToLowerInvariant();
+                // Map logical node keys to verified non-empty Windows 10/11 stock/shell icons
+                if (k == "info" || k == "sysinfo") bmp = ExtractStockIcon(79, size);
+                else if (k == "pc" || k == "monitor" || k == "hardware") bmp = ExtractStockIcon(94, size) ?? ExtractDllIcon("imageres.dll", 109, size);
+                else if (k == "bookmarks") bmp = ExtractDllIcon("shell32.dll", 43, size) ?? ExtractStockIcon(79, size);
+                else if (k == "recent" || k == "log") bmp = ExtractDllIcon("shell32.dll", 265, size) ?? ExtractStockIcon(83, size);
+                else if (k == "win11" || k == "windows") bmp = ExtractDllIcon("imageres.dll", 149, size) ?? ExtractDllIcon("shell32.dll", 15, size);
+                else if (k == "appearance" || k == "colors") bmp = ExtractDllIcon("imageres.dll", 67, size) ?? ExtractDllIcon("shell32.dll", 141, size);
+                else if (k == "display" || k == "gpu" || k == "alttab") bmp = ExtractDllIcon("imageres.dll", 109, size) ?? ExtractStockIcon(34, size);
+                else if (k == "sound" || k == "audio") bmp = ExtractStockIcon(116, size);
+                else if (k == "behavior" || k == "settings") bmp = ExtractDllIcon("imageres.dll", 114, size) ?? ExtractDllIcon("shell32.dll", 316, size);
+                else if (k == "mouse" || k == "timer") bmp = ExtractDllIcon("main.cpl", 0, size) ?? ExtractDllIcon("imageres.dll", 114, size);
+                else if (k == "keyboard") bmp = ExtractDllIcon("shell32.dll", 173, size) ?? ExtractStockIcon(82, size);
+                else if (k == "lock" || k == "logon") bmp = ExtractStockIcon(47, size);
+                else if (k == "boot" || k == "backup") bmp = ExtractStockIcon(8, size);
+                else if (k == "explorer" || k == "folder") bmp = ExtractStockIcon(3, size);
+                else if (k == "drive" || k == "drives") bmp = ExtractStockIcon(8, size);
+                else if (k == "navpane") bmp = ExtractStockIcon(4, size);
+                else if (k == "shortcuts" || k == "link") bmp = ExtractDllIcon("shell32.dll", 168, size) ?? ExtractStockIcon(84, size);
+                else if (k == "context" || k == "menu") bmp = ExtractDllIcon("shell32.dll", 165, size) ?? ExtractStockIcon(83, size);
+                else if (k == "tools") bmp = ExtractStockIcon(86, size) ?? ExtractDllIcon("shell32.dll", 316, size);
+                else if (k == "privacy" || k == "shield") bmp = ExtractStockIcon(77, size);
+                else if (k == "network" || k == "netdrive") bmp = ExtractStockIcon(9, size);
+                else if (k == "globe" || k == "internet") bmp = ExtractStockIcon(13, size);
+                else if (k == "kernel" || k == "key") bmp = ExtractStockIcon(82, size);
+                else if (k == "processes" || k == "app") bmp = ExtractStockIcon(2, size);
+                else if (k == "automation" || k == "workflow") bmp = ExtractDllIcon("shell32.dll", 238, size) ?? ExtractStockIcon(22, size);
+                else if (k == "diag" || k == "help") bmp = ExtractStockIcon(23, size);
+                else if (k == "search") bmp = ExtractStockIcon(22, size);
+                else if (k == "refresh" || k == "restart") bmp = ExtractDllIcon("shell32.dll", 238, size) ?? ExtractDllIcon("imageres.dll", 114, size);
+                else if (k == "brand_amd") bmp = ArgonIconPack.GetIcon("brand_amd", Color.FromArgb(237, 28, 36), size);
+                else if (k == "brand_nvidia") bmp = ArgonIconPack.GetIcon("brand_nvidia", Color.FromArgb(118, 185, 0), size);
+                else if (k == "brand_intel") bmp = ArgonIconPack.GetIcon("brand_intel", Color.FromArgb(0, 113, 197), size);
+
+                if (!HasVisiblePixels(bmp)) bmp = ExtractDllIcon("shell32.dll", 165, size);
+                if (!HasVisiblePixels(bmp)) bmp = ExtractStockIcon(79, size);
+                if (!HasVisiblePixels(bmp)) bmp = ArgonIconPack.GetIcon("sliders", ArgonTheme.Accent, size);
+
+                shellCache[cKey] = bmp;
+                return bmp;
+            }
+        }
+    }
+
+    public static class ArgonIconPack
+    {
+        private static readonly Dictionary<string, Image> rawCache = new Dictionary<string, Image>(StringComparer.OrdinalIgnoreCase);
+        private static readonly Dictionary<string, Bitmap> tintedCache = new Dictionary<string, Bitmap>(StringComparer.OrdinalIgnoreCase);
+        private static readonly object iconLock = new object();
+
+        private static Image LoadRawIcon(string key)
+        {
+            if (string.IsNullOrEmpty(key)) return null;
+            lock (iconLock)
+            {
+                Image existing;
+                if (rawCache.TryGetValue(key, out existing)) return existing;
+
+                Image loaded = null;
+                try
+                {
+                    Assembly asm = Assembly.GetExecutingAssembly();
+                    string resName = "argon.icons." + key + ".png";
+                    using (Stream st = asm.GetManifestResourceStream(resName))
+                    {
+                        if (st != null)
+                        {
+                            using (Image tmp = Image.FromStream(st))
+                                loaded = new Bitmap(tmp);
+                        }
+                    }
+                }
+                catch { }
+
+                if (loaded == null)
+                {
+                    try
+                    {
+                        string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+                        string p1 = Path.Combine(baseDir, "assets", "icons", key + ".png");
+                        string p2 = Path.Combine(baseDir, "..", "..", "assets", "icons", key + ".png");
+                        string path = File.Exists(p1) ? p1 : (File.Exists(p2) ? p2 : null);
+                        if (path != null)
+                        {
+                            using (Image tmp = Image.FromFile(path))
+                                loaded = new Bitmap(tmp);
+                        }
+                    }
+                    catch { }
+                }
+
+                rawCache[key] = loaded;
+                return loaded;
+            }
+        }
+
+        public static Bitmap GetIcon(string key, Color tint, int size)
+        {
+            if (string.IsNullOrEmpty(key) || size <= 0) return null;
+            string cacheKey = key + "|" + tint.ToArgb().ToString() + "|" + size;
+            lock (iconLock)
+            {
+                Bitmap cached;
+                if (tintedCache.TryGetValue(cacheKey, out cached)) return cached;
+
+                Image src = LoadRawIcon(key);
+                if (src == null) return null;
+
+                Bitmap bmp = new Bitmap(size, size, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+                try
+                {
+                    using (Graphics g = Graphics.FromImage(bmp))
+                    {
+                        g.SmoothingMode = SmoothingMode.AntiAlias;
+                        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                        g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                        g.Clear(Color.Transparent);
+
+                        float r = tint.R / 255f;
+                        float gr = tint.G / 255f;
+                        float b = tint.B / 255f;
+                        float a = tint.A / 255f;
+
+                        System.Drawing.Imaging.ColorMatrix cm = new System.Drawing.Imaging.ColorMatrix(new float[][]
+                        {
+                            new float[] {0, 0, 0, 0, 0},
+                            new float[] {0, 0, 0, 0, 0},
+                            new float[] {0, 0, 0, 0, 0},
+                            new float[] {0, 0, 0, a, 0},
+                            new float[] {r, gr, b, 0, 1}
+                        });
+                        using (System.Drawing.Imaging.ImageAttributes ia = new System.Drawing.Imaging.ImageAttributes())
+                        {
+                            ia.SetColorMatrix(cm);
+                            g.DrawImage(src, new Rectangle(0, 0, size, size), 0, 0, src.Width, src.Height, GraphicsUnit.Pixel, ia);
+                        }
+                    }
+                    tintedCache[cacheKey] = bmp;
+                    return bmp;
+                }
+                catch
+                {
+                    bmp.Dispose();
+                    return null;
+                }
+            }
+        }
+
+        public static void DrawIcon(Graphics g, Rectangle bounds, string key, Color tint)
+        {
+            if (g == null || bounds.Width <= 0 || bounds.Height <= 0) return;
+            int sz = Math.Min(bounds.Width, bounds.Height);
+            Bitmap bmp = GetIcon(key, tint, sz);
+            if (bmp == null) return;
+            int x = bounds.X + (bounds.Width - sz) / 2;
+            int y = bounds.Y + (bounds.Height - sz) / 2;
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            g.DrawImage(bmp, new Rectangle(x, y, sz, sz));
+        }
+
+        public static string GetVendorLogoKey(string nameOrTag)
+        {
+            string s = (nameOrTag ?? "").ToUpperInvariant();
+            if (s.Contains("AMD") || s.Contains("RYZEN") || s.Contains("RADEON")) return "brand_amd";
+            if (s.Contains("NVIDIA") || s.Contains("GEFORCE") || s.Contains("RTX") || s.Contains("GTX")) return "brand_nvidia";
+            if (s.Contains("INTEL") || s.Contains("CORE") || s.Contains("ARC")) return "brand_intel";
+            return "";
+        }
+
+        public static Bitmap GetVendorBadgeIcon(string nameOrTag, int size)
+        {
+            string key = GetVendorLogoKey(nameOrTag);
+            if (key == "brand_amd") return GetIcon(key, Color.FromArgb(237, 28, 36), size);
+            if (key == "brand_nvidia") return GetIcon(key, Color.FromArgb(118, 185, 0), size);
+            if (key == "brand_intel") return GetIcon(key, Color.FromArgb(0, 113, 197), size);
+            string upper = (nameOrTag ?? "").ToUpperInvariant();
+            string fbKey = (upper.Contains("RX") || upper.Contains("GPU") || upper.Contains("RADEON") || upper.Contains("GEFORCE")) ? "gpu" : "cpu";
+            return WindowsShellIcons.GetIcon(fbKey == "gpu" ? "display" : "pc", size) ?? GetIcon(fbKey, ArgonTheme.Accent, size);
+        }
+
+        public static string ResolveTweakIconKey(string id, string cat, string hw)
+        {
+            if (hw == "AMD_CPU" || hw == "AMD_GPU") return "brand_amd";
+            if (hw == "NVIDIA_GPU") return "brand_nvidia";
+            if (hw == "INTEL_CPU" || hw == "INTEL_GPU") return "brand_intel";
+            if (id == "LAT_CSTATES" || id == "LAT_COREPARK" || id == "EXP_SMT_ISOLATION") return "cpu";
+            if (id == "FPS_HAGS" || id == "FPS_MMCSS_GAMES" || id == "FPS_FSO_FLIP" || id == "WU_MPO_CONTROL") return "gpu";
+            if (id == "NET_DNS_SWITCH" || id == "NET_HOSTPRIO" || id == "WU_IPV4_TEREDO") return "globe";
+            if (cat == "NETWORK" || id == "EXP_TCP_CONGESTION" || id == "EXP_ECN_HEURISTICS" || id == "WU_DELIVERY_OPT") return "network";
+            if (id == "LAT_TIMER" || id == "EXP_SERIALIZE_TIMER" || id == "EXP_SYNTHETIC_PULSE") return "timer";
+            if (id == "LAT_MOUSE_SPI" || id == "LAT_HID_QUEUE" || id == "LAT_FILTERKEYS" || id == "EXP_FOREGROUND_HOOKS") return "mouse";
+            if (id == "LAT_USB_PCIE" || id == "LAT_USB_XHCI" || id == "FPS_NVME_IRQ8") return "usb";
+            if (id == "FPS_MEMORY_ENGINE" || id == "EXP_SVCHOST_SPLIT") return "memory";
+            if (cat == "FPS") return "display";
+            if (cat == "WINUTIL") return "windows";
+            if (cat == "EXPERIMENTAL") return "terminal";
+            return "sliders";
+        }
+    }
 
     public static class TechnicalIconRenderer
     {
@@ -3758,117 +6465,37 @@ namespace ArgonLatencyStudio
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.PixelOffsetMode = PixelOffsetMode.HighQuality;
 
-            if (hw == "INTEL_CPU" || hw == "INTEL_GPU") primary = Color.FromArgb(56, 189, 248);
-            else if (hw == "AMD_CPU") primary = Color.FromArgb(249, 115, 22);
-            else if (hw == "AMD_GPU") primary = Color.FromArgb(239, 68, 68);
-            else if (hw == "NVIDIA_GPU") primary = Color.FromArgb(34, 197, 94);
-
-            Rectangle box = new Rectangle(bounds.X + 1, bounds.Y + 1, bounds.Width - 2, bounds.Height - 2);
-            using (SolidBrush bgBr = new SolidBrush(Color.FromArgb(isEnabled ? 48 : 26, primary)))
-            using (Pen borderPen = new Pen(Color.FromArgb(isEnabled ? 210 : 110, primary), 1.2f))
+            string key = ArgonIconPack.ResolveTweakIconKey(id, cat, hw);
+            if (key.StartsWith("brand_"))
             {
-                g.FillRectangle(bgBr, box);
-                g.DrawRectangle(borderPen, box);
+                Bitmap brandBmp = WindowsShellIcons.GetIcon(key, Math.Max(14, bounds.Width - 2));
+                if (brandBmp != null)
+                {
+                    g.DrawImage(brandBmp, new Rectangle(bounds.X + 1, bounds.Y + 1, bounds.Width - 2, bounds.Height - 2));
+                    return;
+                }
             }
 
-            using (Pen p = new Pen(primary, 1.5f))
-            using (SolidBrush b = new SolidBrush(primary))
-            using (Font f = new Font("Segoe UI", 6.2f, FontStyle.Bold))
-            {
-                int cx = bounds.X + bounds.Width / 2;
-                int cy = bounds.Y + bounds.Height / 2;
+            string shellKey = "settings";
+            if (key == "cpu") shellKey = "pc";
+            else if (key == "gpu" || key == "display") shellKey = "display";
+            else if (key == "globe" || key == "network") shellKey = "network";
+            else if (key == "timer") shellKey = "timer";
+            else if (key == "mouse") shellKey = "mouse";
+            else if (key == "usb" || key == "memory") shellKey = "drive";
+            else if (key == "windows") shellKey = "win11";
+            else if (key == "terminal") shellKey = "kernel";
 
-                if (hw == "INTEL_CPU" || hw == "AMD_CPU" || id == "LAT_CSTATES" || id == "LAT_COREPARK" || id == "EXP_SMT_ISOLATION")
-                {
-                    // CPU Die + Pins
-                    Rectangle die = new Rectangle(cx - 5, cy - 5, 10, 10);
-                    g.DrawRectangle(p, die);
-                    for (int i = -3; i <= 3; i += 3)
-                    {
-                        g.DrawLine(p, cx + i, cy - 8, cx + i, cy - 5);
-                        g.DrawLine(p, cx + i, cy + 5, cx + i, cy + 8);
-                        g.DrawLine(p, cx - 8, cy + i, cx - 5, cy + i);
-                        g.DrawLine(p, cx + 5, cy + i, cx + 8, cy + i);
-                    }
-                    g.FillRectangle(b, cx - 2, cy - 2, 5, 5);
-                }
-                else if (hw == "NVIDIA_GPU" || hw == "AMD_GPU" || hw == "INTEL_GPU" || id == "FPS_HAGS" || id == "FPS_MMCSS_GAMES" || id == "FPS_FSO_FLIP" || id == "WU_MPO_CONTROL")
-                {
-                    // GPU / Display Card with Fan
-                    Rectangle card = new Rectangle(cx - 7, cy - 5, 14, 9);
-                    g.DrawRectangle(p, card);
-                    g.DrawEllipse(p, cx - 3, cy - 3, 6, 6);
-                    g.DrawLine(p, cx - 5, cy + 6, cx + 3, cy + 6); // PCIe gold fingers
-                }
-                else if (id == "NET_DNS_SWITCH" || id == "NET_HOSTPRIO" || id == "WU_IPV4_TEREDO")
-                {
-                    // DNS Globe
-                    Rectangle globe = new Rectangle(cx - 6, cy - 6, 12, 12);
-                    g.DrawEllipse(p, globe);
-                    g.DrawEllipse(p, cx - 3, cy - 6, 6, 12);
-                    g.DrawLine(p, cx - 6, cy, cx + 6, cy);
-                }
-                else if (cat == "NETWORK" || id == "EXP_TCP_CONGESTION" || id == "EXP_ECN_HEURISTICS" || id == "WU_DELIVERY_OPT")
-                {
-                    // RJ45 Network Port / Packet Switch
-                    Rectangle port = new Rectangle(cx - 6, cy - 5, 12, 9);
-                    g.DrawRectangle(p, port);
-                    g.DrawLine(p, cx - 3, cy - 5, cx - 3, cy - 2);
-                    g.DrawLine(p, cx, cy - 5, cx, cy - 2);
-                    g.DrawLine(p, cx + 3, cy - 5, cx + 3, cy - 2);
-                    g.DrawLine(p, cx, cy + 4, cx, cy + 7);
-                    g.DrawLine(p, cx - 5, cy + 7, cx + 5, cy + 7);
-                }
-                else if (id == "LAT_TIMER" || id == "EXP_SERIALIZE_TIMER" || id == "EXP_SYNTHETIC_PULSE")
-                {
-                    // High-Precision Oscilloscope / Timer Pulse
-                    Rectangle clk = new Rectangle(cx - 6, cy - 6, 12, 12);
-                    g.DrawEllipse(p, clk);
-                    g.DrawLine(p, cx, cy, cx, cy - 4);
-                    g.DrawLine(p, cx, cy, cx + 3, cy + 2);
-                }
-                else if (id == "LAT_MOUSE_SPI" || id == "LAT_HID_QUEUE" || id == "LAT_FILTERKEYS" || id == "EXP_FOREGROUND_HOOKS")
-                {
-                    // Precision Input / Mouse Body
-                    Rectangle m = new Rectangle(cx - 4, cy - 6, 8, 12);
-                    g.DrawRectangle(p, m);
-                    g.DrawLine(p, cx - 4, cy - 1, cx + 4, cy - 1);
-                    g.DrawLine(p, cx, cy - 6, cx, cy - 1);
-                }
-                else if (id == "LAT_USB_PCIE" || id == "LAT_USB_XHCI" || id == "FPS_NVME_IRQ8")
-                {
-                    // Bus / Trident / NVMe Lane
-                    g.DrawLine(p, cx - 5, cy, cx + 6, cy);
-                    g.DrawLine(p, cx - 2, cy, cx + 1, cy - 4);
-                    g.DrawLine(p, cx, cy, cx + 3, cy + 4);
-                    g.FillEllipse(b, cx - 7, cy - 2, 4, 4);
-                    g.FillRectangle(b, cx + 4, cy - 2, 3, 4);
-                }
-                else if (id == "FPS_MEMORY_ENGINE" || id == "EXP_SVCHOST_SPLIT")
-                {
-                    // RAM DIMM Module
-                    Rectangle ram = new Rectangle(cx - 7, cy - 4, 14, 7);
-                    g.DrawRectangle(p, ram);
-                    g.FillRectangle(b, cx - 5, cy - 2, 2, 3);
-                    g.FillRectangle(b, cx - 1, cy - 2, 2, 3);
-                    g.FillRectangle(b, cx + 3, cy - 2, 2, 3);
-                    g.DrawLine(p, cx - 5, cy + 5, cx + 5, cy + 5);
-                }
-                else
-                {
-                    // Shield / Kernel Lock
-                    Point[] shield = new Point[]
-                    {
-                        new Point(cx, cy - 6),
-                        new Point(cx + 6, cy - 3),
-                        new Point(cx + 5, cy + 3),
-                        new Point(cx, cy + 7),
-                        new Point(cx - 5, cy + 3),
-                        new Point(cx - 6, cy - 3)
-                    };
-                    g.DrawPolygon(p, shield);
-                }
+            Bitmap shBmp = WindowsShellIcons.GetIcon(shellKey, Math.Max(16, Math.Min(bounds.Width, bounds.Height)));
+            if (shBmp != null)
+            {
+                g.DrawImage(shBmp, new Rectangle(bounds.X + 1, bounds.Y + 1, bounds.Width - 2, bounds.Height - 2));
+                return;
             }
+
+            int pad = 4;
+            Rectangle iconRect = new Rectangle(bounds.X + pad, bounds.Y + pad, Math.Max(12, bounds.Width - pad * 2), Math.Max(12, bounds.Height - pad * 2));
+            ArgonIconPack.DrawIcon(g, iconRect, key, isEnabled ? ArgonTheme.Accent : ArgonTheme.TextMuted);
         }
     }
 
@@ -3906,7 +6533,7 @@ namespace ArgonLatencyStudio
             this.DoubleBuffered = true;
             this.Height = ROW_HEIGHT;
             this.Width = 740;
-            this.BackColor = Color.FromArgb(18, 22, 31);
+            this.BackColor = ArgonTheme.BgCanvas;
             this.Margin = new Padding(0, 0, 0, 2);
 
             BuildCompactUtilityRow();
@@ -3969,7 +6596,7 @@ namespace ArgonLatencyStudio
             {
                 Text = cleanTitle,
                 Font = new Font("Segoe UI", 8.6f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(226, 232, 240),
+                ForeColor = ArgonTheme.TextPrimary,
                 AutoSize = false,
                 AutoEllipsis = true,
                 UseMnemonic = false,
@@ -3986,9 +6613,9 @@ namespace ArgonLatencyStudio
             {
                 DropDownStyle = ComboBoxStyle.DropDownList,
                 Font = new Font("Segoe UI", 7.8f, FontStyle.Regular),
-                BackColor = Color.FromArgb(13, 16, 23),
-                ForeColor = Color.FromArgb(203, 213, 225),
-                FlatStyle = FlatStyle.Flat,
+                BackColor = ArgonTheme.BgInput,
+                ForeColor = ArgonTheme.TextPrimary,
+                FlatStyle = FlatStyle.Standard,
                 Size = new Size(215, 22),
                 DropDownWidth = 380,
                 Cursor = Cursors.Hand
@@ -4031,8 +6658,8 @@ namespace ArgonLatencyStudio
             {
                 Text = "Varsayılan",
                 Font = new Font("Consolas", 7.6f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(148, 163, 184),
-                BackColor = Color.FromArgb(24, 30, 42),
+                ForeColor = ArgonTheme.TextSecondary,
+                BackColor = ArgonTheme.BgSurface,
                 AutoSize = false,
                 AutoEllipsis = true,
                 TextAlign = ContentAlignment.MiddleCenter,
@@ -4042,52 +6669,52 @@ namespace ArgonLatencyStudio
             lblLiveStateBadge.Click += (s, e) => ShowTechnicalSpecDialog();
             this.Controls.Add(lblLiveStateBadge);
 
-            // 6. Quick Technical Spec Inspect Button [?]
+            // 6. Quick Technical Spec Inspect Button
             btnInfoInspect = new Button
             {
-                Text = "?",
-                Font = new Font("Consolas", 8.0f, FontStyle.Bold),
+                Text = "",
+                Image = ArgonIconPack.GetIcon("info", ArgonTheme.TextMuted, 14),
+                ImageAlign = ContentAlignment.MiddleCenter,
                 FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(26, 33, 48),
-                ForeColor = Color.FromArgb(148, 163, 184),
-                Size = new Size(22, 22),
+                BackColor = ArgonTheme.BgInput,
+                ForeColor = ArgonTheme.TextMuted,
+                Size = new Size(24, 24),
                 Cursor = Cursors.Hand
             };
             btnInfoInspect.FlatAppearance.BorderSize = 1;
-            btnInfoInspect.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnInfoInspect.FlatAppearance.BorderColor = ArgonTheme.BorderSubtle;
             btnInfoInspect.Click += (s, e) => ShowTechnicalSpecDialog();
             this.Controls.Add(btnInfoInspect);
 
-            // 7. Machine-Specific Customizable Parameter Button [⚙]
+            // 7. Machine-Specific Customizable Parameter Button
             if (Tweak.HasCustomParam)
             {
                 btnGearConfig = new Button
                 {
-                    Text = "⚙",
-                    Font = new Font("Segoe UI Symbol", 8.2f, FontStyle.Regular),
+                    Text = "",
+                    Image = ArgonIconPack.GetIcon("settings", ArgonTheme.Accent, 14),
+                    ImageAlign = ContentAlignment.MiddleCenter,
                     FlatStyle = FlatStyle.Flat,
-                    BackColor = Color.FromArgb(20, 26, 38),
-                    ForeColor = Color.FromArgb(56, 189, 248),
-                    Size = new Size(22, 22),
+                    BackColor = ArgonTheme.BgInput,
+                    ForeColor = ArgonTheme.Accent,
+                    Size = new Size(24, 24),
                     Cursor = Cursors.Hand
                 };
                 btnGearConfig.FlatAppearance.BorderSize = 1;
-                btnGearConfig.FlatAppearance.BorderColor = Color.FromArgb(45, 68, 98);
+                btnGearConfig.FlatAppearance.BorderColor = ArgonTheme.BorderSubtle;
                 btnGearConfig.Click += (s, e) => ShowCustomParameterModal();
                 btnGearConfig.MouseEnter += (s, e) =>
                 {
-                    btnGearConfig.BackColor = Color.FromArgb(28, 42, 62);
-                    btnGearConfig.ForeColor = Color.FromArgb(125, 211, 252);
-                    btnGearConfig.FlatAppearance.BorderColor = Color.FromArgb(56, 189, 248);
+                    btnGearConfig.BackColor = ArgonTheme.AccentSoft;
+                    btnGearConfig.FlatAppearance.BorderColor = ArgonTheme.Accent;
                 };
                 btnGearConfig.MouseLeave += (s, e) =>
                 {
-                    btnGearConfig.BackColor = Color.FromArgb(20, 26, 38);
-                    btnGearConfig.ForeColor = Color.FromArgb(56, 189, 248);
-                    btnGearConfig.FlatAppearance.BorderColor = Color.FromArgb(45, 68, 98);
+                    btnGearConfig.BackColor = ArgonTheme.BgInput;
+                    btnGearConfig.FlatAppearance.BorderColor = ArgonTheme.BorderSubtle;
                 };
                 this.Controls.Add(btnGearConfig);
-                sharedToolTip.SetToolTip(btnGearConfig, Loc.T("Makineye özel parametre belirle [⚙]", "Configure machine-specific parameter [⚙]"));
+                sharedToolTip.SetToolTip(btnGearConfig, Loc.T("Makineye özel parametre belirle", "Configure machine-specific parameter"));
             }
 
             UpdateCustomVariationLabel();
@@ -4166,6 +6793,11 @@ namespace ArgonLatencyStudio
                 btnGearConfig.Location = new Point(rightX, 7);
                 rightX -= 5;
             }
+            else
+            {
+                // Keep column alignment straight across all tweak cards
+                rightX -= 29;
+            }
 
             if (lblLiveStateBadge != null)
             {
@@ -4178,10 +6810,10 @@ namespace ArgonLatencyStudio
 
             if (cmbVariations != null)
             {
-                int comboW = w >= 800 ? 250 : (w >= 700 ? 220 : 185);
+                int comboW = w >= 980 ? 290 : (w >= 820 ? 250 : (w >= 680 ? 215 : 175));
                 rightX -= comboW;
-                cmbVariations.Size = new Size(comboW, 22);
-                cmbVariations.Location = new Point(rightX, 7);
+                cmbVariations.Size = new Size(comboW, 24);
+                cmbVariations.Location = new Point(rightX, 6);
                 rightX -= 8;
             }
 
@@ -4228,17 +6860,17 @@ namespace ArgonLatencyStudio
         {
             base.OnPaint(e);
             Color borderColor = Tweak.IsEnabled
-                ? Color.FromArgb(140, Tweak.BadgeColor)
-                : (isMouseHovered ? Color.FromArgb(65, 80, 110) : Color.FromArgb(30, 37, 52));
+                ? ArgonTheme.Accent
+                : (isMouseHovered ? ArgonTheme.BorderSubtle : ArgonTheme.BorderSubtle);
 
             using (Pen p = new Pen(borderColor, 1))
             {
                 e.Graphics.DrawRectangle(p, 0, 0, this.Width - 1, this.Height - 1);
             }
 
-            using (SolidBrush accentBr = new SolidBrush(Tweak.IsEnabled ? Tweak.BadgeColor : Color.FromArgb(45, 55, 76)))
+            using (SolidBrush accentBr = new SolidBrush(Tweak.IsEnabled ? ArgonTheme.Accent : ArgonTheme.BorderSubtle))
             {
-                e.Graphics.FillRectangle(accentBr, 0, 0, Tweak.IsEnabled ? 4 : 2, this.Height);
+                e.Graphics.FillRectangle(accentBr, 0, 0, Tweak.IsEnabled ? 3 : 2, this.Height);
             }
         }
 
@@ -4316,18 +6948,18 @@ namespace ArgonLatencyStudio
             UpdateCustomVariationLabel();
 
             this.BackColor = Tweak.IsEnabled
-                ? Color.FromArgb(17, 29, 39)
-                : (isMouseHovered ? Color.FromArgb(23, 29, 42) : Color.FromArgb(17, 21, 30));
+                ? ArgonTheme.AccentSoft
+                : (isMouseHovered ? ArgonTheme.BgSurfaceHover : ArgonTheme.BgCanvas);
 
             if (lblTitle != null)
             {
-                lblTitle.ForeColor = Tweak.IsEnabled ? Color.White : Color.FromArgb(212, 220, 232);
+                lblTitle.ForeColor = Tweak.IsEnabled ? ArgonTheme.TextPrimary : ArgonTheme.TextSecondary;
             }
 
             if (cmbVariations != null)
             {
-                cmbVariations.BackColor = Tweak.IsEnabled ? Color.FromArgb(14, 24, 34) : Color.FromArgb(13, 16, 23);
-                cmbVariations.ForeColor = Tweak.IsEnabled ? Color.FromArgb(56, 189, 248) : Color.FromArgb(175, 188, 208);
+                cmbVariations.BackColor = ArgonTheme.BgInput;
+                cmbVariations.ForeColor = Tweak.IsEnabled ? ArgonTheme.Accent : ArgonTheme.TextMuted;
             }
 
             if (lblLiveStateBadge != null)
@@ -4337,52 +6969,52 @@ namespace ArgonLatencyStudio
                     if (Tweak.IsRebootPending)
                     {
                         int safeIdx = Math.Max(0, Math.Min(Tweak.SelectedVariationIndex, Tweak.Variations.Count - 1));
-                        string modTag = Tweak.Variations.Count > 1 ? string.Format(Loc.T("Mod {0} (Restart)", "Mode {0} (Restart)"), safeIdx + 1) : Loc.T("Restart Bekliyor", "Restart Pending");
-                        lblLiveStateBadge.Text = "⚠️ " + modTag;
-                        lblLiveStateBadge.ForeColor = Color.FromArgb(251, 191, 36);
-                        lblLiveStateBadge.BackColor = Color.FromArgb(52, 34, 14);
+                        string modTag = Tweak.Variations.Count > 1 ? string.Format(Loc.T("Mod {0} · Restart", "Mode {0} · Restart"), safeIdx + 1) : Loc.T("Restart Bekliyor", "Restart Pending");
+                        lblLiveStateBadge.Text = modTag;
+                        lblLiveStateBadge.ForeColor = ArgonTheme.Alert;
+                        lblLiveStateBadge.BackColor = ArgonTheme.AlertSoft;
                     }
                     else if (Tweak.IsNetReloadPending)
                     {
-                        lblLiveStateBadge.Text = Loc.T("⚡ Ağ Yenileme", "⚡ Net Reload");
-                        lblLiveStateBadge.ForeColor = Color.FromArgb(56, 189, 248);
-                        lblLiveStateBadge.BackColor = Color.FromArgb(15, 36, 56);
+                        lblLiveStateBadge.Text = Loc.T("Ağ Yenileme", "Net Reload");
+                        lblLiveStateBadge.ForeColor = ArgonTheme.Accent;
+                        lblLiveStateBadge.BackColor = ArgonTheme.AccentSoft;
                     }
                     else if (Tweak.IsVerifiedInOs)
                     {
-                        string vText = !string.IsNullOrEmpty(Tweak.VerifiedSystemValue) ? Tweak.VerifiedSystemValue : Loc.T("UYGULANDI", "APPLIED");
-                        lblLiveStateBadge.Text = "✓ " + vText;
-                        lblLiveStateBadge.ForeColor = Color.FromArgb(52, 211, 153);
-                        lblLiveStateBadge.BackColor = Color.FromArgb(13, 40, 32);
+                        string vText = !string.IsNullOrEmpty(Tweak.VerifiedSystemValue) ? Tweak.VerifiedSystemValue : Loc.T("Doğrulandı", "Verified");
+                        lblLiveStateBadge.Text = vText;
+                        lblLiveStateBadge.ForeColor = ArgonTheme.Accent;
+                        lblLiveStateBadge.BackColor = ArgonTheme.AccentSoft;
                     }
                     else
                     {
-                        lblLiveStateBadge.Text = Loc.T("✓ UYGULANDI", "✓ APPLIED");
-                        lblLiveStateBadge.ForeColor = Color.FromArgb(52, 211, 153);
-                        lblLiveStateBadge.BackColor = Color.FromArgb(13, 40, 32);
+                        lblLiveStateBadge.Text = Loc.T("Uygulandı", "Applied");
+                        lblLiveStateBadge.ForeColor = ArgonTheme.Accent;
+                        lblLiveStateBadge.BackColor = ArgonTheme.AccentSoft;
                     }
                 }
                 else
                 {
                     if (Tweak.IsRebootPending)
                     {
-                        lblLiveStateBadge.Text = Loc.T("⚠️ Pasif (Restart)", "⚠️ Disabled (Restart)");
-                        lblLiveStateBadge.ForeColor = Color.FromArgb(251, 191, 36);
-                        lblLiveStateBadge.BackColor = Color.FromArgb(52, 34, 14);
+                        lblLiveStateBadge.Text = Loc.T("Pasif · Restart", "Disabled · Restart");
+                        lblLiveStateBadge.ForeColor = ArgonTheme.Alert;
+                        lblLiveStateBadge.BackColor = ArgonTheme.AlertSoft;
                     }
                     else if (Tweak.IsDetectedActiveInOs)
                     {
-                        string dText = !string.IsNullOrEmpty(Tweak.VerifiedSystemValue) ? Tweak.VerifiedSystemValue : Loc.T("SİSTEMDE AKTİF", "ACTIVE IN OS");
-                        lblLiveStateBadge.Text = "● " + dText;
-                        lblLiveStateBadge.ForeColor = Color.FromArgb(56, 189, 248);
-                        lblLiveStateBadge.BackColor = Color.FromArgb(14, 34, 52);
+                        string dText = !string.IsNullOrEmpty(Tweak.VerifiedSystemValue) ? Tweak.VerifiedSystemValue : Loc.T("Sistemde Aktif", "Active in OS");
+                        lblLiveStateBadge.Text = dText;
+                        lblLiveStateBadge.ForeColor = ArgonTheme.Accent;
+                        lblLiveStateBadge.BackColor = ArgonTheme.AccentSoft;
                     }
                     else
                     {
                         string defTxt = string.IsNullOrEmpty(Tweak.CapturedOriginalSummary) ? Loc.T("Varsayılan", "Default") : Tweak.CapturedOriginalSummary;
                         lblLiveStateBadge.Text = defTxt;
-                        lblLiveStateBadge.ForeColor = Color.FromArgb(125, 140, 165);
-                        lblLiveStateBadge.BackColor = Color.FromArgb(22, 27, 38);
+                        lblLiveStateBadge.ForeColor = ArgonTheme.TextMuted;
+                        lblLiveStateBadge.BackColor = ArgonTheme.BgInput;
                     }
                 }
             }
@@ -7260,7 +9892,2911 @@ namespace ArgonLatencyStudio
         }
     }
 
+    public class DoubleBufferedPanel : Panel
+    {
+        public DoubleBufferedPanel()
+        {
+            this.DoubleBuffered = true;
+            this.ResizeRedraw = true;
+        }
+    }
+
+    public class InputLabDiagnosticsDialog : Form
+    {
+        private StateVault vault;
+        private Action onOpenMsiExplorer;
+        private RawInputSampleTracker tracker;
+        private RawInputHookNativeWindow rawHook;
+        private System.Windows.Forms.Timer uiTimer;
+
+        private Button btnTabRaw, btnTabUsb;
+        private Panel pnlRawTab, pnlUsbTab;
+
+        private DoubleBufferedPanel pnlTestPad;
+        private DoubleBufferedPanel pnlSparkline;
+        private Label lblMetricPrimary;
+        private Label lblMetricSecondary;
+        private Label lblMetricDevice;
+        private CheckBox chkPadOnlyFilter;
+        private InputDeliveryMetrics lastMetrics = new InputDeliveryMetrics();
+
+        private ListView lvUsbDevices;
+        private TextBox txtUsbFindings;
+
+        public InputLabDiagnosticsDialog(StateVault vault, Action onOpenMsiExplorer)
+        {
+            this.vault = vault;
+            this.onOpenMsiExplorer = onOpenMsiExplorer;
+            this.tracker = new RawInputSampleTracker(4000);
+            this.rawHook = new RawInputHookNativeWindow(OnRawMouseHandle);
+
+            this.Text = "Argon Latency Studio — InputLab Raw Input Teslimat & USB Topoloji Laboratuvarı";
+            this.Size = new Size(900, 690);
+            this.StartPosition = FormStartPosition.CenterParent;
+            this.FormBorderStyle = FormBorderStyle.FixedDialog;
+            this.MaximizeBox = false;
+            this.MinimizeBox = false;
+            this.BackColor = Color.FromArgb(13, 16, 23);
+            this.ForeColor = Color.White;
+            this.Font = new Font("Segoe UI", 8.5f, FontStyle.Regular);
+
+            BuildUi();
+            DisableMnemonicsRecursive(this);
+
+            this.Shown += (s, e) =>
+            {
+                rawHook.AttachAndRegister(this.Handle);
+                RefreshUsbTopology();
+            };
+
+            uiTimer = new System.Windows.Forms.Timer { Interval = 100 };
+            uiTimer.Tick += (s, e) => RefreshRawInputDisplay();
+            uiTimer.Start();
+        }
+
+        private static void DisableMnemonicsRecursive(Control root)
+        {
+            foreach (Control c in root.Controls)
+            {
+                Label l = c as Label;
+                if (l != null) l.UseMnemonic = false;
+                ButtonBase b = c as ButtonBase;
+                if (b != null) b.UseMnemonic = false;
+                if (c.HasChildren) DisableMnemonicsRecursive(c);
+            }
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            if (uiTimer != null)
+            {
+                uiTimer.Stop();
+                uiTimer.Dispose();
+                uiTimer = null;
+            }
+            if (rawHook != null)
+            {
+                rawHook.UnregisterAndDetach();
+            }
+            if (tracker != null)
+            {
+                tracker.Dispose();
+                tracker = null;
+            }
+            base.OnFormClosing(e);
+        }
+
+        private void OnRawMouseHandle(IntPtr hRawInput)
+        {
+            if (tracker == null || !pnlRawTab.Visible) return;
+            if (chkPadOnlyFilter != null && chkPadOnlyFilter.Checked)
+            {
+                try
+                {
+                    Point pt = pnlTestPad.PointToClient(Cursor.Position);
+                    if (!pnlTestPad.ClientRectangle.Contains(pt)) return;
+                }
+                catch { return; }
+            }
+            tracker.RecordRawMouseMessage(hRawInput);
+        }
+
+        private void BuildUi()
+        {
+            // Header
+            Panel pnlHdr = new Panel
+            {
+                Location = new Point(0, 0),
+                Size = new Size(900, 72),
+                BackColor = Color.FromArgb(18, 23, 34)
+            };
+            this.Controls.Add(pnlHdr);
+
+            Label lblTitle = new Label
+            {
+                Text = "⚡ INPUTLAB: RAW INPUT (WM_INPUT) HOST TESLİMAT ZAMANLAMASI & USB TOPOLOJİSİ",
+                Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(52, 211, 153),
+                Location = new Point(16, 10),
+                AutoSize = true
+            };
+            pnlHdr.Controls.Add(lblTitle);
+
+            Label lblSub = new Label
+            {
+                Text = "Not: Ölçülen metrik Windows'un WM_INPUT paketlerini uygulamaya teslim etme aralığı/jitter değeridir; fiziksel sensör veya click-to-photon gecikmesi değildir.",
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Italic),
+                ForeColor = Color.FromArgb(148, 163, 184),
+                Location = new Point(17, 34),
+                Size = new Size(850, 28)
+            };
+            pnlHdr.Controls.Add(lblSub);
+
+            // Sub-Navigation
+            Panel pnlNav = new Panel
+            {
+                Location = new Point(0, 72),
+                Size = new Size(900, 38),
+                BackColor = Color.FromArgb(15, 19, 28)
+            };
+            this.Controls.Add(pnlNav);
+
+            btnTabRaw = new Button
+            {
+                Text = "▶ Canlı Raw Input Host Teslimatı (WM_INPUT)",
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                Location = new Point(16, 5),
+                Size = new Size(300, 28),
+                Cursor = Cursors.Hand
+            };
+            btnTabRaw.FlatAppearance.BorderSize = 0;
+            btnTabRaw.Click += (s, e) => SwitchTab(0);
+            pnlNav.Controls.Add(btnTabRaw);
+
+            btnTabUsb = new Button
+            {
+                Text = "≡ USB Denetleyici Ağacı, Paylaşım & Güç Denetimi",
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                Location = new Point(324, 5),
+                Size = new Size(330, 28),
+                Cursor = Cursors.Hand
+            };
+            btnTabUsb.FlatAppearance.BorderSize = 0;
+            btnTabUsb.Click += (s, e) => SwitchTab(1);
+            pnlNav.Controls.Add(btnTabUsb);
+
+            pnlRawTab = new Panel { Location = new Point(16, 118), Size = new Size(858, 480), BackColor = Color.FromArgb(13, 16, 23) };
+            pnlUsbTab = new Panel { Location = new Point(16, 118), Size = new Size(858, 480), BackColor = Color.FromArgb(13, 16, 23), Visible = false };
+            this.Controls.Add(pnlRawTab);
+            this.Controls.Add(pnlUsbTab);
+
+            BuildRawTabUi();
+            BuildUsbTabUi();
+
+            // Bottom Bar
+            Panel pnlBot = new Panel
+            {
+                Location = new Point(0, 606),
+                Size = new Size(900, 48),
+                BackColor = Color.FromArgb(18, 23, 34)
+            };
+            this.Controls.Add(pnlBot);
+
+            Button btnOpenMsi = new Button
+            {
+                Text = "⚡ PCIe MSI & USB Denetleyici Kesme Yöneticisini Aç",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(37, 45, 64),
+                ForeColor = Color.FromArgb(56, 189, 248),
+                Location = new Point(16, 9),
+                Size = new Size(340, 30),
+                Cursor = Cursors.Hand
+            };
+            btnOpenMsi.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnOpenMsi.Click += (s, e) =>
+            {
+                if (onOpenMsiExplorer != null)
+                {
+                    onOpenMsiExplorer();
+                    this.Close();
+                }
+            };
+            pnlBot.Controls.Add(btnOpenMsi);
+
+            Button btnClose = new Button
+            {
+                Text = "Kapat",
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(30, 41, 59),
+                ForeColor = Color.White,
+                Location = new Point(780, 9),
+                Size = new Size(94, 30),
+                Cursor = Cursors.Hand,
+                DialogResult = DialogResult.OK
+            };
+            btnClose.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnClose.Click += (s, e) => this.Close();
+            pnlBot.Controls.Add(btnClose);
+
+            SwitchTab(0);
+        }
+
+        private void SwitchTab(int idx)
+        {
+            pnlRawTab.Visible = (idx == 0);
+            pnlUsbTab.Visible = (idx == 1);
+            btnTabRaw.BackColor = (idx == 0) ? Color.FromArgb(16, 185, 129) : Color.FromArgb(24, 31, 46);
+            btnTabRaw.ForeColor = (idx == 0) ? Color.Black : Color.FromArgb(148, 163, 184);
+            btnTabUsb.BackColor = (idx == 1) ? Color.FromArgb(56, 189, 248) : Color.FromArgb(24, 31, 46);
+            btnTabUsb.ForeColor = (idx == 1) ? Color.Black : Color.FromArgb(148, 163, 184);
+        }
+
+        private void BuildRawTabUi()
+        {
+            // Stats Summary Card
+            Panel pnlStats = new Panel
+            {
+                Location = new Point(0, 0),
+                Size = new Size(856, 96),
+                BackColor = Color.FromArgb(18, 23, 34)
+            };
+            pnlStats.Paint += (s, e) =>
+            {
+                using (Pen p = new Pen(Color.FromArgb(45, 55, 75), 1))
+                {
+                    e.Graphics.DrawRectangle(p, 0, 0, pnlStats.Width - 1, pnlStats.Height - 1);
+                }
+            };
+            pnlRawTab.Controls.Add(pnlStats);
+
+            lblMetricPrimary = new Label
+            {
+                Text = "Medyan Aralık: -- ms (~-- Hz)  |  Ortalama: -- ms (~-- Hz)  |  Örnek: 0",
+                Font = new Font("Segoe UI", 10.2f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(52, 211, 153),
+                Location = new Point(12, 10),
+                Size = new Size(830, 24)
+            };
+            pnlStats.Controls.Add(lblMetricPrimary);
+
+            lblMetricSecondary = new Label
+            {
+                Text = "P95: -- ms | P99: -- ms | Max: -- ms | Jitter (StdDev): ±-- ms | Batch (<0.12ms): %-- | Gap (>2.5x): 0 | Tutarlılık: --",
+                Font = new Font("Consolas", 8.2f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(226, 232, 240),
+                Location = new Point(12, 40),
+                Size = new Size(830, 22)
+            };
+            pnlStats.Controls.Add(lblMetricSecondary);
+
+            lblMetricDevice = new Label
+            {
+                Text = "Aktif Raw Input Fare (hDevice): Hareket bekleniyor...",
+                Font = new Font("Consolas", 7.8f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(148, 163, 184),
+                Location = new Point(12, 66),
+                Size = new Size(830, 20),
+                AutoEllipsis = true
+            };
+            pnlStats.Controls.Add(lblMetricDevice);
+
+            // Real-time Interval Sparkline (0..4ms visualization)
+            pnlSparkline = new DoubleBufferedPanel
+            {
+                Location = new Point(0, 104),
+                Size = new Size(856, 130),
+                BackColor = Color.FromArgb(10, 13, 19)
+            };
+            pnlSparkline.Paint += PnlSparkline_Paint;
+            pnlRawTab.Controls.Add(pnlSparkline);
+
+            // Interactive Capture Pad
+            pnlTestPad = new DoubleBufferedPanel
+            {
+                Location = new Point(0, 242),
+                Size = new Size(856, 188),
+                BackColor = Color.FromArgb(16, 22, 32),
+                Cursor = Cursors.Cross
+            };
+            pnlTestPad.Paint += (s, e) =>
+            {
+                using (Pen p = new Pen(Color.FromArgb(52, 211, 153), 1))
+                {
+                    e.Graphics.DrawRectangle(p, 0, 0, pnlTestPad.Width - 1, pnlTestPad.Height - 1);
+                }
+                using (Font f = new Font("Segoe UI", 10.0f, FontStyle.Bold))
+                using (Brush b = new SolidBrush(Color.FromArgb(148, 163, 184)))
+                {
+                    StringFormat sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+                    e.Graphics.DrawString("FAREYİ BU ALANDA HIZLICA DAİRESEL HAREKET ETTİRİN\n(Gerçek Win32 WM_INPUT Teslimat Aralıkları Ölçülür)",
+                        f, b, new RectangleF(10, 10, pnlTestPad.Width - 20, pnlTestPad.Height - 20), sf);
+                }
+            };
+            pnlRawTab.Controls.Add(pnlTestPad);
+
+            // Controls Row
+            chkPadOnlyFilter = new CheckBox
+            {
+                Text = "Yalnızca test alanının üzerindeyken kaydet (Önerilen)",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(203, 213, 225),
+                Location = new Point(0, 442),
+                Size = new Size(340, 24),
+                Checked = true
+            };
+            pnlRawTab.Controls.Add(chkPadOnlyFilter);
+
+            Button btnReset = new Button
+            {
+                Text = "↺ Ölçümü Sıfırla",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(45, 55, 75),
+                ForeColor = Color.White,
+                Location = new Point(365, 438),
+                Size = new Size(145, 32),
+                Cursor = Cursors.Hand
+            };
+            btnReset.FlatAppearance.BorderSize = 0;
+            btnReset.Click += (s, e) =>
+            {
+                if (tracker != null) tracker.Reset();
+                RefreshRawInputDisplay();
+            };
+            pnlRawTab.Controls.Add(btnReset);
+
+            Button btnCopy = new Button
+            {
+                Text = "≡ Özeti Kopyala",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(37, 45, 64),
+                ForeColor = Color.FromArgb(56, 189, 248),
+                Location = new Point(518, 438),
+                Size = new Size(160, 32),
+                Cursor = Cursors.Hand
+            };
+            btnCopy.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnCopy.Click += (s, e) =>
+            {
+                try
+                {
+                    Clipboard.SetText(lblMetricPrimary.Text + Environment.NewLine + lblMetricSecondary.Text + Environment.NewLine + lblMetricDevice.Text);
+                    MessageBox.Show("InputLab özet verileri panoya kopyalandı.", "Kopyalandı", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                catch { }
+            };
+            pnlRawTab.Controls.Add(btnCopy);
+
+            Button btnExportCsv = new Button
+            {
+                Text = "↓ CSV Trace Kaydet",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(16, 185, 129),
+                ForeColor = Color.Black,
+                Location = new Point(686, 438),
+                Size = new Size(170, 32),
+                Cursor = Cursors.Hand
+            };
+            btnExportCsv.FlatAppearance.BorderSize = 0;
+            btnExportCsv.Click += (s, e) =>
+            {
+                if (tracker == null) return;
+                using (SaveFileDialog sfd = new SaveFileDialog())
+                {
+                    sfd.Filter = "CSV Dosyası (*.csv)|*.csv";
+                    sfd.FileName = string.Format("argon_inputlab_trace_{0:yyyyMMdd_HHmmss}.csv", DateTime.Now);
+                    if (sfd.ShowDialog(this) == DialogResult.OK)
+                    {
+                        tracker.ExportCsv(sfd.FileName);
+                        MessageBox.Show("Ham WM_INPUT teslimat zamanları CSV olarak kaydedildi:\n" + sfd.FileName, "Kaydedildi", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+                }
+            };
+            pnlRawTab.Controls.Add(btnExportCsv);
+        }
+
+        private void PnlSparkline_Paint(object sender, PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            int w = pnlSparkline.Width;
+            int h = pnlSparkline.Height;
+
+            using (Pen borderPen = new Pen(Color.FromArgb(45, 55, 75), 1))
+            {
+                g.DrawRectangle(borderPen, 0, 0, w - 1, h - 1);
+            }
+
+            // Grid lines (0.5ms, 1.0ms, 2.0ms, 4.0ms)
+            double maxScaleMs = 4.0;
+            if (lastMetrics != null && lastMetrics.P95DeltaMs > 3.5)
+                maxScaleMs = Math.Min(16.0, Math.Max(4.0, Math.Ceiling(lastMetrics.P95DeltaMs * 1.4)));
+
+            double[] refs = new double[] { 0.5, 1.0, 2.0, maxScaleMs / 2.0 };
+            using (Pen gridPen = new Pen(Color.FromArgb(30, 41, 59), 1))
+            using (Font gf = new Font("Consolas", 7.2f))
+            using (Brush gb = new SolidBrush(Color.FromArgb(100, 116, 139)))
+            {
+                foreach (double r in refs)
+                {
+                    if (r >= maxScaleMs) continue;
+                    int y = h - 14 - (int)((r / maxScaleMs) * (h - 24));
+                    g.DrawLine(gridPen, 42, y, w - 6, y);
+                    g.DrawString(string.Format("{0:0.0}ms", r), gf, gb, 4, y - 6);
+                }
+            }
+
+            if (lastMetrics == null || lastMetrics.RecentDeltasMs.Count == 0)
+            {
+                using (Font f = new Font("Consolas", 8.0f))
+                using (Brush b = new SolidBrush(Color.FromArgb(100, 116, 139)))
+                {
+                    g.DrawString("Canlı WM_INPUT aralık grafiği: Veri bekleniyor...", f, b, 52, h / 2 - 8);
+                }
+                return;
+            }
+
+            List<double> pts = lastMetrics.RecentDeltasMs;
+            int maxBars = Math.Min(pts.Count, (w - 50) / 3);
+            int startIdx = pts.Count - maxBars;
+            double median = Math.Max(0.1, lastMetrics.MedianDeltaMs);
+
+            for (int i = 0; i < maxBars; i++)
+            {
+                double val = pts[startIdx + i];
+                double norm = Math.Min(1.0, val / maxScaleMs);
+                int barH = Math.Max(2, (int)(norm * (h - 24)));
+                int x = 46 + i * 3;
+                int y = h - 14 - barH;
+
+                Color barCol = Color.FromArgb(52, 211, 153);
+                if (val < 0.12) barCol = Color.FromArgb(56, 189, 248); // Batch stacked burst
+                else if (val > median * 2.5 && val > 2.2) barCol = Color.FromArgb(248, 113, 113); // Gap spike
+                else if (val > median * 1.45) barCol = Color.FromArgb(251, 191, 36); // Minor variance
+
+                using (Brush br = new SolidBrush(barCol))
+                {
+                    g.FillRectangle(br, x, y, 2, barH);
+                }
+            }
+
+            using (Font lf = new Font("Segoe UI", 7.2f, FontStyle.Regular))
+            using (Brush lb = new SolidBrush(Color.FromArgb(148, 163, 184)))
+            {
+                g.DrawString(string.Format("Ölçek: 0 - {0:0.0} ms  |  Yeşil: Stabil   Mavi: Sıkışma (<0.12ms)   Kırmızı: Boşluk/Zıplama", maxScaleMs), lf, lb, 46, 3);
+            }
+        }
+
+        private void RefreshRawInputDisplay()
+        {
+            if (tracker == null || !pnlRawTab.Visible) return;
+            lastMetrics = tracker.ComputeMetrics(260);
+            if (lastMetrics.SampleCount == 0) return;
+
+            lblMetricPrimary.Text = string.Format(
+                "Medyan Teslimat: {0:0.00} ms (~{1:0} Hz)   |   Ort: {2:0.00} ms (~{3:0} Hz)   |   Örnek: {4}",
+                lastMetrics.MedianDeltaMs, lastMetrics.EquivalentMedianHz,
+                lastMetrics.AvgDeltaMs, lastMetrics.EquivalentAvgHz,
+                lastMetrics.SampleCount);
+
+            lblMetricSecondary.Text = string.Format(
+                "P95: {0:0.00} ms  |  P99: {1:0.00} ms  |  Max: {2:0.00} ms  |  Jitter: ±{3:0.00} ms  |  Batch(<0.12ms): %{4:0.0}  |  Gap: {5}  |  Skor: %{6:0.0}",
+                lastMetrics.P95DeltaMs, lastMetrics.P99DeltaMs, lastMetrics.MaxDeltaMs,
+                lastMetrics.JitterStdDevMs, lastMetrics.BatchPercent, lastMetrics.GapCount, lastMetrics.ConsistencyScore);
+
+            lblMetricDevice.Text = string.Format("Aktif Fare (hDevice=0x{0:X}): {1}",
+                lastMetrics.ActiveDeviceHandle.ToInt64(),
+                string.IsNullOrEmpty(lastMetrics.ActiveDeviceName) ? "Standart Raw Input Fare" : lastMetrics.ActiveDeviceName);
+
+            pnlSparkline.Invalidate();
+        }
+
+        private void BuildUsbTabUi()
+        {
+            Button btnRescan = new Button
+            {
+                Text = "↺ USB Topolojisi & Güç Ayarlarını Yeniden Tara",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(37, 45, 64),
+                ForeColor = Color.FromArgb(56, 189, 248),
+                Location = new Point(0, 0),
+                Size = new Size(340, 30),
+                Cursor = Cursors.Hand
+            };
+            btnRescan.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnRescan.Click += (s, e) => RefreshUsbTopology();
+            pnlUsbTab.Controls.Add(btnRescan);
+
+            lvUsbDevices = new ListView
+            {
+                Location = new Point(0, 38),
+                Size = new Size(856, 275),
+                View = View.Details,
+                FullRowSelect = true,
+                GridLines = true,
+                BackColor = Color.FromArgb(18, 23, 34),
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Regular),
+                BorderStyle = BorderStyle.FixedSingle
+            };
+            lvUsbDevices.Columns.Add("Rol / Tür", 155);
+            lvUsbDevices.Columns.Add("USB / HID Aygıt Adı", 230);
+            lvUsbDevices.Columns.Add("Bağlı USB Host Denetleyicisi (xHCI)", 230);
+            lvUsbDevices.Columns.Add("Güç Bayrakları", 125);
+            lvUsbDevices.Columns.Add("PnP Aygıt ID", 110);
+            pnlUsbTab.Controls.Add(lvUsbDevices);
+
+            txtUsbFindings = new TextBox
+            {
+                Location = new Point(0, 322),
+                Size = new Size(856, 152),
+                Multiline = true,
+                ReadOnly = true,
+                ScrollBars = ScrollBars.Vertical,
+                BackColor = Color.FromArgb(10, 13, 19),
+                ForeColor = Color.FromArgb(226, 232, 240),
+                Font = new Font("Consolas", 8.2f, FontStyle.Regular),
+                BorderStyle = BorderStyle.FixedSingle
+            };
+            pnlUsbTab.Controls.Add(txtUsbFindings);
+        }
+
+        private void RefreshUsbTopology()
+        {
+            if (txtUsbFindings != null) txtUsbFindings.Text = "USB xHCI denetleyicileri ve bağlı HID cihazları taranıyor...";
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                UsbTopologyReport rep = UsbInputTopologyScanner.ScanUsbTopology(vault);
+                try
+                {
+                    if (!this.IsDisposed && this.IsHandleCreated)
+                    {
+                        this.BeginInvoke((MethodInvoker)delegate
+                        {
+                            lvUsbDevices.BeginUpdate();
+                            lvUsbDevices.Items.Clear();
+                            foreach (var d in rep.Devices)
+                            {
+                                ListViewItem lvi = new ListViewItem(d.RoleTag);
+                                lvi.SubItems.Add(d.DeviceName);
+                                lvi.SubItems.Add(d.ControllerName);
+                                lvi.SubItems.Add(d.PowerFlagsSummary);
+                                lvi.SubItems.Add(d.PnpId);
+                                if (d.IsRawInputMouse)
+                                    lvi.ForeColor = d.HasPowerSavingOn ? Color.FromArgb(251, 191, 36) : Color.FromArgb(52, 211, 153);
+                                else if (d.HasPowerSavingOn)
+                                    lvi.ForeColor = Color.FromArgb(251, 191, 36);
+                                else
+                                    lvi.ForeColor = Color.FromArgb(226, 232, 240);
+                                lvUsbDevices.Items.Add(lvi);
+                            }
+                            lvUsbDevices.EndUpdate();
+
+                            StringBuilder sb = new StringBuilder();
+                            sb.AppendLine(string.Format("• USB Denetleyiciler : {0} adet xHCI Host Controller", rep.Controllers.Count));
+                            sb.AppendLine(string.Format("• HID Kuyruk Boyutu  : MouseDataQueueSize={0} | KeyboardDataQueueSize={1}", rep.MouseQueueSize, rep.KeyboardQueueSize));
+                            sb.AppendLine(string.Format("• Global USB Suspend : DisableSelectiveSuspend={0}", rep.UsbSelectiveSuspendDisabled ? "1 (Devre Dışı)" : "Varsayılan"));
+                            sb.AppendLine("─────────────────────────────────────────────────────────────────────────────────────────────────");
+                            if (rep.Findings.Count == 0)
+                                sb.AppendLine("✅ Belirgin bir USB denetleyici çakışması veya fare uyku bayrağı tespit edilmedi.");
+                            else
+                                foreach (string f in rep.Findings) sb.AppendLine(f);
+                            if (!string.IsNullOrEmpty(rep.ScanError))
+                                sb.AppendLine("Tarama Notu: " + rep.ScanError);
+
+                            txtUsbFindings.Text = sb.ToString();
+                        });
+                    }
+                }
+                catch { }
+            });
+        }
+    }
+
+    public class InterruptMsiExplorerDialog : Form
+    {
+        private StateVault vault;
+        private bool isAdmin;
+        private List<PciInterruptDeviceInfo> devices = new List<PciInterruptDeviceInfo>();
+
+        private ListView lvDevices;
+        private CheckBox chkIncludeSecondary;
+        private Label lblSelectedHeader;
+        private Label lblSelectedAdvisory;
+        private Label lblReadbackStatus;
+        private ComboBox cmbMsiMode;
+        private ComboBox cmbDevicePolicy;
+        private ComboBox cmbDevicePriority;
+        private FlowLayoutPanel flpCores;
+        private List<CheckBox> coreBoxes = new List<CheckBox>();
+        private Button btnApplyDevice, btnRevertDevice, btnRevertAll;
+
+        public InterruptMsiExplorerDialog(StateVault vault, bool isAdmin)
+        {
+            this.vault = vault;
+            this.isAdmin = isAdmin;
+
+            this.Text = "Argon Latency Studio — Aygıt & Kesme Yönlendirme (MSI Mode & IRQ Affinity Explorer)";
+            this.Size = new Size(940, 700);
+            this.StartPosition = FormStartPosition.CenterParent;
+            this.FormBorderStyle = FormBorderStyle.FixedDialog;
+            this.MaximizeBox = false;
+            this.MinimizeBox = false;
+            this.BackColor = Color.FromArgb(13, 16, 23);
+            this.ForeColor = Color.White;
+            this.Font = new Font("Segoe UI", 8.5f, FontStyle.Regular);
+
+            BuildUi();
+            DisableMnemonicsRecursive(this);
+            LoadDevicesAsync();
+        }
+
+        private static void DisableMnemonicsRecursive(Control root)
+        {
+            foreach (Control c in root.Controls)
+            {
+                Label l = c as Label;
+                if (l != null) l.UseMnemonic = false;
+                ButtonBase b = c as ButtonBase;
+                if (b != null) b.UseMnemonic = false;
+                if (c.HasChildren) DisableMnemonicsRecursive(c);
+            }
+        }
+
+        private void BuildUi()
+        {
+            // Header
+            Panel pnlHdr = new Panel
+            {
+                Location = new Point(0, 0),
+                Size = new Size(940, 78),
+                BackColor = Color.FromArgb(18, 23, 34)
+            };
+            this.Controls.Add(pnlHdr);
+
+            Label lblTitle = new Label
+            {
+                Text = "⚡ AYGIT & KESME YÖNLENDİRME (PCIe MSI MODE & IRQ AFFINITY EXPLORER)",
+                Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(56, 189, 248),
+                Location = new Point(16, 10),
+                AutoSize = true
+            };
+            pnlHdr.Controls.Add(lblTitle);
+
+            Label lblSub = new Label
+            {
+                Text = "Güvenli Kapsam: Yalnızca GPU, Ağ, USB xHCI ve Depolama/Ses PCIe aygıtları listelenir; körlemesine toplu IRQ pinleme yapılmaz. Tüm yazımlar StateVault yedeği alır.",
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Italic),
+                ForeColor = Color.FromArgb(148, 163, 184),
+                Location = new Point(17, 34),
+                Size = new Size(710, 32)
+            };
+            pnlHdr.Controls.Add(lblSub);
+
+            Button btnRescan = new Button
+            {
+                Text = "↺ Yeniden Tara",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(37, 45, 64),
+                ForeColor = Color.White,
+                Location = new Point(785, 14),
+                Size = new Size(125, 28),
+                Cursor = Cursors.Hand
+            };
+            btnRescan.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnRescan.Click += (s, e) => LoadDevicesAsync();
+            pnlHdr.Controls.Add(btnRescan);
+
+            chkIncludeSecondary = new CheckBox
+            {
+                Text = "AHCI & Ses Aygıtlarını Dahil Et",
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(203, 213, 225),
+                Location = new Point(735, 48),
+                Size = new Size(190, 22),
+                Checked = true
+            };
+            chkIncludeSecondary.CheckedChanged += (s, e) => LoadDevicesAsync();
+            pnlHdr.Controls.Add(chkIncludeSecondary);
+
+            // ListView
+            lvDevices = new ListView
+            {
+                Location = new Point(16, 88),
+                Size = new Size(894, 245),
+                View = View.Details,
+                FullRowSelect = true,
+                GridLines = true,
+                MultiSelect = false,
+                BackColor = Color.FromArgb(18, 23, 34),
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Regular),
+                BorderStyle = BorderStyle.FixedSingle
+            };
+            lvDevices.Columns.Add("Sınıf", 110);
+            lvDevices.Columns.Add("PCI Aygıt Adı", 250);
+            lvDevices.Columns.Add("MSI Modu", 105);
+            lvDevices.Columns.Add("MSI Limit", 70);
+            lvDevices.Columns.Add("Kesme Politikası (DevicePolicy)", 190);
+            lvDevices.Columns.Add("Çekirdek Maskesi", 155);
+            lvDevices.SelectedIndexChanged += LvDevices_SelectedIndexChanged;
+            this.Controls.Add(lvDevices);
+
+            // Editor Panel
+            Panel pnlEdit = new Panel
+            {
+                Location = new Point(16, 342),
+                Size = new Size(894, 255),
+                BackColor = Color.FromArgb(18, 23, 34)
+            };
+            pnlEdit.Paint += (s, e) =>
+            {
+                using (Pen p = new Pen(Color.FromArgb(45, 55, 75), 1))
+                {
+                    e.Graphics.DrawRectangle(p, 0, 0, pnlEdit.Width - 1, pnlEdit.Height - 1);
+                }
+            };
+            this.Controls.Add(pnlEdit);
+
+            lblSelectedHeader = new Label
+            {
+                Text = "Listeden bir PCIe aygıtı seçin...",
+                Font = new Font("Segoe UI", 9.0f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(52, 211, 153),
+                Location = new Point(14, 10),
+                Size = new Size(865, 22),
+                AutoEllipsis = true
+            };
+            pnlEdit.Controls.Add(lblSelectedHeader);
+
+            lblSelectedAdvisory = new Label
+            {
+                Text = "Aygıt kesme güvenlik uyarısı ve doğrulama durumu burada gösterilir.",
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(203, 213, 225),
+                Location = new Point(14, 34),
+                Size = new Size(865, 34)
+            };
+            pnlEdit.Controls.Add(lblSelectedAdvisory);
+
+            // Left Column Combos
+            Label l1 = new Label { Text = "MSI Modu (MSISupported):", Font = new Font("Segoe UI", 8.0f, FontStyle.Bold), ForeColor = Color.FromArgb(203, 213, 225), Location = new Point(14, 78), AutoSize = true };
+            pnlEdit.Controls.Add(l1);
+            cmbMsiMode = new ComboBox { Location = new Point(180, 74), Size = new Size(250, 24), DropDownStyle = ComboBoxStyle.DropDownList, BackColor = Color.FromArgb(13, 16, 23), ForeColor = Color.White };
+            cmbMsiMode.Items.AddRange(new string[] { "Varsayılan (Anahtarı Kaldır)", "0 - Line-Based IRQ (Kapalı)", "1 - MSI / MSI-X Etkin (Önerilen)" });
+            cmbMsiMode.SelectedIndex = 0;
+            pnlEdit.Controls.Add(cmbMsiMode);
+
+            Label l2 = new Label { Text = "Kesme Politikası:", Font = new Font("Segoe UI", 8.0f, FontStyle.Bold), ForeColor = Color.FromArgb(203, 213, 225), Location = new Point(14, 114), AutoSize = true };
+            pnlEdit.Controls.Add(l2);
+            cmbDevicePolicy = new ComboBox { Location = new Point(180, 110), Size = new Size(250, 24), DropDownStyle = ComboBoxStyle.DropDownList, BackColor = Color.FromArgb(13, 16, 23), ForeColor = Color.White };
+            cmbDevicePolicy.Items.AddRange(new string[]
+            {
+                "Sistem Varsayılanı (Anahtarı Kaldır)",
+                "0 - MachineDefault",
+                "1 - AllCloseProcessors",
+                "2 - OneCloseProcessor",
+                "3 - AllProcessorsInMachine",
+                "4 - SpecifiedProcessors (Özel Çekirdek)",
+                "5 - SpreadMessages (MSI-X Yay)"
+            });
+            cmbDevicePolicy.SelectedIndex = 0;
+            cmbDevicePolicy.SelectedIndexChanged += (s, e) => UpdateCoreChecklistEnabledState();
+            pnlEdit.Controls.Add(cmbDevicePolicy);
+
+            Label l3 = new Label { Text = "Kesme Önceliği:", Font = new Font("Segoe UI", 8.0f, FontStyle.Bold), ForeColor = Color.FromArgb(203, 213, 225), Location = new Point(14, 150), AutoSize = true };
+            pnlEdit.Controls.Add(l3);
+            cmbDevicePriority = new ComboBox { Location = new Point(180, 146), Size = new Size(250, 24), DropDownStyle = ComboBoxStyle.DropDownList, BackColor = Color.FromArgb(13, 16, 23), ForeColor = Color.White };
+            cmbDevicePriority.Items.AddRange(new string[] { "Varsayılan (Anahtarı Kaldır)", "1 - Düşük", "2 - Normal", "3 - Yüksek" });
+            cmbDevicePriority.SelectedIndex = 0;
+            pnlEdit.Controls.Add(cmbDevicePriority);
+
+            lblReadbackStatus = new Label
+            {
+                Text = isAdmin ? "Yönetici Yetkisi Aktif — Seçili aygıt için okuma/yazma hazır." : "⚠ Salt Okunur Mod: HKLM\\Enum\\PCI yazımı için Argon'u Yönetici olarak başlatın.",
+                Font = new Font("Consolas", 7.8f, FontStyle.Regular),
+                ForeColor = isAdmin ? Color.FromArgb(56, 189, 248) : Color.FromArgb(251, 191, 36),
+                Location = new Point(14, 182),
+                Size = new Size(420, 32)
+            };
+            pnlEdit.Controls.Add(lblReadbackStatus);
+
+            btnApplyDevice = new Button
+            {
+                Text = "✓ Seçili Aygıta Uygula & Doğrula",
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(16, 185, 129),
+                ForeColor = Color.Black,
+                Location = new Point(14, 216),
+                Size = new Size(235, 30),
+                Cursor = Cursors.Hand,
+                Enabled = isAdmin
+            };
+            btnApplyDevice.FlatAppearance.BorderSize = 0;
+            btnApplyDevice.Click += (s, e) => ApplyToSelectedDevice();
+            pnlEdit.Controls.Add(btnApplyDevice);
+
+            btnRevertDevice = new Button
+            {
+                Text = "↺ Aygıtı Orijinale Döndür",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(51, 65, 85),
+                ForeColor = Color.White,
+                Location = new Point(256, 216),
+                Size = new Size(174, 30),
+                Cursor = Cursors.Hand,
+                Enabled = isAdmin
+            };
+            btnRevertDevice.FlatAppearance.BorderSize = 0;
+            btnRevertDevice.Click += (s, e) => RevertSelectedDevice();
+            pnlEdit.Controls.Add(btnRevertDevice);
+
+            // Right Column: CPU Core Affinity Checklist
+            Label lCores = new Label
+            {
+                Text = "Özel Çekirdek Maskesi (AssignmentSetOverride — Yalnızca Policy 4 için):",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(56, 189, 248),
+                Location = new Point(450, 76),
+                AutoSize = true
+            };
+            pnlEdit.Controls.Add(lCores);
+
+            flpCores = new FlowLayoutPanel
+            {
+                Location = new Point(450, 98),
+                Size = new Size(428, 110),
+                AutoScroll = true,
+                BackColor = Color.FromArgb(12, 15, 22),
+                BorderStyle = BorderStyle.FixedSingle,
+                Padding = new Padding(4)
+            };
+            pnlEdit.Controls.Add(flpCores);
+
+            int cpuCount = Math.Min(64, Environment.ProcessorCount);
+            for (int c = 0; c < cpuCount; c++)
+            {
+                CheckBox cb = new CheckBox
+                {
+                    Text = "CPU " + c,
+                    Font = new Font("Consolas", 7.6f, FontStyle.Regular),
+                    ForeColor = Color.FromArgb(226, 232, 240),
+                    Size = new Size(64, 20),
+                    Tag = c
+                };
+                coreBoxes.Add(cb);
+                flpCores.Controls.Add(cb);
+            }
+
+            Button btnHintFirst2 = new Button
+            {
+                Text = "İlk 2 (0-1)",
+                Font = new Font("Segoe UI", 7.4f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(30, 41, 59),
+                ForeColor = Color.White,
+                Location = new Point(450, 216),
+                Size = new Size(100, 28),
+                Cursor = Cursors.Hand
+            };
+            btnHintFirst2.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnHintFirst2.Click += (s, e) =>
+            {
+                for (int i = 0; i < coreBoxes.Count; i++) coreBoxes[i].Checked = (i < 2);
+            };
+            pnlEdit.Controls.Add(btnHintFirst2);
+
+            Button btnHintEven = new Button
+            {
+                Text = "Çiftler (Fiziksel)",
+                Font = new Font("Segoe UI", 7.4f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(30, 41, 59),
+                ForeColor = Color.White,
+                Location = new Point(558, 216),
+                Size = new Size(120, 28),
+                Cursor = Cursors.Hand
+            };
+            btnHintEven.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnHintEven.Click += (s, e) =>
+            {
+                for (int i = 0; i < coreBoxes.Count; i++) coreBoxes[i].Checked = (i % 2 == 0);
+            };
+            pnlEdit.Controls.Add(btnHintEven);
+
+            Button btnHintClear = new Button
+            {
+                Text = "Temizle",
+                Font = new Font("Segoe UI", 7.4f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(30, 41, 59),
+                ForeColor = Color.FromArgb(248, 113, 113),
+                Location = new Point(686, 216),
+                Size = new Size(90, 28),
+                Cursor = Cursors.Hand
+            };
+            btnHintClear.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnHintClear.Click += (s, e) =>
+            {
+                for (int i = 0; i < coreBoxes.Count; i++) coreBoxes[i].Checked = false;
+            };
+            pnlEdit.Controls.Add(btnHintClear);
+
+            UpdateCoreChecklistEnabledState();
+
+            // Bottom Bar
+            Panel pnlBot = new Panel
+            {
+                Location = new Point(0, 608),
+                Size = new Size(940, 50),
+                BackColor = Color.FromArgb(18, 23, 34)
+            };
+            this.Controls.Add(pnlBot);
+
+            btnRevertAll = new Button
+            {
+                Text = "↺ Bu Oturumdaki Tüm Kesme Değişikliklerini Geri Al",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = isAdmin ? Color.FromArgb(127, 29, 29) : Color.FromArgb(45, 55, 72),
+                ForeColor = Color.White,
+                Location = new Point(16, 10),
+                Size = new Size(340, 30),
+                Cursor = Cursors.Hand,
+                Enabled = isAdmin
+            };
+            btnRevertAll.FlatAppearance.BorderSize = 0;
+            btnRevertAll.Click += (s, e) =>
+            {
+                foreach (var d in devices)
+                    PciInterruptScanner.RevertDeviceSettingsTracked(vault, d);
+                LoadDevicesAsync();
+                MessageBox.Show("Tüm aygıt MSI/IRQ değişiklikleri StateVault üzerinden orijinaline döndürüldü.", "Geri Alındı", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            };
+            pnlBot.Controls.Add(btnRevertAll);
+
+            Button btnClose = new Button
+            {
+                Text = "Kapat",
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(30, 41, 59),
+                ForeColor = Color.White,
+                Location = new Point(816, 10),
+                Size = new Size(94, 30),
+                Cursor = Cursors.Hand,
+                DialogResult = DialogResult.OK
+            };
+            btnClose.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnClose.Click += (s, e) => this.Close();
+            pnlBot.Controls.Add(btnClose);
+        }
+
+        private void UpdateCoreChecklistEnabledState()
+        {
+            bool customPolicy = (cmbDevicePolicy != null && cmbDevicePolicy.SelectedIndex == 5);
+            if (flpCores != null) flpCores.Enabled = customPolicy && isAdmin;
+        }
+
+        private void LoadDevicesAsync()
+        {
+            bool incSec = chkIncludeSecondary != null && chkIncludeSecondary.Checked;
+            string prevInst = (lvDevices != null && lvDevices.SelectedItems.Count > 0 && lvDevices.SelectedItems[0].Tag is PciInterruptDeviceInfo)
+                ? ((PciInterruptDeviceInfo)lvDevices.SelectedItems[0].Tag).InstancePath : null;
+
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                List<PciInterruptDeviceInfo> scanned = PciInterruptScanner.ScanPciDevices(incSec);
+                try
+                {
+                    if (!this.IsDisposed && this.IsHandleCreated)
+                    {
+                        this.BeginInvoke((MethodInvoker)delegate
+                        {
+                            devices = scanned;
+                            lvDevices.BeginUpdate();
+                            lvDevices.Items.Clear();
+                            ListViewItem toSelect = null;
+                            foreach (var d in devices)
+                            {
+                                ListViewItem lvi = new ListViewItem(d.ClassName);
+                                lvi.SubItems.Add(d.FriendlyName);
+                                string msiStr = !d.MsiSupported.HasValue ? "Varsayılan" : (d.MsiSupported.Value == 1 ? "✓ Açık (1)" : "✕ Line IRQ (0)");
+                                lvi.SubItems.Add(msiStr);
+                                lvi.SubItems.Add(d.MessageNumberLimit.HasValue ? d.MessageNumberLimit.Value.ToString() : "-");
+                                lvi.SubItems.Add(PciInterruptScanner.GetDevicePolicyLabel(d.DevicePolicy));
+                                lvi.SubItems.Add(d.HasAssignmentBytes ? PciInterruptScanner.DecodeMaskToCoreList(d.AssignmentMask) : "-");
+                                lvi.Tag = d;
+
+                                if (d.MsiSupported.HasValue && d.MsiSupported.Value == 1)
+                                    lvi.ForeColor = Color.FromArgb(52, 211, 153);
+                                else if (d.ClassTag == "Display" || d.ClassTag == "Net" || d.ClassTag == "USB")
+                                    lvi.ForeColor = Color.FromArgb(251, 191, 36);
+                                else
+                                    lvi.ForeColor = Color.FromArgb(203, 213, 225);
+
+                                lvDevices.Items.Add(lvi);
+                                if (prevInst != null && string.Equals(d.InstancePath, prevInst, StringComparison.OrdinalIgnoreCase))
+                                    toSelect = lvi;
+                            }
+                            if (toSelect != null) toSelect.Selected = true;
+                            else if (lvDevices.Items.Count > 0) lvDevices.Items[0].Selected = true;
+                            lvDevices.EndUpdate();
+                        });
+                    }
+                }
+                catch { }
+            });
+        }
+
+        private void LvDevices_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (lvDevices.SelectedItems.Count == 0) return;
+            PciInterruptDeviceInfo d = lvDevices.SelectedItems[0].Tag as PciInterruptDeviceInfo;
+            if (d == null) return;
+
+            lblSelectedHeader.Text = string.Format("[{0}] {1}  —  {2}", d.ClassName, d.FriendlyName, d.InstancePath);
+            lblSelectedAdvisory.Text = d.SafetyAdvisory;
+
+            if (!d.MsiSupported.HasValue) cmbMsiMode.SelectedIndex = 0;
+            else if (d.MsiSupported.Value == 0) cmbMsiMode.SelectedIndex = 1;
+            else cmbMsiMode.SelectedIndex = 2;
+
+            if (!d.DevicePolicy.HasValue) cmbDevicePolicy.SelectedIndex = 0;
+            else if (d.DevicePolicy.Value >= 0 && d.DevicePolicy.Value <= 5) cmbDevicePolicy.SelectedIndex = d.DevicePolicy.Value + 1;
+            else cmbDevicePolicy.SelectedIndex = 0;
+
+            if (!d.DevicePriority.HasValue) cmbDevicePriority.SelectedIndex = 0;
+            else if (d.DevicePriority.Value >= 1 && d.DevicePriority.Value <= 3) cmbDevicePriority.SelectedIndex = d.DevicePriority.Value;
+            else cmbDevicePriority.SelectedIndex = 0;
+
+            for (int i = 0; i < coreBoxes.Count; i++)
+            {
+                int cpuIdx = (int)coreBoxes[i].Tag;
+                coreBoxes[i].Checked = d.HasAssignmentBytes && ((d.AssignmentMask & (1UL << cpuIdx)) != 0);
+            }
+            UpdateCoreChecklistEnabledState();
+        }
+
+        private void ApplyToSelectedDevice()
+        {
+            if (!isAdmin || lvDevices.SelectedItems.Count == 0) return;
+            PciInterruptDeviceInfo d = lvDevices.SelectedItems[0].Tag as PciInterruptDeviceInfo;
+            if (d == null) return;
+
+            int msiOpt = cmbMsiMode.SelectedIndex == 1 ? 0 : (cmbMsiMode.SelectedIndex == 2 ? 1 : -1);
+            int polOpt = cmbDevicePolicy.SelectedIndex > 0 ? (cmbDevicePolicy.SelectedIndex - 1) : -1;
+            int prioOpt = cmbDevicePriority.SelectedIndex > 0 ? cmbDevicePriority.SelectedIndex : -1;
+
+            ulong mask = 0;
+            if (polOpt == 4)
+            {
+                for (int i = 0; i < coreBoxes.Count; i++)
+                {
+                    if (coreBoxes[i].Checked)
+                        mask |= (1UL << (int)coreBoxes[i].Tag);
+                }
+                if (mask == 0)
+                {
+                    MessageBox.Show("Policy 4 (Özel Çekirdek) seçildiğinde en az bir CPU çekirdeği işaretlemelisiniz.", "Çekirdek Maskesi Boş", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+            }
+
+            string verifySummary;
+            bool ok = PciInterruptScanner.ApplyDeviceSettingsTracked(vault, d, msiOpt, polOpt, mask, prioOpt, out verifySummary);
+            lblReadbackStatus.Text = (ok ? "✓ " : "⚠️ Yazım Hatası | ") + verifySummary;
+            LoadDevicesAsync();
+
+            if (ok)
+            {
+                MessageBox.Show(
+                    string.Format("'{0}' kesme ayarları StateVault yedeklemesi ile uygulandı ve doğrulandı.\n\n{1}\n\n⚠️ Yeni MSI/IRQ yönlendirmesinin Windows çekirdeğinde devreye girmesi için bilgisayarı yeniden başlatmanız gerekir.",
+                    d.FriendlyName, verifySummary),
+                    "Kesme Ayarı Uygulandı (Restart Gerekir)",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+        }
+
+        private void RevertSelectedDevice()
+        {
+            if (!isAdmin || lvDevices.SelectedItems.Count == 0) return;
+            PciInterruptDeviceInfo d = lvDevices.SelectedItems[0].Tag as PciInterruptDeviceInfo;
+            if (d == null) return;
+
+            PciInterruptScanner.RevertDeviceSettingsTracked(vault, d);
+            lblReadbackStatus.Text = "🔄 Seçili aygıt için oturum kesme değişiklikleri orijinaline döndürüldü.";
+            LoadDevicesAsync();
+        }
+    }
+
+    #region Virtual Memory (Pagefile) & Memory Stability Advisor
+
+    public class VirtualMemoryAdvisorDialog : Form
+    {
+        private StateVault vault;
+        private bool isAdmin;
+        private Action onSettingsChanged;
+
+        private Label lblRamSummary;
+        private Label lblCommitSummary;
+        private Label lblPagingExecStatus;
+        private Label lblPagefileStatus;
+        private ListView lvDrives;
+        private RichTextBox rtbAdvisorReport;
+        private Button btnApplyRecommended;
+        private Button btnResetWindowsDefault;
+        private Button btnSafePurgeStandby;
+        private Button btnCopyPsScript;
+        private Button btnOpenSysdm;
+        private Label lblStatusMessage;
+
+        public VirtualMemoryAdvisorDialog(StateVault vault, bool isAdmin, Action onSettingsChanged)
+        {
+            this.vault = vault;
+            this.isAdmin = isAdmin;
+            this.onSettingsChanged = onSettingsChanged;
+
+            this.Text = "Argon Latency Studio — Windows Sanal Bellek (Pagefile) & Kararlılık Danışmanı";
+            this.Size = new Size(880, 680);
+            this.StartPosition = FormStartPosition.CenterParent;
+            this.FormBorderStyle = FormBorderStyle.FixedDialog;
+            this.MaximizeBox = false;
+            this.MinimizeBox = false;
+            this.BackColor = Color.FromArgb(13, 16, 23);
+            this.ForeColor = Color.White;
+            this.Font = new Font("Segoe UI", 8.5f, FontStyle.Regular);
+
+            BuildUi();
+            DisableMnemonicsRecursive(this);
+            RefreshDiagnostics();
+        }
+
+        private static void DisableMnemonicsRecursive(Control root)
+        {
+            foreach (Control c in root.Controls)
+            {
+                Label l = c as Label;
+                if (l != null) l.UseMnemonic = false;
+                ButtonBase b = c as ButtonBase;
+                if (b != null) b.UseMnemonic = false;
+                if (c.HasChildren) DisableMnemonicsRecursive(c);
+            }
+        }
+
+        private void BuildUi()
+        {
+            // Header
+            Panel pnlHdr = new Panel
+            {
+                Location = new Point(0, 0),
+                Size = new Size(880, 72),
+                BackColor = Color.FromArgb(18, 23, 34)
+            };
+            this.Controls.Add(pnlHdr);
+
+            Label lblTitle = new Label
+            {
+                Text = "🧠 WINDOWS SANAL BELLEK (PAGEFILE) & OYUN KARARLILIK DANIŞMANI",
+                Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(56, 189, 248),
+                Location = new Point(16, 10),
+                AutoSize = true
+            };
+            pnlHdr.Controls.Add(lblTitle);
+
+            Label lblSub = new Label
+            {
+                Text = "16 GB RAM sistemlerinde Path of Exile 2 gibi ağır oyunlarda yaşanan RAM daralması, DisablePagingExecutive takılması ve sayfa dosyası çökmelerini güvenle analiz eder ve onarır.",
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Italic),
+                ForeColor = Color.FromArgb(148, 163, 184),
+                Location = new Point(17, 34),
+                Size = new Size(720, 32)
+            };
+            pnlHdr.Controls.Add(lblSub);
+
+            Button btnRefresh = new Button
+            {
+                Text = "↺ Yenile",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(37, 45, 64),
+                ForeColor = Color.White,
+                Location = new Point(748, 16),
+                Size = new Size(100, 28),
+                Cursor = Cursors.Hand
+            };
+            btnRefresh.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnRefresh.Click += (s, e) => RefreshDiagnostics();
+            pnlHdr.Controls.Add(btnRefresh);
+
+            int y = 82;
+
+            // Overview Card
+            Panel pnlOverview = new Panel
+            {
+                Location = new Point(16, y),
+                Size = new Size(832, 106),
+                BackColor = Color.FromArgb(18, 23, 34)
+            };
+            this.Controls.Add(pnlOverview);
+
+            lblRamSummary = new Label
+            {
+                Text = "Fiziksel RAM: Taranıyor...",
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(226, 232, 240),
+                Location = new Point(14, 10),
+                AutoSize = true
+            };
+            pnlOverview.Controls.Add(lblRamSummary);
+
+            lblCommitSummary = new Label
+            {
+                Text = "Commit Limiti: Taranıyor...",
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(226, 232, 240),
+                Location = new Point(410, 10),
+                AutoSize = true
+            };
+            pnlOverview.Controls.Add(lblCommitSummary);
+
+            lblPagingExecStatus = new Label
+            {
+                Text = "DisablePagingExecutive: Taranıyor...",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(148, 163, 184),
+                Location = new Point(14, 42),
+                AutoSize = true
+            };
+            pnlOverview.Controls.Add(lblPagingExecStatus);
+
+            lblPagefileStatus = new Label
+            {
+                Text = "Kayıtlı PagingFiles: Taranıyor...",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(148, 163, 184),
+                Location = new Point(14, 72),
+                AutoSize = true
+            };
+            pnlOverview.Controls.Add(lblPagefileStatus);
+
+            y += 116;
+
+            // Drive Table Card
+            Label lblDrivesTitle = new Label
+            {
+                Text = "💾 YEREL DİSKLER & SANAL BELLEK DOSYA DAĞILIMI:",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(148, 163, 184),
+                Location = new Point(16, y),
+                AutoSize = true
+            };
+            this.Controls.Add(lblDrivesTitle);
+            y += 20;
+
+            lvDrives = new ListView
+            {
+                Location = new Point(16, y),
+                Size = new Size(832, 100),
+                View = View.Details,
+                FullRowSelect = true,
+                BackColor = Color.FromArgb(15, 20, 28),
+                ForeColor = Color.White,
+                BorderStyle = BorderStyle.FixedSingle,
+                HeaderStyle = ColumnHeaderStyle.Nonclickable
+            };
+            lvDrives.Columns.Add("Sürücü", 80);
+            lvDrives.Columns.Add("Etiket / Tür", 130);
+            lvDrives.Columns.Add("Toplam Boyut", 110);
+            lvDrives.Columns.Add("Boş Alan", 110);
+            lvDrives.Columns.Add("Mevcut Pagefile Durumu", 240);
+            lvDrives.Columns.Add("Tavsiye Edilen Rol", 140);
+            this.Controls.Add(lvDrives);
+
+            y += 110;
+
+            // Diagnostics and Technical Advisory Card
+            Label lblAdvTitle = new Label
+            {
+                Text = "🔍 TEKNİK ANALİZ VE POE 2 TAKILMA / ÇÖKME DEĞERLENDİRMESİ:",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(148, 163, 184),
+                Location = new Point(16, y),
+                AutoSize = true
+            };
+            this.Controls.Add(lblAdvTitle);
+            y += 20;
+
+            rtbAdvisorReport = new RichTextBox
+            {
+                Location = new Point(16, y),
+                Size = new Size(832, 150),
+                BackColor = Color.FromArgb(15, 20, 28),
+                ForeColor = Color.FromArgb(203, 213, 225),
+                BorderStyle = BorderStyle.FixedSingle,
+                ReadOnly = true,
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Regular)
+            };
+            this.Controls.Add(rtbAdvisorReport);
+
+            y += 160;
+
+            // Actions Panel
+            Panel pnlActions = new Panel
+            {
+                Location = new Point(16, y),
+                Size = new Size(832, 110),
+                BackColor = Color.FromArgb(18, 23, 34)
+            };
+            this.Controls.Add(pnlActions);
+
+            btnApplyRecommended = new Button
+            {
+                Text = "🛡️ Tavsiye Edilen Ayarları Uygula (C: Sistem + M: 16-48 GB NVMe + Paging Serbest)",
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(16, 185, 129),
+                ForeColor = Color.Black,
+                Location = new Point(14, 12),
+                Size = new Size(540, 32),
+                Cursor = Cursors.Hand
+            };
+            btnApplyRecommended.FlatAppearance.BorderSize = 0;
+            btnApplyRecommended.Click += (s, e) => ApplyRecommendedConfiguration();
+            pnlActions.Controls.Add(btnApplyRecommended);
+
+            btnResetWindowsDefault = new Button
+            {
+                Text = "🔄 Yalnızca C: Sistem Yönetimli",
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Regular),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(37, 45, 64),
+                ForeColor = Color.FromArgb(226, 232, 240),
+                Location = new Point(562, 12),
+                Size = new Size(256, 32),
+                Cursor = Cursors.Hand
+            };
+            btnResetWindowsDefault.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnResetWindowsDefault.Click += (s, e) => ResetToWindowsDefault();
+            pnlActions.Controls.Add(btnResetWindowsDefault);
+
+            btnSafePurgeStandby = new Button
+            {
+                Text = "🧹 Güvenli Standby Boşalt",
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Regular),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(37, 45, 64),
+                ForeColor = Color.FromArgb(56, 189, 248),
+                Location = new Point(14, 52),
+                Size = new Size(180, 28),
+                Cursor = Cursors.Hand
+            };
+            btnSafePurgeStandby.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnSafePurgeStandby.Click += (s, e) =>
+            {
+                try
+                {
+                    if (NativeMethods.EnablePrivilege("SeProfileSingleProcessPrivilege"))
+                    {
+                        int purgeCmd = 4;
+                        if (NativeMethods.NtSetSystemInformation(80, ref purgeCmd, sizeof(int)) == 0)
+                        {
+                            lblStatusMessage.Text = "🧹 Standby List başarıyla boşaltıldı (Hiçbir süreç diske budanmadı).";
+                            lblStatusMessage.ForeColor = Color.FromArgb(52, 211, 153);
+                            RefreshDiagnostics();
+                            return;
+                        }
+                    }
+                    lblStatusMessage.Text = "⚠ Standby temizliği için Yönetici yetkisi gereklidir.";
+                    lblStatusMessage.ForeColor = Color.FromArgb(248, 113, 113);
+                }
+                catch (Exception ex)
+                {
+                    lblStatusMessage.Text = "Hata: " + ex.Message;
+                }
+            };
+            pnlActions.Controls.Add(btnSafePurgeStandby);
+
+            btnCopyPsScript = new Button
+            {
+                Text = "📋 PowerShell Yönetici Komutunu Kopyala",
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Regular),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(37, 45, 64),
+                ForeColor = Color.FromArgb(226, 232, 240),
+                Location = new Point(202, 52),
+                Size = new Size(270, 28),
+                Cursor = Cursors.Hand
+            };
+            btnCopyPsScript.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnCopyPsScript.Click += (s, e) =>
+            {
+                string script = "Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management' -Name 'DisablePagingExecutive' -Value 0 -Type DWord; Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management' -Name 'PagingFiles' -Value @('C:\\pagefile.sys 0 0', 'M:\\pagefile.sys 16384 49152') -Type MultiString";
+                try
+                {
+                    Clipboard.SetText(script);
+                    lblStatusMessage.Text = "📋 PowerShell yönetici komutu panoya kopyalandı!";
+                    lblStatusMessage.ForeColor = Color.FromArgb(52, 211, 153);
+                }
+                catch { }
+            };
+            pnlActions.Controls.Add(btnCopyPsScript);
+
+            btnOpenSysdm = new Button
+            {
+                Text = "⚙️ Windows Sanal Bellek GUI Aç (sysdm.cpl)",
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Regular),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(37, 45, 64),
+                ForeColor = Color.FromArgb(226, 232, 240),
+                Location = new Point(480, 52),
+                Size = new Size(338, 28),
+                Cursor = Cursors.Hand
+            };
+            btnOpenSysdm.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnOpenSysdm.Click += (s, e) =>
+            {
+                try
+                {
+                    Process.Start("SystemPropertiesAdvanced.exe");
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("Pencere açılamadı: " + ex.Message);
+                }
+            };
+            pnlActions.Controls.Add(btnOpenSysdm);
+
+            lblStatusMessage = new Label
+            {
+                Text = isAdmin ? "Yönetici Yetkisi Aktif — Kayıt defteri okuma ve yazma hazır." : "⚠ Salt Okunur Mod: Değişiklikleri uygulamak için Argon'u Yönetici olarak başlatın veya PowerShell komutunu kullanın.",
+                Font = new Font("Consolas", 7.8f, FontStyle.Regular),
+                ForeColor = isAdmin ? Color.FromArgb(56, 189, 248) : Color.FromArgb(251, 191, 36),
+                Location = new Point(14, 86),
+                AutoSize = true
+            };
+            pnlActions.Controls.Add(lblStatusMessage);
+        }
+
+        private void RefreshDiagnostics()
+        {
+            try
+            {
+                NativeMethods.MEMORYSTATUSEX mem = new NativeMethods.MEMORYSTATUSEX();
+                bool memOk = NativeMethods.GlobalMemoryStatusEx(mem);
+                double totalRamGb = memOk ? (mem.ullTotalPhys / (1024.0 * 1024.0 * 1024.0)) : 16.0;
+                double availRamGb = memOk ? (mem.ullAvailPhys / (1024.0 * 1024.0 * 1024.0)) : 0.0;
+                double usedRamGb = totalRamGb - availRamGb;
+                uint loadPercent = memOk ? mem.dwMemoryLoad : 0;
+
+                double totalCommitGb = memOk ? (mem.ullTotalPageFile / (1024.0 * 1024.0 * 1024.0)) : 0.0;
+                double availCommitGb = memOk ? (mem.ullAvailPageFile / (1024.0 * 1024.0 * 1024.0)) : 0.0;
+                double usedCommitGb = totalCommitGb - availCommitGb;
+
+                lblRamSummary.Text = string.Format("Fiziksel RAM: {0:0.0} GB Toplam  |  Kullanılan: {1:0.0} GB (%{2})  |  Boş: {3:0.0} GB",
+                    totalRamGb, usedRamGb, loadPercent, availRamGb);
+
+                lblCommitSummary.Text = string.Format("Commit Limiti: {0:0.0} GB  |  Kullanılan: {1:0.0} GB  |  Boş Tavan: {2:0.0} GB",
+                    totalCommitGb, usedCommitGb, availCommitGb);
+
+                string pe = vault.ReadRegistryDisplay("HKLM", @"SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management", "DisablePagingExecutive", "0");
+                bool isPeActive = (pe == "1");
+
+                if (isPeActive)
+                {
+                    lblPagingExecStatus.Text = "DisablePagingExecutive = 1  [🔴 KRİTİK RİSK: Çekirdek ve Sürücüler RAM'de Kilitli — PoE 2 İçin Sakıncalı!]";
+                    lblPagingExecStatus.ForeColor = Color.FromArgb(248, 113, 113);
+                }
+                else
+                {
+                    lblPagingExecStatus.Text = "DisablePagingExecutive = 0  [🟢 GÜVENLİ: Windows Paging Serbest — Oyunlar İçin Maksimum Fiziksel RAM]";
+                    lblPagingExecStatus.ForeColor = Color.FromArgb(52, 211, 153);
+                }
+
+                string pfRaw = vault.ReadRegistryDisplay("HKLM", @"SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management", "PagingFiles", "Bulunamadı (Windows Yönetimli)");
+                lblPagefileStatus.Text = string.Format("Kayıtlı PagingFiles: {0}", pfRaw);
+
+                // Populate Drive List
+                lvDrives.Items.Clear();
+                bool cHasPagefile = false;
+                bool mHasDynamicPagefile = false;
+                bool mHasStatic32 = false;
+
+                foreach (DriveInfo d in DriveInfo.GetDrives())
+                {
+                    if (!d.IsReady || d.DriveType != DriveType.Fixed) continue;
+                    string dLetter = d.Name.Substring(0, 1).ToUpper();
+
+                    double totGb = d.TotalSize / (1024.0 * 1024.0 * 1024.0);
+                    double freeGb = d.AvailableFreeSpace / (1024.0 * 1024.0 * 1024.0);
+
+                    string currentPf = "Yok";
+                    if (pfRaw.IndexOf(dLetter + @":\pagefile.sys", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        if (pfRaw.IndexOf(dLetter + @":\pagefile.sys 0 0", StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            currentPf = "Sistem Yönetimli (0 0)";
+                            if (dLetter == "C") cHasPagefile = true;
+                        }
+                        else
+                        {
+                            currentPf = "Özel Boyut Tanımlı";
+                            if (dLetter == "M")
+                            {
+                                if (pfRaw.IndexOf("32768 32768", StringComparison.OrdinalIgnoreCase) >= 0)
+                                {
+                                    currentPf = "Sabit 32 GB (32768 32768)";
+                                    mHasStatic32 = true;
+                                }
+                                else if (pfRaw.IndexOf("49152", StringComparison.OrdinalIgnoreCase) >= 0)
+                                {
+                                    currentPf = "Dinamik 16-48 GB (16384 49152)";
+                                    mHasDynamicPagefile = true;
+                                }
+                            }
+                        }
+                    }
+
+                    string recommendedRole = (dLetter == "C") ? "Kaza Dökümü (0 0)" : (dLetter == "M" ? "Birincil Dinamik NVMe" : "Veri / Yedek");
+
+                    ListViewItem it = new ListViewItem(dLetter + ":");
+                    it.SubItems.Add(string.IsNullOrEmpty(d.VolumeLabel) ? d.DriveFormat : d.VolumeLabel);
+                    it.SubItems.Add(string.Format("{0:0.0} GB", totGb));
+                    it.SubItems.Add(string.Format("{0:0.0} GB Boş", freeGb));
+                    it.SubItems.Add(currentPf);
+                    it.SubItems.Add(recommendedRole);
+
+                    if (dLetter == "C" && currentPf == "Yok")
+                    {
+                        it.ForeColor = Color.FromArgb(251, 191, 36);
+                    }
+                    else if (dLetter == "M" && mHasStatic32)
+                    {
+                        it.ForeColor = Color.FromArgb(251, 191, 36);
+                    }
+                    else if (currentPf.IndexOf("Dinamik") >= 0 || (dLetter == "C" && cHasPagefile))
+                    {
+                        it.ForeColor = Color.FromArgb(52, 211, 153);
+                    }
+
+                    lvDrives.Items.Add(it);
+                }
+
+                // Build Technical Advisory Report
+                StringBuilder sb = new StringBuilder();
+                sb.AppendLine("📋 SİSTEM SANAL BELLEK VE OYUN PERFORMANSI RAPORU:");
+                sb.AppendLine("─────────────────────────────────────────────────────────────────────────────");
+
+                if (isPeActive)
+                {
+                    sb.AppendLine("🔴 KRİTİK BULGU 1: DisablePagingExecutive=1 Değeri Aktif!");
+                    sb.AppendLine("   • Neden Sorun Yaratır: Windows çekirdek kodu ve sürücüler fiziksel RAM'de kilitlenir.");
+                    sb.AppendLine("   • 16 GB RAM'li bilgisayarınızda Path of Exile 2 gibi 10-14 GB RAM isteyen oyunlar çalışırken,");
+                    sb.AppendLine("     işletim sistemi boş fiziksel sayfa bulamaz. Bu durum anlık bellek daralmasına, arka plan");
+                    sb.AppendLine("     servislerinin kilitlenmesine ve oyunda 1-2 saniyelik mikro donmalara / çökmeye sebep olur.");
+                    sb.AppendLine("   • Tavsiye: DisablePagingExecutive değerini mutlaka 0 (Güvenli / Paging Serbest) yapın.");
+                    sb.AppendLine();
+                }
+                else
+                {
+                    sb.AppendLine("🟢 DisablePagingExecutive=0: Çekirdek paging serbest. Fiziksel RAM oyunlar için rahatlatılmış.");
+                    sb.AppendLine();
+                }
+
+                if (!cHasPagefile)
+                {
+                    sb.AppendLine("🟡 BULGU 2: Sistem Diski C:'de Pagefile Tanımlı Değil!");
+                    sb.AppendLine("   • Neden Önemli: Windows kaza anında (BSOD) minidump dökümü alabilmek için C: sürücüsünde");
+                    sb.AppendLine("     en azından küçük/sistem yönetimli bir takas alanına ihtiyaç duyar.");
+                    sb.AppendLine("   • Tavsiye: C:\\pagefile.sys 0 0 (Sistem Yönetimli) olarak eklenmelidir.");
+                    sb.AppendLine();
+                }
+
+                if (mHasStatic32)
+                {
+                    sb.AppendLine("🟡 BULGU 3: M: NVMe Diskinde Sabit 32 GB Tavanı (32768 32768) Var!");
+                    sb.AppendLine("   • Neden Riskli: Sabit tavan esnemez. PoE 2 ağır harita yüklemelerinde, shader derlemelerinde");
+                    sb.AppendLine("     veya arkada tarayıcı/yayın açıkken toplam commit sınırı aşılırsa oyun doğrudan kilitlenir.");
+                    sb.AppendLine("   • Tavsiye: Başlangıç 16 GB (16384 MB), En Büyük 48 GB (49152 MB) yapılarak tavan esnetilmelidir.");
+                    sb.AppendLine();
+                }
+                else if (mHasDynamicPagefile && !isPeActive && cHasPagefile)
+                {
+                    sb.AppendLine("🟢 HARİKA: Sisteminiz PoE 2 ve modern AAA espor oyunları için tam kararlı durumdadır!");
+                    sb.AppendLine("   • C:'de kaza döküm desteği aktif.");
+                    sb.AppendLine("   • M: hızlı NVMe SSD'de 16-48 GB dinamik esneme alanı tahsis edilmiş.");
+                    sb.AppendLine("   • DisablePagingExecutive=0 ile bellek daralması ve disk takas fırtınası engellenmiştir.");
+                    sb.AppendLine();
+                }
+
+                sb.AppendLine("ℹ️ NOT: Eski tweaker'ların 'RAM Cleaner / Working Set Trim' özellikleri arka plan süreçlerini");
+                sb.AppendLine("zorla diske yazarak 1-2 saniyelik mikro donmalar yaratır. Argon v4.0'da bu zararlı motor kaldırılmıştır.");
+
+                rtbAdvisorReport.Text = sb.ToString();
+            }
+            catch (Exception ex)
+            {
+                rtbAdvisorReport.Text = "Hata: " + ex.Message;
+            }
+        }
+
+        private void ApplyRecommendedConfiguration()
+        {
+            if (!isAdmin)
+            {
+                MessageBox.Show("Bu ayarı uygulamak için Argon'u Yönetici Olarak Çalıştırmanız gerekir.\n\nAlternatif olarak 'PowerShell Yönetici Komutunu Kopyala' butonuna basarak PowerShell'e yapıştırabilirsiniz.", "Yönetici Yetkisi Gerekli", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            try
+            {
+                string memMgmtKey = @"SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management";
+                vault.SetRegistryTracked("Windows Bellek Kararlılık Kalkanı", "HKLM", memMgmtKey, "DisablePagingExecutive", 0, RegistryValueKind.DWord);
+                vault.SetRegistryTracked("Windows Bellek Kararlılık Kalkanı", "HKLM", memMgmtKey, "LargeSystemCache", 0, RegistryValueKind.DWord);
+
+                // Detect M: drive
+                bool hasM = Directory.Exists(@"M:\");
+                string[] pf;
+                if (hasM)
+                {
+                    pf = new string[] { @"C:\pagefile.sys 0 0", @"M:\pagefile.sys 16384 49152" };
+                }
+                else
+                {
+                    pf = new string[] { @"C:\pagefile.sys 0 0" };
+                }
+
+                vault.SetRegistryTracked("Windows Bellek Kararlılık Kalkanı", "HKLM", memMgmtKey, "PagingFiles", pf, RegistryValueKind.MultiString);
+
+                lblStatusMessage.Text = "✅ Tavsiye edilen kararlı ayarlar başarıyla uygulandı! Bilgisayarı bir kez yeniden başlatmanız önerilir.";
+                lblStatusMessage.ForeColor = Color.FromArgb(52, 211, 153);
+
+                RefreshDiagnostics();
+                if (onSettingsChanged != null) onSettingsChanged();
+
+                MessageBox.Show("Sanal bellek ve paging kararlılık ayarları başarıyla kaydedildi!\n\n• DisablePagingExecutive = 0 (Paging serbest)\n• LargeSystemCache = 0\n• C: = Sistem Yönetimli\n• M: = 16384 MB - 49152 MB (Dinamik NVMe)\n\nDeğişikliklerin işletim sistemi tarafından tam olarak devreye alınması için bilgisayarınızı bir kez yeniden başlatın.", "Ayar Başarıyla Uygulandı", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Ayar uygulanamadı: " + ex.Message, "Hata", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void ResetToWindowsDefault()
+        {
+            if (!isAdmin)
+            {
+                MessageBox.Show("Bu ayarı uygulamak için Argon'u Yönetici Olarak Çalıştırmanız gerekir.", "Yönetici Yetkisi Gerekli", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            try
+            {
+                string memMgmtKey = @"SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management";
+                vault.SetRegistryTracked("Windows Bellek Kararlılık Kalkanı", "HKLM", memMgmtKey, "DisablePagingExecutive", 0, RegistryValueKind.DWord);
+                vault.SetRegistryTracked("Windows Bellek Kararlılık Kalkanı", "HKLM", memMgmtKey, "LargeSystemCache", 0, RegistryValueKind.DWord);
+                string[] pf = new string[] { @"C:\pagefile.sys 0 0" };
+                vault.SetRegistryTracked("Windows Bellek Kararlılık Kalkanı", "HKLM", memMgmtKey, "PagingFiles", pf, RegistryValueKind.MultiString);
+
+                lblStatusMessage.Text = "🔄 Windows varsayılanına dönüldü (Yalnızca C: Sistem Yönetimli).";
+                lblStatusMessage.ForeColor = Color.FromArgb(52, 211, 153);
+                RefreshDiagnostics();
+                if (onSettingsChanged != null) onSettingsChanged();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Sıfırlama başarısız: " + ex.Message, "Hata", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+    }
+
     #endregion
+
+    #endregion
+
+    #endregion
+
+    #region Winaero-Style Windows Customization Catalog & Helpers
+
+    public enum CustomizeControlKind
+    {
+        CheckBox,
+        ComboChoice,
+        NumericRange,
+        ActionButton
+    }
+
+    public class CustomizeOptionDef
+    {
+        public string OptionId;
+        public string Label;
+        public string HelpNote;
+        public string RegistryPathHint;
+        public CustomizeControlKind Kind;
+        public bool RequiresAdmin;
+        public string[] Choices;
+        public int MinVal;
+        public int MaxVal = 100;
+        public int StepVal = 1;
+        public string Unit = "";
+
+        public Func<StateVault, bool> GetBool;
+        public Action<StateVault, bool> SetBool;
+        public Func<StateVault, int> GetInt;
+        public Action<StateVault, int> SetInt;
+        public Action<StateVault> ResetAction;
+        public Action<Form> InvokeToolAction;
+    }
+
+    public class CustomizePageDef
+    {
+        public string PageKey;
+        public string CategoryGroup;
+        public string Title;
+        public string IconKey;
+        public string Description;
+        public string TargetRegistryPath;
+        public bool RequiresAdmin;
+        public bool SuggestsExplorerRestart;
+        public bool SuggestsLogoffOrReboot;
+        public List<CustomizeOptionDef> Options = new List<CustomizeOptionDef>();
+    }
+
+    public static class WinaeroCustomizeCatalog
+    {
+        public static int ReadDword(string hiveName, string subKey, string valueName, int defaultVal)
+        {
+            try
+            {
+                RegistryKey root = (hiveName == "HKLM") ? Registry.LocalMachine : Registry.CurrentUser;
+                using (RegistryKey k = root.OpenSubKey(subKey, false))
+                {
+                    if (k == null) return defaultVal;
+                    object v = k.GetValue(valueName, null);
+                    if (v == null) return defaultVal;
+                    return Convert.ToInt32(v);
+                }
+            }
+            catch { return defaultVal; }
+        }
+
+        public static string ReadStr(string hiveName, string subKey, string valueName, string defaultVal)
+        {
+            try
+            {
+                RegistryKey root = (hiveName == "HKLM") ? Registry.LocalMachine : Registry.CurrentUser;
+                using (RegistryKey k = root.OpenSubKey(subKey, false))
+                {
+                    if (k == null) return defaultVal;
+                    object v = k.GetValue(valueName, null);
+                    return v == null ? defaultVal : Convert.ToString(v);
+                }
+            }
+            catch { return defaultVal; }
+        }
+
+        public static bool SubKeyExists(string hiveName, string subKey)
+        {
+            try
+            {
+                RegistryKey root = (hiveName == "HKLM") ? Registry.LocalMachine : Registry.CurrentUser;
+                using (RegistryKey k = root.OpenSubKey(subKey, false))
+                {
+                    return k != null;
+                }
+            }
+            catch { return false; }
+        }
+
+        public static void DeleteSubKeyTreeSafe(string hiveName, string subKey)
+        {
+            try
+            {
+                RegistryKey root = (hiveName == "HKLM") ? Registry.LocalMachine : Registry.CurrentUser;
+                root.DeleteSubKeyTree(subKey, false);
+            }
+            catch { }
+        }
+
+        public static void OpenKeyInRegedit(string fullPath)
+        {
+            if (string.IsNullOrEmpty(fullPath)) return;
+            try
+            {
+                string clean = fullPath.Trim();
+                if (clean.StartsWith(@"HKCU\", StringComparison.OrdinalIgnoreCase))
+                    clean = @"Bilgisayar\HKEY_CURRENT_USER\" + clean.Substring(5);
+                else if (clean.StartsWith(@"HKLM\", StringComparison.OrdinalIgnoreCase))
+                    clean = @"Bilgisayar\HKEY_LOCAL_MACHINE\" + clean.Substring(5);
+                else if (clean.StartsWith(@"HKEY_", StringComparison.OrdinalIgnoreCase))
+                    clean = @"Bilgisayar\" + clean;
+
+                using (RegistryKey k = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Applets\Regedit"))
+                {
+                    if (k != null) k.SetValue("LastKey", clean, RegistryValueKind.String);
+                }
+                Process.Start("regedit.exe");
+            }
+            catch { }
+        }
+
+        public static void RestartExplorerProcess()
+        {
+            try
+            {
+                foreach (Process p in Process.GetProcessesByName("explorer"))
+                {
+                    try { p.Kill(); p.WaitForExit(2000); } catch { }
+                }
+                Process.Start(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe"));
+            }
+            catch { }
+        }
+
+        public static void RebuildIconCache()
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo("ie4uinit.exe", "-show") { CreateNoWindow = true, UseShellExecute = false });
+            }
+            catch { }
+        }
+
+        public static void CreateDesktopShortcutFile(string fileName, string targetPath, string arguments, string description, string iconLocation)
+        {
+            string desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+            string lnkPath = Path.Combine(desktop, fileName + ".lnk");
+            Type shellType = Type.GetTypeFromProgID("WScript.Shell");
+            object shell = Activator.CreateInstance(shellType);
+            object sc = shellType.InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, shell, new object[] { lnkPath });
+            Type scType = sc.GetType();
+            scType.InvokeMember("TargetPath", BindingFlags.SetProperty, null, sc, new object[] { targetPath });
+            if (!string.IsNullOrEmpty(arguments))
+                scType.InvokeMember("Arguments", BindingFlags.SetProperty, null, sc, new object[] { arguments });
+            if (!string.IsNullOrEmpty(description))
+                scType.InvokeMember("Description", BindingFlags.SetProperty, null, sc, new object[] { description });
+            if (!string.IsNullOrEmpty(iconLocation))
+                scType.InvokeMember("IconLocation", BindingFlags.SetProperty, null, sc, new object[] { iconLocation });
+            scType.InvokeMember("Save", BindingFlags.InvokeMethod, null, sc, null);
+        }
+
+        public static List<CustomizePageDef> BuildCatalog()
+        {
+            List<CustomizePageDef> pages = new List<CustomizePageDef>();
+
+            string advKey = @"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
+            string expKey = @"Software\Microsoft\Windows\CurrentVersion\Explorer";
+            string expPol = @"Software\Policies\Microsoft\Windows\Explorer";
+            string expPolLm = @"SOFTWARE\Policies\Microsoft\Windows\Explorer";
+            string themePers = @"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
+            string dwmKey = @"Software\Microsoft\Windows\DWM";
+            string win11MenuClsid = @"Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}";
+            string win11MenuInproc = win11MenuClsid + @"\InprocServer32";
+            string metricsKey = @"Control Panel\Desktop\WindowMetrics";
+            string desktopKey = @"Control Panel\Desktop";
+            string shellBlocked = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked";
+
+            // ══ 1. WINDOWS 11 ═══════════════════════════════════════════════
+            pages.Add(new CustomizePageDef
+            {
+                PageKey = "win11_context",
+                CategoryGroup = "Özelleştir: Windows 11",
+                Title = "Klasik Tam Sağ Tık Menüsü",
+                IconKey = "win11",
+                SuggestsExplorerRestart = true,
+                TargetRegistryPath = @"HKCU\" + win11MenuInproc,
+                Description = "Windows 11'de kısaltılmış sağ tık menüsünü ve 'Daha fazla seçenek göster' adımını kaldırır; dosya ve masaüstünde doğrudan tam klasik bağlam menüsünü açar.",
+                Options = new List<CustomizeOptionDef>
+                {
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "w11_classic_ctx",
+                        Label = "Klasik Tam Sağ Tık Menüsünü Etkinleştir (Explorer yeniden başlatılmalı)",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RegistryPathHint = @"HKCU\" + win11MenuInproc,
+                        GetBool = v => SubKeyExists("HKCU", win11MenuInproc),
+                        SetBool = (v, on) =>
+                        {
+                            if (on) v.SetRegistryTracked("Klasik Sağ Tık Menüsü", "HKCU", win11MenuInproc, "", "", RegistryValueKind.String);
+                            else DeleteSubKeyTreeSafe("HKCU", win11MenuClsid);
+                        },
+                        ResetAction = v => DeleteSubKeyTreeSafe("HKCU", win11MenuClsid)
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "w11_compact_exp",
+                        Label = "Dosya Gezgini Kompakt Görünüm (Öğeler arası dikey boşluğu daralt)",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RegistryPathHint = @"HKCU\" + advKey + @"\UseCompactMode",
+                        GetBool = v => ReadDword("HKCU", advKey, "UseCompactMode", 0) == 1,
+                        SetBool = (v, on) => v.SetRegistryTracked("Explorer Kompakt Mod", "HKCU", advKey, "UseCompactMode", on ? 1 : 0, RegistryValueKind.DWord),
+                        ResetAction = v => v.RevertRegistryTracked("HKCU", advKey, "UseCompactMode")
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "w11_check_boxes",
+                        Label = "Dosya ve klasör seçmek için onay kutularını kullan (AutoCheckSelect)",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RegistryPathHint = @"HKCU\" + advKey + @"\AutoCheckSelect",
+                        GetBool = v => ReadDword("HKCU", advKey, "AutoCheckSelect", 0) == 1,
+                        SetBool = (v, on) => v.SetRegistryTracked("Seçim Onay Kutuları", "HKCU", advKey, "AutoCheckSelect", on ? 1 : 0, RegistryValueKind.DWord),
+                        ResetAction = v => v.RevertRegistryTracked("HKCU", advKey, "AutoCheckSelect")
+                    }
+                }
+            });
+
+            pages.Add(new CustomizePageDef
+            {
+                PageKey = "win11_taskbar",
+                CategoryGroup = "Özelleştir: Windows 11",
+                Title = "Görev Çubuğu ve Saat",
+                IconKey = "display",
+                SuggestsExplorerRestart = true,
+                TargetRegistryPath = @"HKCU\" + advKey,
+                Description = "Windows 11 görev çubuğu hizalamasını (Sol/Orta), saatte saniye gösterimini, Widget düğmesini ve sağ tık 'Görevi Sonlandır' özelliğini yönetir.",
+                Options = new List<CustomizeOptionDef>
+                {
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "w11_tb_align",
+                        Label = "Görev Çubuğu Hizalaması:",
+                        Kind = CustomizeControlKind.ComboChoice,
+                        Choices = new string[] { "Sol (Klasik Windows 10)", "Orta (Windows 11 Varsayılan)" },
+                        RegistryPathHint = @"HKCU\" + advKey + @"\TaskbarAl",
+                        GetInt = v => ReadDword("HKCU", advKey, "TaskbarAl", 1) == 0 ? 0 : 1,
+                        SetInt = (v, idx) => v.SetRegistryTracked("Görev Çubuğu Hizası", "HKCU", advKey, "TaskbarAl", idx == 0 ? 0 : 1, RegistryValueKind.DWord),
+                        ResetAction = v => v.RevertRegistryTracked("HKCU", advKey, "TaskbarAl")
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "w11_clock_sec",
+                        Label = "Sistem tepsisi saatinde saniyeleri göster (ShowSecondsInSystemClock)",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RegistryPathHint = @"HKCU\" + advKey + @"\ShowSecondsInSystemClock",
+                        GetBool = v => ReadDword("HKCU", advKey, "ShowSecondsInSystemClock", 0) == 1,
+                        SetBool = (v, on) => v.SetRegistryTracked("Saat Saniyesi", "HKCU", advKey, "ShowSecondsInSystemClock", on ? 1 : 0, RegistryValueKind.DWord),
+                        ResetAction = v => v.RevertRegistryTracked("HKCU", advKey, "ShowSecondsInSystemClock")
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "w11_widgets",
+                        Label = "Görev çubuğunda Widget (Haberler/Hava Durumu) düğmesini gizle",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RegistryPathHint = @"HKCU\" + advKey + @"\TaskbarDa",
+                        GetBool = v => ReadDword("HKCU", advKey, "TaskbarDa", 1) == 0,
+                        SetBool = (v, on) => v.SetRegistryTracked("Widget Düğmesi", "HKCU", advKey, "TaskbarDa", on ? 0 : 1, RegistryValueKind.DWord),
+                        ResetAction = v => v.RevertRegistryTracked("HKCU", advKey, "TaskbarDa")
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "w11_endtask",
+                        Label = "Görev çubuğu simgesi sağ tık menüsüne 'Görevi Sonlandır' ekle",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RegistryPathHint = @"HKCU\" + advKey + @"\TaskbarDeveloperSettings\TaskbarEndTask",
+                        GetBool = v => ReadDword("HKCU", advKey + @"\TaskbarDeveloperSettings", "TaskbarEndTask", 0) == 1,
+                        SetBool = (v, on) => v.SetRegistryTracked("Görev Çubuğu Görevi Sonlandır", "HKCU", advKey + @"\TaskbarDeveloperSettings", "TaskbarEndTask", on ? 1 : 0, RegistryValueKind.DWord),
+                        ResetAction = v => v.RevertRegistryTracked("HKCU", advKey + @"\TaskbarDeveloperSettings", "TaskbarEndTask")
+                    }
+                }
+            });
+
+            pages.Add(new CustomizePageDef
+            {
+                PageKey = "win11_start",
+                CategoryGroup = "Özelleştir: Windows 11",
+                Title = "Başlat Menüsü, Copilot ve Spotlight",
+                IconKey = "win11",
+                SuggestsExplorerRestart = true,
+                TargetRegistryPath = @"HKCU\" + advKey,
+                Description = "Başlat menüsündeki Önerilenler bölümünü, Windows Copilot'u, son açılan belge geçmişini ve masaüstündeki Windows Spotlight simgesini yönetir.",
+                Options = new List<CustomizeOptionDef>
+                {
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "w11_rec",
+                        Label = "Başlat menüsünde 'Önerilen' ipuçları ve reklamları kapat",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RegistryPathHint = @"HKCU\" + advKey + @"\Start_IrisRecommendations",
+                        GetBool = v => ReadDword("HKCU", advKey, "Start_IrisRecommendations", 1) == 0,
+                        SetBool = (v, on) => v.SetRegistryTracked("Başlat Önerilenler", "HKCU", advKey, "Start_IrisRecommendations", on ? 0 : 1, RegistryValueKind.DWord),
+                        ResetAction = v => v.RevertRegistryTracked("HKCU", advKey, "Start_IrisRecommendations")
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "w11_recent_docs",
+                        Label = "Başlat ve Hızlı Erişimde son açılan öğeleri gizle (Start_TrackDocs)",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RegistryPathHint = @"HKCU\" + advKey + @"\Start_TrackDocs",
+                        GetBool = v => ReadDword("HKCU", advKey, "Start_TrackDocs", 1) == 0,
+                        SetBool = (v, on) => v.SetRegistryTracked("Son Açılan Belgeler", "HKCU", advKey, "Start_TrackDocs", on ? 0 : 1, RegistryValueKind.DWord),
+                        ResetAction = v => v.RevertRegistryTracked("HKCU", advKey, "Start_TrackDocs")
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "w11_copilot",
+                        Label = "Windows Copilot özelliğini devre dışı bırak (TurnOffWindowsCopilot)",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RegistryPathHint = @"HKCU\Software\Policies\Microsoft\Windows\WindowsCopilot\TurnOffWindowsCopilot",
+                        GetBool = v => ReadDword("HKCU", @"Software\Policies\Microsoft\Windows\WindowsCopilot", "TurnOffWindowsCopilot", 0) == 1,
+                        SetBool = (v, on) => v.SetRegistryTracked("Windows Copilot", "HKCU", @"Software\Policies\Microsoft\Windows\WindowsCopilot", "TurnOffWindowsCopilot", on ? 1 : 0, RegistryValueKind.DWord),
+                        ResetAction = v => v.RevertRegistryTracked("HKCU", @"Software\Policies\Microsoft\Windows\WindowsCopilot", "TurnOffWindowsCopilot")
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "w11_spotlight_icon",
+                        Label = "Masaüstünden 'Windows Spotlight' bilgi simgesini kaldır",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RegistryPathHint = @"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\HideDesktopIcons\NewStartPanel\{2cc5ca98-6485-489a-920e-b3e88a6ccce3}",
+                        GetBool = v => ReadDword("HKCU", @"Software\Microsoft\Windows\CurrentVersion\Explorer\HideDesktopIcons\NewStartPanel", "{2cc5ca98-6485-489a-920e-b3e88a6ccce3}", 0) == 1,
+                        SetBool = (v, on) => v.SetRegistryTracked("Spotlight Masaüstü İkonu", "HKCU", @"Software\Microsoft\Windows\CurrentVersion\Explorer\HideDesktopIcons\NewStartPanel", "{2cc5ca98-6485-489a-920e-b3e88a6ccce3}", on ? 1 : 0, RegistryValueKind.DWord),
+                        ResetAction = v => v.RevertRegistryTracked("HKCU", @"Software\Microsoft\Windows\CurrentVersion\Explorer\HideDesktopIcons\NewStartPanel", "{2cc5ca98-6485-489a-920e-b3e88a6ccce3}")
+                    }
+                }
+            });
+
+            // ══ 2. GÖRÜNÜM (APPEARANCE) ═════════════════════════════════════
+            pages.Add(new CustomizePageDef
+            {
+                PageKey = "app_colors",
+                CategoryGroup = "Özelleştir: Görünüm",
+                Title = "Renkler, Koyu/Açık Mod ve Başlık Çubuğu",
+                IconKey = "appearance",
+                TargetRegistryPath = @"HKCU\" + themePers,
+                Description = "Windows sistem temasını, uygulama açık/koyu modunu, pencere başlık çubuklarında vurgu rengi kullanımını ve saydamlık efektlerini özelleştirir.",
+                Options = new List<CustomizeOptionDef>
+                {
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "app_light_apps",
+                        Label = "Uygulamalar için Koyu Mod yerine Açık Mod kullan (AppsUseLightTheme)",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RegistryPathHint = @"HKCU\" + themePers + @"\AppsUseLightTheme",
+                        GetBool = v => ReadDword("HKCU", themePers, "AppsUseLightTheme", 1) == 1,
+                        SetBool = (v, on) => v.SetRegistryTracked("Uygulama Açık/Koyu Mod", "HKCU", themePers, "AppsUseLightTheme", on ? 1 : 0, RegistryValueKind.DWord),
+                        ResetAction = v => v.RevertRegistryTracked("HKCU", themePers, "AppsUseLightTheme")
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "app_light_sys",
+                        Label = "Görev çubuğu ve Başlat menüsü için Açık Mod kullan (SystemUsesLightTheme)",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RegistryPathHint = @"HKCU\" + themePers + @"\SystemUsesLightTheme",
+                        GetBool = v => ReadDword("HKCU", themePers, "SystemUsesLightTheme", 0) == 1,
+                        SetBool = (v, on) => v.SetRegistryTracked("Sistem Açık/Koyu Mod", "HKCU", themePers, "SystemUsesLightTheme", on ? 1 : 0, RegistryValueKind.DWord),
+                        ResetAction = v => v.RevertRegistryTracked("HKCU", themePers, "SystemUsesLightTheme")
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "app_title_color",
+                        Label = "Pencere başlık çubuklarında ve kenarlıklarda vurgu rengini göster",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RegistryPathHint = @"HKCU\" + dwmKey + @"\ColorPrevalence",
+                        GetBool = v => ReadDword("HKCU", dwmKey, "ColorPrevalence", 0) == 1,
+                        SetBool = (v, on) => v.SetRegistryTracked("Başlık Çubuğu Vurgu Rengi", "HKCU", dwmKey, "ColorPrevalence", on ? 1 : 0, RegistryValueKind.DWord),
+                        ResetAction = v => v.RevertRegistryTracked("HKCU", dwmKey, "ColorPrevalence")
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "app_transparency",
+                        Label = "Windows saydamlık ve Acrylic efektlerini etkinleştir (EnableTransparency)",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RegistryPathHint = @"HKCU\" + themePers + @"\EnableTransparency",
+                        GetBool = v => ReadDword("HKCU", themePers, "EnableTransparency", 1) == 1,
+                        SetBool = (v, on) => v.SetRegistryTracked("Windows Saydamlık", "HKCU", themePers, "EnableTransparency", on ? 1 : 0, RegistryValueKind.DWord),
+                        ResetAction = v => v.RevertRegistryTracked("HKCU", themePers, "EnableTransparency")
+                    }
+                }
+            });
+
+            pages.Add(new CustomizePageDef
+            {
+                PageKey = "app_alttab",
+                CategoryGroup = "Özelleştir: Görünüm",
+                Title = "Alt+Tab Görünümü ve Duvar Kağıdı Kalitesi",
+                IconKey = "display",
+                SuggestsExplorerRestart = true,
+                TargetRegistryPath = @"HKCU\" + expKey + @"\AltTabSettings",
+                Description = "Klasik XP/2000 kompakt Alt+Tab pencere değiştiricisini geri getirebilir, modern Alt+Tab arka plan karartma oranını ve duvar kağıdı sıkıştırma kalitesini ayarlayabilirsiniz.",
+                Options = new List<CustomizeOptionDef>
+                {
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "alt_classic",
+                        Label = "Klasik XP/2000 simge tabanlı Alt+Tab iletişim kutusunu kullan",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RegistryPathHint = @"HKCU\" + expKey + @"\AltTabSettings",
+                        GetBool = v => ReadDword("HKCU", expKey, "AltTabSettings", 0) == 1,
+                        SetBool = (v, on) => v.SetRegistryTracked("Klasik Alt+Tab", "HKCU", expKey, "AltTabSettings", on ? 1 : 0, RegistryValueKind.DWord),
+                        ResetAction = v => v.RevertRegistryTracked("HKCU", expKey, "AltTabSettings")
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "alt_dim",
+                        Label = "Modern Alt+Tab Arka Plan Karartma Oranı (%)",
+                        Kind = CustomizeControlKind.NumericRange,
+                        MinVal = 0, MaxVal = 100, StepVal = 5, Unit = "%",
+                        RegistryPathHint = @"HKCU\" + expKey + @"\MultitaskingView\AltTabViewHost\Grid_backgroundDimmingLayer_percent",
+                        GetInt = v => ReadDword("HKCU", expKey + @"\MultitaskingView\AltTabViewHost", "Grid_backgroundDimmingLayer_percent", 70),
+                        SetInt = (v, val) => v.SetRegistryTracked("Alt+Tab Karartma", "HKCU", expKey + @"\MultitaskingView\AltTabViewHost", "Grid_backgroundDimmingLayer_percent", val, RegistryValueKind.DWord),
+                        ResetAction = v => v.RevertRegistryTracked("HKCU", expKey + @"\MultitaskingView\AltTabViewHost", "Grid_backgroundDimmingLayer_percent")
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "wall_jpg_100",
+                        Label = "Masaüstü duvar kağıdını %100 kayıpsız JPEG kalitesinde ayarla (JPEGImportQuality)",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RegistryPathHint = @"HKCU\" + desktopKey + @"\JPEGImportQuality",
+                        GetBool = v => ReadDword("HKCU", desktopKey, "JPEGImportQuality", 85) >= 100,
+                        SetBool = (v, on) => v.SetRegistryTracked("Duvar Kağıdı Kalitesi", "HKCU", desktopKey, "JPEGImportQuality", on ? 100 : 85, RegistryValueKind.DWord),
+                        ResetAction = v => v.RevertRegistryTracked("HKCU", desktopKey, "JPEGImportQuality")
+                    }
+                }
+            });
+
+            pages.Add(new CustomizePageDef
+            {
+                PageKey = "app_metrics",
+                CategoryGroup = "Özelleştir: Görünüm",
+                Title = "Masaüstü Simge Aralığı ve Pencere Ölçüleri",
+                IconKey = "colors",
+                SuggestsLogoffOrReboot = true,
+                TargetRegistryPath = @"HKCU\" + metricsKey,
+                Description = "Windows masaüstü simgelerinin yatay/dikey aralığını, kaydırma çubuğu genişliğini ve pencere kenarlık kalınlığını ayarlar. Değişiklikler oturum kapatılıp açıldığında geçerli olur.",
+                Options = new List<CustomizeOptionDef>
+                {
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "met_icon_h",
+                        Label = "Masaüstü Simge Yatay Aralığı (Varsayılan: -1125 twip):",
+                        Kind = CustomizeControlKind.NumericRange,
+                        MinVal = -2500, MaxVal = -480, StepVal = 75, Unit = "twip",
+                        RegistryPathHint = @"HKCU\" + metricsKey + @"\IconSpacing",
+                        GetInt = v => { int x; return int.TryParse(ReadStr("HKCU", metricsKey, "IconSpacing", "-1125"), out x) ? x : -1125; },
+                        SetInt = (v, val) => v.SetRegistryTracked("Simge Yatay Aralığı", "HKCU", metricsKey, "IconSpacing", val.ToString(), RegistryValueKind.String),
+                        ResetAction = v => v.RevertRegistryTracked("HKCU", metricsKey, "IconSpacing")
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "met_icon_v",
+                        Label = "Masaüstü Simge Dikey Aralığı (Varsayılan: -1125 twip):",
+                        Kind = CustomizeControlKind.NumericRange,
+                        MinVal = -2500, MaxVal = -480, StepVal = 75, Unit = "twip",
+                        RegistryPathHint = @"HKCU\" + metricsKey + @"\IconVerticalSpacing",
+                        GetInt = v => { int x; return int.TryParse(ReadStr("HKCU", metricsKey, "IconVerticalSpacing", "-1125"), out x) ? x : -1125; },
+                        SetInt = (v, val) => v.SetRegistryTracked("Simge Dikey Aralığı", "HKCU", metricsKey, "IconVerticalSpacing", val.ToString(), RegistryValueKind.String),
+                        ResetAction = v => v.RevertRegistryTracked("HKCU", metricsKey, "IconVerticalSpacing")
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "met_scroll_w",
+                        Label = "Klasik Pencere Kaydırma Çubuğu Genişliği (Varsayılan: -255 twip):",
+                        Kind = CustomizeControlKind.NumericRange,
+                        MinVal = -480, MaxVal = -120, StepVal = 15, Unit = "twip",
+                        RegistryPathHint = @"HKCU\" + metricsKey + @"\ScrollWidth",
+                        GetInt = v => { int x; return int.TryParse(ReadStr("HKCU", metricsKey, "ScrollWidth", "-255"), out x) ? x : -255; },
+                        SetInt = (v, val) =>
+                        {
+                            v.SetRegistryTracked("ScrollBar Genişlik", "HKCU", metricsKey, "ScrollWidth", val.ToString(), RegistryValueKind.String);
+                            v.SetRegistryTracked("ScrollBar Yükseklik", "HKCU", metricsKey, "ScrollHeight", val.ToString(), RegistryValueKind.String);
+                        },
+                        ResetAction = v =>
+                        {
+                            v.RevertRegistryTracked("HKCU", metricsKey, "ScrollWidth");
+                            v.RevertRegistryTracked("HKCU", metricsKey, "ScrollHeight");
+                        }
+                    }
+                }
+            });
+
+            // ══ 3. DAVRANIŞ VE ÖNYÜKLEME (BEHAVIOR & BOOT) ══════════════════
+            pages.Add(new CustomizePageDef
+            {
+                PageKey = "beh_mouse",
+                CategoryGroup = "Özelleştir: Davranış",
+                Title = "Menü Gecikmesi, X-Mouse ve Aero Shake",
+                IconKey = "mouse",
+                TargetRegistryPath = @"HKCU\" + desktopKey,
+                Description = "Pencere başlığını sallayınca diğer pencereleri küçülten Aero Shake'i kapatır, menü açılış hızını ayarlar ve pencere sürükleme davranışını düzenler.",
+                Options = new List<CustomizeOptionDef>
+                {
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "beh_no_shake",
+                        Label = "Aero Shake özelliğini kapat (Pencereyi sallayınca diğerlerini küçültme)",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RegistryPathHint = @"HKCU\" + advKey + @"\DisallowShaking",
+                        GetBool = v => ReadDword("HKCU", advKey, "DisallowShaking", 0) == 1,
+                        SetBool = (v, on) => v.SetRegistryTracked("Aero Shake", "HKCU", advKey, "DisallowShaking", on ? 1 : 0, RegistryValueKind.DWord),
+                        ResetAction = v => v.RevertRegistryTracked("HKCU", advKey, "DisallowShaking")
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "beh_snap",
+                        Label = "Pencereleri ekran kenarına sürükleyince otomatik boyutlandırma (Aero Snap)",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RegistryPathHint = @"HKCU\" + desktopKey + @"\WindowArrangementActive",
+                        GetBool = v => ReadStr("HKCU", desktopKey, "WindowArrangementActive", "1") == "1",
+                        SetBool = (v, on) => v.SetRegistryTracked("Aero Snap", "HKCU", desktopKey, "WindowArrangementActive", on ? "1" : "0", RegistryValueKind.String),
+                        ResetAction = v => v.RevertRegistryTracked("HKCU", desktopKey, "WindowArrangementActive")
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "beh_menu_delay",
+                        Label = "Alt Menü Açılış Gecikmesi (MenuShowDelay — 0 ms anlık, 400 ms varsayılan):",
+                        Kind = CustomizeControlKind.NumericRange,
+                        MinVal = 0, MaxVal = 800, StepVal = 20, Unit = "ms",
+                        RegistryPathHint = @"HKCU\" + desktopKey + @"\MenuShowDelay",
+                        GetInt = v => { int x; return int.TryParse(ReadStr("HKCU", desktopKey, "MenuShowDelay", "400"), out x) ? x : 400; },
+                        SetInt = (v, val) => v.SetRegistryTracked("Menü Açılış Gecikmesi", "HKCU", desktopKey, "MenuShowDelay", val.ToString(), RegistryValueKind.String),
+                        ResetAction = v => v.RevertRegistryTracked("HKCU", desktopKey, "MenuShowDelay")
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "beh_xmouse",
+                        Label = "X-Mouse: Fare imleci üzerine geldiğinde pencereyi tıklamadan etkinleştir",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RegistryPathHint = "Win32 SPI_SETACTIVEWINDOWTRACKING",
+                        GetBool = v => { int cur = 0; NativeMethods.SystemParametersInfo(0x1000, 0, out cur, 0); return cur != 0; },
+                        SetBool = (v, on) =>
+                        {
+                            NativeMethods.SystemParametersInfo(0x1001, 0, new IntPtr(on ? 1 : 0), 3);
+                        },
+                        ResetAction = v => NativeMethods.SystemParametersInfo(0x1001, 0, IntPtr.Zero, 3)
+                    }
+                }
+            });
+
+            pages.Add(new CustomizePageDef
+            {
+                PageKey = "beh_logon",
+                CategoryGroup = "Özelleştir: Davranış",
+                Title = "Kilit Ekranı ve Oturum Açma (Boot / Logon)",
+                IconKey = "lock",
+                RequiresAdmin = true,
+                TargetRegistryPath = @"HKLM\SOFTWARE\Policies\Microsoft\Windows\Personalization",
+                Description = "Bilgisayar açılışında kilit ekranını atlar, oturum açma ekranındaki Acrylic bulanıklığı kaldırır, Başlangıç Sesini ve detaylı durum mesajlarını yönetir.",
+                Options = new List<CustomizeOptionDef>
+                {
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "logon_nolock",
+                        Label = "Windows Kilit Ekranını devre dışı bırak (NoLockScreen) [Yönetici]",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RequiresAdmin = true,
+                        RegistryPathHint = @"HKLM\SOFTWARE\Policies\Microsoft\Windows\Personalization\NoLockScreen",
+                        GetBool = v => ReadDword("HKLM", @"SOFTWARE\Policies\Microsoft\Windows\Personalization", "NoLockScreen", 0) == 1,
+                        SetBool = (v, on) => v.SetRegistryTracked("Kilit Ekranını Kapat", "HKLM", @"SOFTWARE\Policies\Microsoft\Windows\Personalization", "NoLockScreen", on ? 1 : 0, RegistryValueKind.DWord),
+                        ResetAction = v => v.RevertRegistryTracked("HKLM", @"SOFTWARE\Policies\Microsoft\Windows\Personalization", "NoLockScreen")
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "logon_noblur",
+                        Label = "Oturum açma ekranında arka plan bulanıklığını (Acrylic) kapat [Yönetici]",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RequiresAdmin = true,
+                        RegistryPathHint = @"HKLM\SOFTWARE\Policies\Microsoft\Windows\System\DisableAcrylicBackgroundOnLogon",
+                        GetBool = v => ReadDword("HKLM", @"SOFTWARE\Policies\Microsoft\Windows\System", "DisableAcrylicBackgroundOnLogon", 0) == 1,
+                        SetBool = (v, on) => v.SetRegistryTracked("Logon Bulanıklık", "HKLM", @"SOFTWARE\Policies\Microsoft\Windows\System", "DisableAcrylicBackgroundOnLogon", on ? 1 : 0, RegistryValueKind.DWord),
+                        ResetAction = v => v.RevertRegistryTracked("HKLM", @"SOFTWARE\Policies\Microsoft\Windows\System", "DisableAcrylicBackgroundOnLogon")
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "logon_verbose",
+                        Label = "Açılış ve kapanışta ayrıntılı Windows durum mesajlarını göster (VerboseStatus) [Yönetici]",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RequiresAdmin = true,
+                        RegistryPathHint = @"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\VerboseStatus",
+                        GetBool = v => ReadDword("HKLM", @"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", "VerboseStatus", 0) == 1,
+                        SetBool = (v, on) => v.SetRegistryTracked("Detaylı Açılış Mesajları", "HKLM", @"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", "VerboseStatus", on ? 1 : 0, RegistryValueKind.DWord),
+                        ResetAction = v => v.RevertRegistryTracked("HKLM", @"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", "VerboseStatus")
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "boot_sound",
+                        Label = "Windows Başlangıç Sesini kapat (DisableStartupSound) [Yönetici]",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RequiresAdmin = true,
+                        RegistryPathHint = @"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\LogonUI\BootAnimation\DisableStartupSound",
+                        GetBool = v => ReadDword("HKLM", @"SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\LogonUI\BootAnimation", "DisableStartupSound", 0) == 1,
+                        SetBool = (v, on) => v.SetRegistryTracked("Başlangıç Sesi", "HKLM", @"SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\LogonUI\BootAnimation", "DisableStartupSound", on ? 1 : 0, RegistryValueKind.DWord),
+                        ResetAction = v => v.RevertRegistryTracked("HKLM", @"SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\LogonUI\BootAnimation", "DisableStartupSound")
+                    }
+                }
+            });
+
+            pages.Add(new CustomizePageDef
+            {
+                PageKey = "beh_keyboard",
+                CategoryGroup = "Özelleştir: Davranış",
+                Title = "Klavye, NumLock ve Kayıt Defteri Yedeği",
+                IconKey = "keyboard",
+                TargetRegistryPath = @"HKCU\Control Panel\Keyboard",
+                Description = "Oyun sırasında kaza ile açılan Yapışkan Tuş/Geçiş Tuşu uyarılarını engeller, NumLock durumunu hatırlar ve otomatik kayıt defteri yedeklemesini (RegIdleBackup) açar.",
+                Options = new List<CustomizeOptionDef>
+                {
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "kbd_numlock",
+                        Label = "Oturum açılışında NumLock tuşunu otomatik olarak açık başlat (InitialKeyboardIndicators=2)",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RegistryPathHint = @"HKCU\Control Panel\Keyboard\InitialKeyboardIndicators",
+                        GetBool = v => ReadStr("HKCU", @"Control Panel\Keyboard", "InitialKeyboardIndicators", "0") == "2",
+                        SetBool = (v, on) => v.SetRegistryTracked("Açılış NumLock", "HKCU", @"Control Panel\Keyboard", "InitialKeyboardIndicators", on ? "2" : "0", RegistryValueKind.String),
+                        ResetAction = v => v.RevertRegistryTracked("HKCU", @"Control Panel\Keyboard", "InitialKeyboardIndicators")
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "kbd_sticky_off",
+                        Label = "5 kez Shift'e basınca çıkan Yapışkan Tuşlar uyarı penceresini kapat",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RegistryPathHint = @"HKCU\Control Panel\Accessibility\StickyKeys\Flags",
+                        GetBool = v => ReadStr("HKCU", @"Control Panel\Accessibility\StickyKeys", "Flags", "510") == "506",
+                        SetBool = (v, on) => v.SetRegistryTracked("Yapışkan Tuş Kalkanı", "HKCU", @"Control Panel\Accessibility\StickyKeys", "Flags", on ? "506" : "510", RegistryValueKind.String),
+                        ResetAction = v => v.RevertRegistryTracked("HKCU", @"Control Panel\Accessibility\StickyKeys", "Flags")
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "kbd_toggle_off",
+                        Label = "CapsLock/NumLock basılı tutma (ToggleKeys) bip sesini ve uyarısını kapat",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RegistryPathHint = @"HKCU\Control Panel\Accessibility\ToggleKeys\Flags",
+                        GetBool = v => ReadStr("HKCU", @"Control Panel\Accessibility\ToggleKeys", "Flags", "62") == "58",
+                        SetBool = (v, on) => v.SetRegistryTracked("Geçiş Tuşu Uyarısı", "HKCU", @"Control Panel\Accessibility\ToggleKeys", "Flags", on ? "58" : "62", RegistryValueKind.String),
+                        ResetAction = v => v.RevertRegistryTracked("HKCU", @"Control Panel\Accessibility\ToggleKeys", "Flags")
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "sys_regbackup",
+                        Label = "Windows otomatik periyodik Kayıt Defteri yedeğini etkinleştir (RegIdleBackup) [Yönetici]",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RequiresAdmin = true,
+                        RegistryPathHint = @"HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Configuration Manager\EnablePeriodicBackup",
+                        GetBool = v => ReadDword("HKLM", @"SYSTEM\CurrentControlSet\Control\Session Manager\Configuration Manager", "EnablePeriodicBackup", 0) == 1,
+                        SetBool = (v, on) => v.SetRegistryTracked("Otomatik RegBack", "HKLM", @"SYSTEM\CurrentControlSet\Control\Session Manager\Configuration Manager", "EnablePeriodicBackup", on ? 1 : 0, RegistryValueKind.DWord),
+                        ResetAction = v => v.RevertRegistryTracked("HKLM", @"SYSTEM\CurrentControlSet\Control\Session Manager\Configuration Manager", "EnablePeriodicBackup")
+                    }
+                }
+            });
+
+            // ══ 4. DOSYA GEZGİNİ (FILE EXPLORER) ════════════════════════════
+            pages.Add(new CustomizePageDef
+            {
+                PageKey = "exp_startup",
+                CategoryGroup = "Özelleştir: Dosya Gezgini",
+                Title = "Başlangıç Klasörü ve Dosya Seçenekleri",
+                IconKey = "explorer",
+                TargetRegistryPath = @"HKCU\" + advKey,
+                Description = "Dosya Gezgini açıldığında varsayılan başlangıç konumunu belirler; bilinen dosya uzantılarını ve gizli sistem dosya/klasörlerini görünür kılar.",
+                Options = new List<CustomizeOptionDef>
+                {
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "exp_launch_to",
+                        Label = "Dosya Gezgini Başlangıç Konumu (LaunchTo):",
+                        Kind = CustomizeControlKind.ComboChoice,
+                        Choices = new string[] { "Bu Bilgisayar (Önerilen)", "Giriş / Hızlı Erişim", "İndirilenler" },
+                        RegistryPathHint = @"HKCU\" + advKey + @"\LaunchTo",
+                        GetInt = v => { int d = ReadDword("HKCU", advKey, "LaunchTo", 2); return d == 1 ? 0 : (d == 3 ? 2 : 1); },
+                        SetInt = (v, idx) => v.SetRegistryTracked("Gezgin Başlangıç Klasörü", "HKCU", advKey, "LaunchTo", idx == 0 ? 1 : (idx == 2 ? 3 : 2), RegistryValueKind.DWord),
+                        ResetAction = v => v.RevertRegistryTracked("HKCU", advKey, "LaunchTo")
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "exp_show_ext",
+                        Label = "Bilinen dosya türleri için uzantıları daima göster (.exe, .txt vb.)",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RegistryPathHint = @"HKCU\" + advKey + @"\HideFileExt",
+                        GetBool = v => ReadDword("HKCU", advKey, "HideFileExt", 1) == 0,
+                        SetBool = (v, on) => v.SetRegistryTracked("Dosya Uzantılarını Göster", "HKCU", advKey, "HideFileExt", on ? 0 : 1, RegistryValueKind.DWord),
+                        ResetAction = v => v.RevertRegistryTracked("HKCU", advKey, "HideFileExt")
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "exp_show_hidden",
+                        Label = "Gizli dosya, klasör ve sürücüleri göster (Hidden=1)",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RegistryPathHint = @"HKCU\" + advKey + @"\Hidden",
+                        GetBool = v => ReadDword("HKCU", advKey, "Hidden", 2) == 1,
+                        SetBool = (v, on) => v.SetRegistryTracked("Gizli Dosyaları Göster", "HKCU", advKey, "Hidden", on ? 1 : 2, RegistryValueKind.DWord),
+                        ResetAction = v => v.RevertRegistryTracked("HKCU", advKey, "Hidden")
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "exp_sep_proc",
+                        Label = "Klasör pencerelerini ayrı bir Explorer işleminde başlat (SeparateProcess)",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RegistryPathHint = @"HKCU\" + advKey + @"\SeparateProcess",
+                        GetBool = v => ReadDword("HKCU", advKey, "SeparateProcess", 0) == 1,
+                        SetBool = (v, on) => v.SetRegistryTracked("Gezgin Ayrı İşlem", "HKCU", advKey, "SeparateProcess", on ? 1 : 0, RegistryValueKind.DWord),
+                        ResetAction = v => v.RevertRegistryTracked("HKCU", advKey, "SeparateProcess")
+                    }
+                }
+            });
+
+            pages.Add(new CustomizePageDef
+            {
+                PageKey = "exp_drives",
+                CategoryGroup = "Özelleştir: Dosya Gezgini",
+                Title = "Sürücü Harfleri, İpuçları ve Önbellek",
+                IconKey = "drive",
+                SuggestsExplorerRestart = true,
+                TargetRegistryPath = @"HKCU\" + expKey,
+                Description = "Sürücü harflerinin (C:, D:) adlardan önce veya sonra görünmesini düzenler; başlık çubuğunda tam klasör yolunu ve klasör ipuçlarında boyut bilgisini kontrol eder.",
+                Options = new List<CustomizeOptionDef>
+                {
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "drv_letters",
+                        Label = "Sürücü Harfi Gösterim Biçimi (ShowDriveLettersFirst):",
+                        Kind = CustomizeControlKind.ComboChoice,
+                        Choices = new string[] { "Varsayılan (Sürücü Adından Sonra: Yerel Disk (C:))", "Sürücü Adından Önce (Örn: (C:) Yerel Disk)", "Sürücü Harflerini Gizle" },
+                        RegistryPathHint = @"HKCU\" + expKey + @"\ShowDriveLettersFirst",
+                        GetInt = v => { int d = ReadDword("HKCU", expKey, "ShowDriveLettersFirst", 0); return d == 4 ? 1 : (d == 2 ? 2 : 0); },
+                        SetInt = (v, idx) => v.SetRegistryTracked("Sürücü Harfi Sırası", "HKCU", expKey, "ShowDriveLettersFirst", idx == 1 ? 4 : (idx == 2 ? 2 : 0), RegistryValueKind.DWord),
+                        ResetAction = v => v.RevertRegistryTracked("HKCU", expKey, "ShowDriveLettersFirst")
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "exp_full_path",
+                        Label = "Klasör başlık çubuğunda tam yolu görüntüle (FullPath)",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RegistryPathHint = @"HKCU\" + expKey + @"\CabinetState\FullPath",
+                        GetBool = v => ReadDword("HKCU", expKey + @"\CabinetState", "FullPath", 0) == 1,
+                        SetBool = (v, on) => v.SetRegistryTracked("Başlıkta Tam Yol", "HKCU", expKey + @"\CabinetState", "FullPath", on ? 1 : 0, RegistryValueKind.DWord),
+                        ResetAction = v => v.RevertRegistryTracked("HKCU", expKey + @"\CabinetState", "FullPath")
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "exp_thumbs_net",
+                        Label = "Ağ klasörlerinde gizli Thumbs.db önbellek dosyası oluşturulmasını kapat",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RegistryPathHint = @"HKCU\" + expPol + @"\DisableThumbsDBOnNetworkFolders",
+                        GetBool = v => ReadDword("HKCU", expPol, "DisableThumbsDBOnNetworkFolders", 0) == 1,
+                        SetBool = (v, on) => v.SetRegistryTracked("Ağ Thumbs.db", "HKCU", expPol, "DisableThumbsDBOnNetworkFolders", on ? 1 : 0, RegistryValueKind.DWord),
+                        ResetAction = v => v.RevertRegistryTracked("HKCU", expPol, "DisableThumbsDBOnNetworkFolders")
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "exp_comp_color",
+                        Label = "Şifreli/sıkıştırılmış NTFS dosyalarının mavi/yeşil renklendirmesini kapat",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RegistryPathHint = @"HKCU\" + advKey + @"\ShowEncryptCompressedColor",
+                        GetBool = v => ReadDword("HKCU", advKey, "ShowEncryptCompressedColor", 1) == 0,
+                        SetBool = (v, on) => v.SetRegistryTracked("NTFS Renklendirme", "HKCU", advKey, "ShowEncryptCompressedColor", on ? 0 : 1, RegistryValueKind.DWord),
+                        ResetAction = v => v.RevertRegistryTracked("HKCU", advKey, "ShowEncryptCompressedColor")
+                    }
+                }
+            });
+
+            pages.Add(new CustomizePageDef
+            {
+                PageKey = "exp_navpane",
+                CategoryGroup = "Özelleştir: Dosya Gezgini",
+                Title = "Gezinti Bölmesi (OneDrive / Galeri)",
+                IconKey = "navpane",
+                SuggestsExplorerRestart = true,
+                TargetRegistryPath = @"HKCU\Software\Classes\CLSID",
+                Description = "Dosya Gezgini'nin sol tarafındaki gezinti bölmesinden OneDrive, Windows 11 Galeri ve çift çıkan çıkarılabilir sürücü girdilerini temizler.",
+                Options = new List<CustomizeOptionDef>
+                {
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "nav_onedrive",
+                        Label = "Gezinti bölmesinden OneDrive simgesini gizle",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RegistryPathHint = @"HKCU\Software\Classes\CLSID\{018D5C66-4533-4307-9B53-224DE2ED1FE6}\System.IsPinnedToNameSpaceTree",
+                        GetBool = v => SubKeyExists("HKCU", @"Software\Classes\CLSID\{018D5C66-4533-4307-9B53-224DE2ED1FE6}") && ReadDword("HKCU", @"Software\Classes\CLSID\{018D5C66-4533-4307-9B53-224DE2ED1FE6}", "System.IsPinnedToNameSpaceTree", 1) == 0,
+                        SetBool = (v, on) => v.SetRegistryTracked("Gezgin OneDrive Gizle", "HKCU", @"Software\Classes\CLSID\{018D5C66-4533-4307-9B53-224DE2ED1FE6}", "System.IsPinnedToNameSpaceTree", on ? 0 : 1, RegistryValueKind.DWord),
+                        ResetAction = v => v.RevertRegistryTracked("HKCU", @"Software\Classes\CLSID\{018D5C66-4533-4307-9B53-224DE2ED1FE6}", "System.IsPinnedToNameSpaceTree")
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "nav_gallery",
+                        Label = "Windows 11 Gezinti bölmesinden 'Galeri' öğesini gizle",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RegistryPathHint = @"HKCU\Software\Classes\CLSID\{e88865ea-0e1c-4e20-9aa6-edcd0212c87c}\System.IsPinnedToNameSpaceTree",
+                        GetBool = v => SubKeyExists("HKCU", @"Software\Classes\CLSID\{e88865ea-0e1c-4e20-9aa6-edcd0212c87c}") && ReadDword("HKCU", @"Software\Classes\CLSID\{e88865ea-0e1c-4e20-9aa6-edcd0212c87c}", "System.IsPinnedToNameSpaceTree", 1) == 0,
+                        SetBool = (v, on) => v.SetRegistryTracked("Gezgin Galeri Gizle", "HKCU", @"Software\Classes\CLSID\{e88865ea-0e1c-4e20-9aa6-edcd0212c87c}", "System.IsPinnedToNameSpaceTree", on ? 0 : 1, RegistryValueKind.DWord),
+                        ResetAction = v => v.RevertRegistryTracked("HKCU", @"Software\Classes\CLSID\{e88865ea-0e1c-4e20-9aa6-edcd0212c87c}", "System.IsPinnedToNameSpaceTree")
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "nav_expand",
+                        Label = "Geçerli klasöre gezinti bölmesini otomatik genişlet (NavPaneExpandToCurrentFolder)",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RegistryPathHint = @"HKCU\" + advKey + @"\NavPaneExpandToCurrentFolder",
+                        GetBool = v => ReadDword("HKCU", advKey, "NavPaneExpandToCurrentFolder", 0) == 1,
+                        SetBool = (v, on) => v.SetRegistryTracked("Otomatik Klasör Genişlet", "HKCU", advKey, "NavPaneExpandToCurrentFolder", on ? 1 : 0, RegistryValueKind.DWord),
+                        ResetAction = v => v.RevertRegistryTracked("HKCU", advKey, "NavPaneExpandToCurrentFolder")
+                    }
+                }
+            });
+
+            // ══ 5. KISAYOLLAR VE SAĞ TIK MENÜSÜ ═════════════════════════════
+            pages.Add(new CustomizePageDef
+            {
+                PageKey = "ctx_shortcuts",
+                CategoryGroup = "Özelleştir: Kısayollar ve Sağ Tık",
+                Title = "Kısayol Okları ve '- Kısayol' Eki",
+                IconKey = "shortcuts",
+                SuggestsExplorerRestart = true,
+                TargetRegistryPath = @"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Shell Icons",
+                Description = "Masaüstü ve klasör kısayollarındaki küçük ok simgesini kaldırır ve yeni kısayol oluştururken Windows'un otomatik eklediği ' - Kısayol' son ekini devre dışı bırakır.",
+                Options = new List<CustomizeOptionDef>
+                {
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "sc_no_arrow",
+                        Label = "Kısayol simgelerindeki ok katmanını kaldır (Shell Icons\\29) [Yönetici]",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RequiresAdmin = true,
+                        RegistryPathHint = @"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Shell Icons\29",
+                        GetBool = v => !string.IsNullOrEmpty(ReadStr("HKLM", @"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Shell Icons", "29", "")),
+                        SetBool = (v, on) =>
+                        {
+                            if (on) v.SetRegistryTracked("Kısayol Okunu Kaldır", "HKLM", @"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Shell Icons", "29", @"%windir%\System32\shell32.dll,-50", RegistryValueKind.String);
+                            else v.DeleteRegistryTracked("Kısayol Okunu Kaldır", "HKLM", @"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Shell Icons", "29");
+                        },
+                        ResetAction = v => v.RevertRegistryTracked("HKLM", @"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Shell Icons", "29")
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "sc_no_suffix",
+                        Label = "Yeni kısayollara ' - Kısayol' eki eklenmesini devre dışı bırak (Explorer\\link)",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RegistryPathHint = @"HKCU\" + expKey + @"\link",
+                        GetBool = v =>
+                        {
+                            try
+                            {
+                                using (RegistryKey k = Registry.CurrentUser.OpenSubKey(expKey, false))
+                                {
+                                    byte[] raw = k != null ? (k.GetValue("link", null) as byte[]) : null;
+                                    return raw != null && raw.Length >= 4 && raw[0] == 0 && raw[1] == 0;
+                                }
+                            }
+                            catch { return false; }
+                        },
+                        SetBool = (v, on) => v.SetRegistryTracked("Kısayol Eki Kapat", "HKCU", expKey, "link", on ? new byte[] { 0x00, 0x00, 0x00, 0x00 } : new byte[] { 0x1e, 0x00, 0x00, 0x00 }, RegistryValueKind.Binary),
+                        ResetAction = v => v.RevertRegistryTracked("HKCU", expKey, "link")
+                    }
+                }
+            });
+
+            string ctxRestartKey = @"Software\Classes\Directory\Background\shell\ArgonRestartExplorer";
+            string ctxCmdKey = @"Software\Classes\Directory\Background\shell\ArgonOpenCmd";
+            string ctxPsKey = @"Software\Classes\Directory\Background\shell\ArgonOpenPS";
+            pages.Add(new CustomizePageDef
+            {
+                PageKey = "ctx_add",
+                CategoryGroup = "Özelleştir: Kısayollar ve Sağ Tık",
+                Title = "Sağ Tık Menüsüne Pratik Araçlar Ekle",
+                IconKey = "context",
+                TargetRegistryPath = @"HKCU\Software\Classes\Directory\Background\shell",
+                Description = "Masaüstü veya klasör boşluğunda sağ tık menüsüne tek tıkla 'Explorer'ı Yeniden Başlat', 'CMD Aç', 'PowerShell Aç' ekler ve 15+ dosya seçim sınırını kaldırır.",
+                Options = new List<CustomizeOptionDef>
+                {
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "ctx_restart_exp",
+                        Label = "Masaüstü/Klasör sağ tıkına 'Explorer'ı Yeniden Başlat' seçeneği ekle",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RegistryPathHint = @"HKCU\" + ctxRestartKey,
+                        GetBool = v => SubKeyExists("HKCU", ctxRestartKey),
+                        SetBool = (v, on) =>
+                        {
+                            if (on)
+                            {
+                                v.SetRegistryTracked("Sağ Tık Explorer Yenile", "HKCU", ctxRestartKey, "", "Explorer'ı Yeniden Başlat", RegistryValueKind.String);
+                                v.SetRegistryTracked("Sağ Tık Explorer İkon", "HKCU", ctxRestartKey, "Icon", "shell32.dll,-238", RegistryValueKind.String);
+                                v.SetRegistryTracked("Sağ Tık Explorer Komut", "HKCU", ctxRestartKey + @"\command", "", @"cmd.exe /c taskkill /f /im explorer.exe & start explorer.exe", RegistryValueKind.String);
+                            }
+                            else DeleteSubKeyTreeSafe("HKCU", ctxRestartKey);
+                        },
+                        ResetAction = v => DeleteSubKeyTreeSafe("HKCU", ctxRestartKey)
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "ctx_cmd_here",
+                        Label = "Klasör/Masaüstü sağ tıkına 'Burada Komut İstemi (CMD) Aç' ekle",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RegistryPathHint = @"HKCU\" + ctxCmdKey,
+                        GetBool = v => SubKeyExists("HKCU", ctxCmdKey),
+                        SetBool = (v, on) =>
+                        {
+                            if (on)
+                            {
+                                v.SetRegistryTracked("Sağ Tık CMD", "HKCU", ctxCmdKey, "", "Komut İstemini Burada Aç (CMD)", RegistryValueKind.String);
+                                v.SetRegistryTracked("Sağ Tık CMD İkon", "HKCU", ctxCmdKey, "Icon", "cmd.exe", RegistryValueKind.String);
+                                v.SetRegistryTracked("Sağ Tık CMD Komut", "HKCU", ctxCmdKey + @"\command", "", "cmd.exe /s /k pushd \"%V\"", RegistryValueKind.String);
+                            }
+                            else DeleteSubKeyTreeSafe("HKCU", ctxCmdKey);
+                        },
+                        ResetAction = v => DeleteSubKeyTreeSafe("HKCU", ctxCmdKey)
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "ctx_ps_here",
+                        Label = "Klasör/Masaüstü sağ tıkına 'Burada PowerShell Aç' ekle",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RegistryPathHint = @"HKCU\" + ctxPsKey,
+                        GetBool = v => SubKeyExists("HKCU", ctxPsKey),
+                        SetBool = (v, on) =>
+                        {
+                            if (on)
+                            {
+                                v.SetRegistryTracked("Sağ Tık PowerShell", "HKCU", ctxPsKey, "", "PowerShell'i Burada Aç", RegistryValueKind.String);
+                                v.SetRegistryTracked("Sağ Tık PS İkon", "HKCU", ctxPsKey, "Icon", "powershell.exe", RegistryValueKind.String);
+                                v.SetRegistryTracked("Sağ Tık PS Komut", "HKCU", ctxPsKey + @"\command", "", "powershell.exe -NoExit -Command \"Set-Location -LiteralPath '%V'\"", RegistryValueKind.String);
+                            }
+                            else DeleteSubKeyTreeSafe("HKCU", ctxPsKey);
+                        },
+                        ResetAction = v => DeleteSubKeyTreeSafe("HKCU", ctxPsKey)
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "ctx_15limit",
+                        Label = "15+ dosya seçildiğinde gizlenen Aç/Yazdır/Düzenle sınırını kaldır (MultipleInvokePromptMinimum=100)",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RegistryPathHint = @"HKCU\" + expKey + @"\MultipleInvokePromptMinimum",
+                        GetBool = v => ReadDword("HKCU", expKey, "MultipleInvokePromptMinimum", 15) >= 50,
+                        SetBool = (v, on) => v.SetRegistryTracked("15 Dosya Seçim Sınırı", "HKCU", expKey, "MultipleInvokePromptMinimum", on ? 100 : 15, RegistryValueKind.DWord),
+                        ResetAction = v => v.RevertRegistryTracked("HKCU", expKey, "MultipleInvokePromptMinimum")
+                    }
+                }
+            });
+
+            pages.Add(new CustomizePageDef
+            {
+                PageKey = "ctx_clean",
+                CategoryGroup = "Özelleştir: Kısayollar ve Sağ Tık",
+                Title = "Sağ Tık Menüsü Kalabalığını Gizle",
+                IconKey = "context",
+                RequiresAdmin = true,
+                SuggestsExplorerRestart = true,
+                TargetRegistryPath = @"HKLM\" + shellBlocked,
+                Description = "Dosya ve klasör sağ tık menüsünde nadiren kullanılan 'Cihaza Yayınla', 'Önceki Sürümleri Geri Yükle' ve 'Modern Paylaş' kabuk eklentilerini geri alınabilir şekilde gizler.",
+                Options = new List<CustomizeOptionDef>
+                {
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "blk_cast",
+                        Label = "'Cihaza Yayınla' (Cast to Device / PlayTo) menüsünü gizle [Yönetici]",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RequiresAdmin = true,
+                        RegistryPathHint = @"HKLM\" + shellBlocked + @"\{7AD84985-87B4-4a16-BE58-8B72A5B390F7}",
+                        GetBool = v => !string.IsNullOrEmpty(ReadStr("HKLM", shellBlocked, "{7AD84985-87B4-4a16-BE58-8B72A5B390F7}", null)),
+                        SetBool = (v, on) =>
+                        {
+                            if (on) v.SetRegistryTracked("Gizle: Cihaza Yayınla", "HKLM", shellBlocked, "{7AD84985-87B4-4a16-BE58-8B72A5B390F7}", "", RegistryValueKind.String);
+                            else v.DeleteRegistryTracked("Gizle: Cihaza Yayınla", "HKLM", shellBlocked, "{7AD84985-87B4-4a16-BE58-8B72A5B390F7}");
+                        },
+                        ResetAction = v => v.RevertRegistryTracked("HKLM", shellBlocked, "{7AD84985-87B4-4a16-BE58-8B72A5B390F7}")
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "blk_share",
+                        Label = "Modern Windows 'Paylaş' (Share) sağ tık girdisini gizle [Yönetici]",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RequiresAdmin = true,
+                        RegistryPathHint = @"HKLM\" + shellBlocked + @"\{E2BF9676-5F8F-435D-97EB-11607A5BEDF7}",
+                        GetBool = v => !string.IsNullOrEmpty(ReadStr("HKLM", shellBlocked, "{E2BF9676-5F8F-435D-97EB-11607A5BEDF7}", null)),
+                        SetBool = (v, on) =>
+                        {
+                            if (on) v.SetRegistryTracked("Gizle: Paylaş", "HKLM", shellBlocked, "{E2BF9676-5F8F-435D-97EB-11607A5BEDF7}", "", RegistryValueKind.String);
+                            else v.DeleteRegistryTracked("Gizle: Paylaş", "HKLM", shellBlocked, "{E2BF9676-5F8F-435D-97EB-11607A5BEDF7}");
+                        },
+                        ResetAction = v => v.RevertRegistryTracked("HKLM", shellBlocked, "{E2BF9676-5F8F-435D-97EB-11607A5BEDF7}")
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "blk_prevver",
+                        Label = "'Önceki Sürümleri Geri Yükle' sekme ve sağ tık menüsünü gizle [Yönetici]",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RequiresAdmin = true,
+                        RegistryPathHint = @"HKLM\" + shellBlocked + @"\{596AB062-B4D2-4215-9F74-E9109B0A8153}",
+                        GetBool = v => !string.IsNullOrEmpty(ReadStr("HKLM", shellBlocked, "{596AB062-B4D2-4215-9F74-E9109B0A8153}", null)),
+                        SetBool = (v, on) =>
+                        {
+                            if (on) v.SetRegistryTracked("Gizle: Önceki Sürümler", "HKLM", shellBlocked, "{596AB062-B4D2-4215-9F74-E9109B0A8153}", "", RegistryValueKind.String);
+                            else v.DeleteRegistryTracked("Gizle: Önceki Sürümler", "HKLM", shellBlocked, "{596AB062-B4D2-4215-9F74-E9109B0A8153}");
+                        },
+                        ResetAction = v => v.RevertRegistryTracked("HKLM", shellBlocked, "{596AB062-B4D2-4215-9F74-E9109B0A8153}")
+                    }
+                }
+            });
+
+            pages.Add(new CustomizePageDef
+            {
+                PageKey = "ctx_tools",
+                CategoryGroup = "Özelleştir: Kısayollar ve Sağ Tık",
+                Title = "Özel Masaüstü Kısayolları ve Bakım",
+                IconKey = "tools",
+                TargetRegistryPath = "",
+                Description = "Masaüstünüze God Mode (Tüm Denetim Masası Ayarları), UEFI/BIOS ile Yeniden Başlatma, Güvenli Mod Seçenekleri ve Klasik Kapatma kutusu için tek tık kısayollar oluşturur.",
+                Options = new List<CustomizeOptionDef>
+                {
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "tool_godmode",
+                        Label = "Masaüstünde 'God Mode' (Tüm Windows Ayarları) Klasörü Oluştur",
+                        HelpNote = "Masaüstünüze 200+ gizli Denetim Masası kısayolunu içeren özel klasörü ekler.",
+                        Kind = CustomizeControlKind.ActionButton,
+                        InvokeToolAction = f =>
+                        {
+                            string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "GodMode.{ED7BA470-8E54-465E-825C-99712043E01C}");
+                            Directory.CreateDirectory(path);
+                            MessageBox.Show("GodMode klasörü masaüstünüzde oluşturuldu.", "Özel Kısayol", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        }
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "tool_uefi_lnk",
+                        Label = "Masaüstüne 'UEFI / BIOS Ayarlarına Yeniden Başlat' Kısayolu Oluştur",
+                        HelpNote = "Çift tıklandığında Windows üzerinden doğrudan anakart BIOS/UEFI menüsüne girer.",
+                        Kind = CustomizeControlKind.ActionButton,
+                        InvokeToolAction = f =>
+                        {
+                            CreateDesktopShortcutFile("UEFI BIOS Ayarlarina Gir", "shutdown.exe", "/r /fw /t 0", "Bilgisayari UEFI BIOS ekranina yeniden baslat", "shell32.dll,21");
+                            MessageBox.Show("'UEFI BIOS Ayarlarina Gir' kısayolu masaüstüne eklendi.", "Özel Kısayol", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        }
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "tool_advboot_lnk",
+                        Label = "Masaüstüne 'Güvenli Mod / Gelişmiş Başlangıç' Kısayolu Oluştur",
+                        HelpNote = "Shift + Yeniden Başlat menüsünü tek tıkla açan masaüstü kısayolu üretir.",
+                        Kind = CustomizeControlKind.ActionButton,
+                        InvokeToolAction = f =>
+                        {
+                            CreateDesktopShortcutFile("Gelismis Baslangic - Guvenli Mod", "shutdown.exe", "/r /o /f /t 0", "Windows Gelismis Baslangic Seceneklerini Ac", "shell32.dll,27");
+                            MessageBox.Show("'Gelismis Baslangic - Guvenli Mod' kısayolu masaüstüne eklendi.", "Özel Kısayol", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        }
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "tool_iconcache",
+                        Label = "Windows Simge Önbelleğini (Icon Cache) Şimdi Sıfırla",
+                        HelpNote = "Bozuk veya güncellenmeyen dosya/uygulama simgelerini yeniler.",
+                        Kind = CustomizeControlKind.ActionButton,
+                        InvokeToolAction = f =>
+                        {
+                            RebuildIconCache();
+                            MessageBox.Show("Windows simge önbelleği yenileme komutu gönderildi.", "Simge Önbelleği", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        }
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "tool_explorer",
+                        Label = "Windows Explorer'ı Şimdi Yeniden Başlat",
+                        HelpNote = "Sağ tık menüsü, görev çubuğu ve kısayol ok değişikliklerini anında devreye alır.",
+                        Kind = CustomizeControlKind.ActionButton,
+                        InvokeToolAction = f => RestartExplorerProcess()
+                    }
+                }
+            });
+
+            // ══ 6. GİZLİLİK VE AĞ UX ═══════════════════════════════════════
+            string cdmKey = @"Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager";
+            pages.Add(new CustomizePageDef
+            {
+                PageKey = "priv_ads",
+                CategoryGroup = "Özelleştir: Gizlilik ve Ağ",
+                Title = "Web Arama, Reklamlar ve İstenmeyen Öneriler",
+                IconKey = "privacy",
+                TargetRegistryPath = @"HKCU\" + cdmKey,
+                Description = "Başlat menüsü aramasında Bing web sonuçlarını, Ayarlar içi önerilen reklamları, kilit ekranı ipuçlarını ve 'Bilgisayarınızı kurmayı bitirelim' ekranlarını kapatır.",
+                Options = new List<CustomizeOptionDef>
+                {
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "priv_websearch",
+                        Label = "Başlat / Windows Arama'da Bing ve Web arama önerilerini kapat (Explorer yenilenmeli)",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RegistryPathHint = @"HKCU\" + expPol + @"\DisableSearchBoxSuggestions",
+                        GetBool = v => ReadDword("HKCU", expPol, "DisableSearchBoxSuggestions", 0) == 1,
+                        SetBool = (v, on) => v.SetRegistryTracked("Bing Web Aramasını Kapat", "HKCU", expPol, "DisableSearchBoxSuggestions", on ? 1 : 0, RegistryValueKind.DWord),
+                        ResetAction = v => v.RevertRegistryTracked("HKCU", expPol, "DisableSearchBoxSuggestions")
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "priv_oobe",
+                        Label = "Güncelleme sonrası 'Bilgisayarınızı kurmayı bitirelim' tam ekran uyarısını kapat",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RegistryPathHint = @"HKCU\Software\Microsoft\Windows\CurrentVersion\UserProfileEngagement\ScoobeSystemSettingEnabled",
+                        GetBool = v => ReadDword("HKCU", @"Software\Microsoft\Windows\CurrentVersion\UserProfileEngagement", "ScoobeSystemSettingEnabled", 1) == 0,
+                        SetBool = (v, on) => v.SetRegistryTracked("Kurulumu Bitir Ekranı", "HKCU", @"Software\Microsoft\Windows\CurrentVersion\UserProfileEngagement", "ScoobeSystemSettingEnabled", on ? 0 : 1, RegistryValueKind.DWord),
+                        ResetAction = v => v.RevertRegistryTracked("HKCU", @"Software\Microsoft\Windows\CurrentVersion\UserProfileEngagement", "ScoobeSystemSettingEnabled")
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "priv_cdm",
+                        Label = "Başlat/Ayarlar reklamlarını ve sessiz önerilen uygulama indirmelerini kapat (ContentDeliveryManager)",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RegistryPathHint = @"HKCU\" + cdmKey,
+                        GetBool = v => ReadDword("HKCU", cdmKey, "SilentInstalledAppsEnabled", 1) == 0 && ReadDword("HKCU", cdmKey, "SubscribedContent-338389Enabled", 1) == 0,
+                        SetBool = (v, on) =>
+                        {
+                            int val = on ? 0 : 1;
+                            v.SetRegistryTracked("Önerilen Uygulamalar", "HKCU", cdmKey, "SilentInstalledAppsEnabled", val, RegistryValueKind.DWord);
+                            v.SetRegistryTracked("Özel İpuçları", "HKCU", cdmKey, "SubscribedContent-338389Enabled", val, RegistryValueKind.DWord);
+                            v.SetRegistryTracked("Ayarlar Önerileri", "HKCU", cdmKey, "SubscribedContent-353698Enabled", val, RegistryValueKind.DWord);
+                            v.SetRegistryTracked("Başlat Önerileri", "HKCU", cdmKey, "SystemPaneSuggestionsEnabled", val, RegistryValueKind.DWord);
+                        },
+                        ResetAction = v =>
+                        {
+                            v.RevertRegistryTracked("HKCU", cdmKey, "SilentInstalledAppsEnabled");
+                            v.RevertRegistryTracked("HKCU", cdmKey, "SubscribedContent-338389Enabled");
+                            v.RevertRegistryTracked("HKCU", cdmKey, "SubscribedContent-353698Enabled");
+                            v.RevertRegistryTracked("HKCU", cdmKey, "SystemPaneSuggestionsEnabled");
+                        }
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "priv_adid",
+                        Label = "Uygulamalar arası Windows Reklam Kimliğini (Advertising ID) devre dışı bırak",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RegistryPathHint = @"HKCU\Software\Microsoft\Windows\CurrentVersion\AdvertisingInfo\Enabled",
+                        GetBool = v => ReadDword("HKCU", @"Software\Microsoft\Windows\CurrentVersion\AdvertisingInfo", "Enabled", 1) == 0,
+                        SetBool = (v, on) => v.SetRegistryTracked("Reklam Kimliği", "HKCU", @"Software\Microsoft\Windows\CurrentVersion\AdvertisingInfo", "Enabled", on ? 0 : 1, RegistryValueKind.DWord),
+                        ResetAction = v => v.RevertRegistryTracked("HKCU", @"Software\Microsoft\Windows\CurrentVersion\AdvertisingInfo", "Enabled")
+                    }
+                }
+            });
+
+            pages.Add(new CustomizePageDef
+            {
+                PageKey = "priv_net",
+                CategoryGroup = "Özelleştir: Gizlilik ve Ağ",
+                Title = "Yükseltilmiş Ağ Sürücüleri ve Uzak Masaüstü",
+                IconKey = "netdrive",
+                RequiresAdmin = true,
+                SuggestsLogoffOrReboot = true,
+                TargetRegistryPath = @"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System",
+                Description = "Yönetici (Admin) haklarıyla çalıştırılan uygulamaların eşlenmiş ağ sürücülerini (Z:, Y: vb.) görmesini sağlar (EnableLinkedConnections) ve RDP portunu görüntüler.",
+                Options = new List<CustomizeOptionDef>
+                {
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "net_linked_drv",
+                        Label = "Yönetici uygulamalarında eşlenmiş ağ sürücülerini erişilebilir yap (EnableLinkedConnections) [Yönetici]",
+                        Kind = CustomizeControlKind.CheckBox,
+                        RequiresAdmin = true,
+                        RegistryPathHint = @"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\EnableLinkedConnections",
+                        GetBool = v => ReadDword("HKLM", @"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", "EnableLinkedConnections", 0) == 1,
+                        SetBool = (v, on) => v.SetRegistryTracked("LinkedConnections", "HKLM", @"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", "EnableLinkedConnections", on ? 1 : 0, RegistryValueKind.DWord),
+                        ResetAction = v => v.RevertRegistryTracked("HKLM", @"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", "EnableLinkedConnections")
+                    },
+                    new CustomizeOptionDef
+                    {
+                        OptionId = "net_rdp_port",
+                        Label = "Uzak Masaüstü (RDP) Dinleme Portu (Varsayılan: 3389) [Yönetici]:",
+                        Kind = CustomizeControlKind.NumericRange,
+                        MinVal = 1024, MaxVal = 65000, StepVal = 1, Unit = "TCP",
+                        RequiresAdmin = true,
+                        RegistryPathHint = @"HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp\PortNumber",
+                        GetInt = v => ReadDword("HKLM", @"SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp", "PortNumber", 3389),
+                        SetInt = (v, val) => v.SetRegistryTracked("RDP Port Numarası", "HKLM", @"SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp", "PortNumber", val, RegistryValueKind.DWord),
+                        ResetAction = v => v.RevertRegistryTracked("HKLM", @"SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp", "PortNumber")
+                    }
+                }
+            });
+
+            return pages;
+        }
+    }
 
     #endregion
 
@@ -7287,6 +12823,7 @@ namespace ArgonLatencyStudio
         private bool startHiddenInTray = false;
         private bool trayStartHandled = false;
         private const string AutoStartTaskName = "ArgonLatencyStudio_Autostart";
+        private bool autoStartSyncedOnStartup = false;
         // saved profile lines of tweaks that could not be applied in limited (non-admin) mode; written back unchanged
         private Dictionary<string, string> preservedProfileTweakLines = new Dictionary<string, string>();
         private bool isLoadingProfile = false;
@@ -7334,7 +12871,6 @@ namespace ArgonLatencyStudio
         private volatile bool pulseThreadRunning = false;
         private int pulseMode = 0;
         private Thread syntheticPulseThread;
-        private bool autoStandbyCleanerActive = false;
         private bool autoGameWatchdogActive = false;
         private int standbyIsolationMode = 0;
         private int fpsEcoQosMode = 0;
@@ -7428,8 +12964,50 @@ namespace ArgonLatencyStudio
         private List<Label> tweakColHeadersCol3 = new List<Label>();
 
         private List<Button> navButtons = new List<Button>();
-        private int currentActiveTabIndex = 0;
+        private int currentActiveTabIndex = 11;
+        private Panel pnlLeftNav;
+        private Label lblCurrentPageTitle;
+        private Label lblSidebarPulse;
         private Panel pnlContentHost;
+        private Panel viewSystemMonitor;
+        private FlowLayoutPanel flowMonitorGrid;
+        private Label monSysOsVal;
+        private Label monSysTimerVal;
+        private Label monSysActiveVal;
+        private Label monSysPlanVal;
+        private Label monCpuTempVal;
+        private Label monCpuLoadVal;
+        private Label monCpuClockVal;
+        private Label monCpuPowerVal;
+        private Panel monCpuLoadBar;
+        private float monCpuLoadPct = 0f;
+        private Label monGpuTempVal;
+        private Label monGpuHotspotVal;
+        private Label monGpuLoadVal;
+        private Label monGpuClockVal;
+        private Label monGpuPowerFanVal;
+        private Label monGpuVramVal;
+        private Panel monGpuLoadBar;
+        private float monGpuLoadPct = 0f;
+        private Label monRamCapVal;
+        private Label monRamSpecVal;
+        private Label monRamLiveVal;
+        private Panel monRamLoadBar;
+        private float monRamLoadPct = 0f;
+        private Label monRamSlotsVal;
+        private Label monBoardVal;
+        private Label monBiosVal;
+        private Label monStorageVal;
+        private Label monDisplaysVal;
+        private Label monNicSpeedVal;
+        private Label lblMonitorTitle;
+        private Label lblMonitorSub;
+        private Label lblMonOverviewHdr;
+        private Label lblMonCpuHdr;
+        private Label lblMonGpuHdr;
+        private Label lblMonRamHdr;
+        private Label lblMonBoardHdr;
+        private Label lblMonNetHdr;
         private Panel viewDashboard;
         private FlowLayoutPanel viewNetwork;
         private FlowLayoutPanel viewLatency;
@@ -7445,6 +13023,31 @@ namespace ArgonLatencyStudio
         private Panel viewGlobalSearch;
         private FlowLayoutPanel flowGlobalSearchCards;
         private Label lblGlobalSearchHeader;
+
+        // Winaero-Style Explorer Shell & Customize Engine
+        private TreeView tvMainNav;
+        private ImageList tvIconList;
+        private PictureBox pbDetailPageIcon;
+        private Panel pnlDetailHeader;
+        private Button btnResetPageDefaults;
+        private Button btnOpenInRegedit;
+        private Button btnBookmarkPageTop;
+        private Button btnNavBack;
+        private Button btnNavForward;
+        private ToolStripMenuItem mnuBookmarksRoot;
+        private TreeNode bookmarksParentNode;
+        private Panel viewCustomizePage;
+        private List<CustomizePageDef> allCustomizePages = new List<CustomizePageDef>();
+        private Dictionary<string, TreeNode> treeNodeByPageKey = new Dictionary<string, TreeNode>(StringComparer.OrdinalIgnoreCase);
+        private List<string> navHistory = new List<string>();
+        private int navHistoryPos = -1;
+        private bool suppressNavHistoryRecord = false;
+        private string currentPageKey = "tab:11";
+        private string currentCustomizePageKey = "";
+        private Label lblDetailPageSub;
+        private ComboBox cmbSetThemeMode;
+        private CheckBox chkSetStartTray;
+        private bool isPopulatingNavTree = false;
 
         // Otomasyon & QoL Modülü
         private QoLAutomationConfig qolConfig = new QoLAutomationConfig();
@@ -7472,6 +13075,37 @@ namespace ArgonLatencyStudio
         private Label lblShaderCacheStatus;
         private Button btnCleanTempNow;
         private Button btnCleanShaderNow;
+
+        // Linux-like Hassas Tekerleksiz Kaydırma (MarbleScrollPlus) Modülü
+        private LinuxlikeScrollEngine linuxScrollEngine;
+        private LinuxlikeScrollConfig linuxScrollConfig = new LinuxlikeScrollConfig();
+        private string linuxScrollConfigPath;
+        private Label lblScrollStatusBadge;
+        private Button btnToggleScroll;
+        private Button btnTakeoverMarble;
+        private CheckBox chkScrollAutoStart;
+        private CheckBox chkScrollAxisLock;
+        private NumericUpDown numScrollAxisDetect;
+        private ComboBox cmbScrollTrigger;
+        private CheckBox chkVertEnabled;
+        private CheckBox chkVertInvert;
+        private CheckBox chkVertSmooth;
+        private NumericUpDown numVertSens;
+        private NumericUpDown numVertSpeed;
+        private Label lblVertCalc;
+        private CheckBox chkHorizEnabled;
+        private CheckBox chkHorizInvert;
+        private CheckBox chkHorizSmooth;
+        private NumericUpDown numHorizSens;
+        private NumericUpDown numHorizSpeed;
+        private Label lblHorizCalc;
+        private Panel pnlCardLinuxScroll;
+        private Panel pnlBoxVert;
+        private Panel pnlBoxHoriz;
+        private Panel pnlScrollTest;
+        private Label lblScrollTestHint;
+        private ToolStripMenuItem mnuTrayLinuxScroll;
+
         private double liveDownloadSpeedKBps = 0;
         private long lastTrafficBytesRecv = 0;
         private DateTime lastTrafficSampleTime = DateTime.MinValue;
@@ -7497,9 +13131,13 @@ namespace ArgonLatencyStudio
         private Panel pnlMouseTestArea;
         private Label lblMouseHzLive;
         private Label lblMouseDeltaLive;
-        private long lastMouseTick = 0;
-        private List<double> mouseHzHistory = new List<double>();
-        private List<double> mouseDeltaHistory = new List<double>();
+        private Label lblMouseDeviceHint;
+        private Button btnOpenInputLabCard3;
+        private Button btnOpenMsiCard3;
+        private Button btnResetRawCard3;
+        private RawInputSampleTracker card3RawTracker;
+        private RawInputHookNativeWindow card3RawHook;
+        private System.Windows.Forms.Timer card3RawUiTimer;
 
         // Windows 11 Presentation Mode Diagnostics & Flip Model Advisor (PresentMon & DXGI probe)
         private Panel pnlPresentationModeBench;
@@ -7599,6 +13237,56 @@ namespace ArgonLatencyStudio
             qolConfig = QoLAutomationConfig.LoadFromFile(qolConfigPath);
             qolConfig.FastForwardMissedAlarms(DateTime.Now);
             qolConfig.SaveToFile(qolConfigPath);
+
+            bool isRenderUiMode = false;
+            bool forceCliTheme = false;
+            if (args != null)
+            {
+                for (int ai = 0; ai < args.Length; ai++)
+                {
+                    if (string.Equals(args[ai], "--render-ui", StringComparison.OrdinalIgnoreCase))
+                        isRenderUiMode = true;
+                    else if (string.Equals(args[ai], "--theme", StringComparison.OrdinalIgnoreCase))
+                        forceCliTheme = true;
+                }
+            }
+            if (!forceCliTheme)
+            {
+                ArgonTheme.IsLightMode = !string.Equals(appSettings.UiThemeMode, "DARK", StringComparison.OrdinalIgnoreCase);
+            }
+            if (!isRenderUiMode)
+            {
+                try
+                {
+                    string oldExe = Application.ExecutablePath + ".old";
+                    if (File.Exists(oldExe)) File.Delete(oldExe);
+                }
+                catch { }
+            }
+            allCustomizePages = WinaeroCustomizeCatalog.BuildCatalog();
+            linuxScrollConfigPath = Path.Combine(profileDir, "argon_linuxlike_scroll.txt");
+            linuxScrollConfig = LinuxlikeScrollConfig.LoadFromFile(linuxScrollConfigPath);
+            linuxScrollEngine = new LinuxlikeScrollEngine(linuxScrollConfig);
+            linuxScrollEngine.Scrolled += (sDx, sDy) =>
+            {
+                if (!this.IsDisposed && this.IsHandleCreated && lblScrollTestHint != null && !lblScrollTestHint.IsDisposed && pnlScrollTest != null && pnlScrollTest.Visible)
+                {
+                    try
+                    {
+                        string text = string.Format("🧪 Canlı Algılandı -> Delta (dx: {0}, dy: {1}) | {2}", sDx, sDy, DateTime.Now.ToString("HH:mm:ss.fff"));
+                        if (this.InvokeRequired)
+                            this.BeginInvoke(new Action(() => { if (!this.IsDisposed && lblScrollTestHint != null && !lblScrollTestHint.IsDisposed) lblScrollTestHint.Text = text; }));
+                        else
+                            lblScrollTestHint.Text = text;
+                    }
+                    catch { }
+                }
+            };
+            if (!isRenderUiMode && linuxScrollConfig.Enabled && linuxScrollConfig.AutoStartWithArgon && !LinuxlikeScrollEngine.DetectExternalProcess())
+            {
+                linuxScrollEngine.Start();
+            }
+
             watchdogConfigPath = Path.Combine(profileDir, "argon_watchdog_config.txt");
             watchdogConfig = WatchdogConfig.LoadFromFile(watchdogConfigPath);
             autoGameWatchdogActive = watchdogConfig.WatchdogActive;
@@ -7617,7 +13305,7 @@ namespace ArgonLatencyStudio
                 IsBalloon = false
             };
 
-            startHiddenInTray = (args != null && Array.IndexOf(args, "--tray") >= 0);
+            startHiddenInTray = (args != null && Array.IndexOf(args, "--tray") >= 0 && appSettings.StartMinimizedToTray);
             RegisterAllTweaksCatalog();
             // Baseline boot probe: record initial boot state of OS so variation toggling never produces false restart requests
             foreach (var t in allTweaks)
@@ -7633,15 +13321,53 @@ namespace ArgonLatencyStudio
                 }
             }
             InitializeStudioUI();
+            if (isRenderUiMode)
+            {
+                detectedHw.ProbeExtendedHardwareSpecs();
+                try { sensorEngine.PollSensors(); } catch { }
+                PopulateSystemMonitorStaticSpecs();
+                UpdateSystemMonitorLiveTelemetry();
+            }
+            else
+            {
+                ThreadPool.QueueUserWorkItem(_ =>
+                {
+                    detectedHw.ProbeExtendedHardwareSpecs();
+                    try
+                    {
+                        if (!this.IsDisposed && this.IsHandleCreated)
+                            this.BeginInvoke((MethodInvoker)delegate { PopulateSystemMonitorStaticSpecs(); });
+                    }
+                    catch { }
+                });
+            }
             ApplyWindowLayoutPolicy();
             bool baselineLostWithProfile = vault.BaselineRecapturedFresh && File.Exists(userProfilePath);
             LoadAndRestoreUserProfileState();
             ProbeAllTweaksLiveOsTruthAndOptionallySync(appSettings.AutoLiveTruthSync);
             if (preservedProfileTweakLines.Count > 0 && lblInspectorTitle != null)
-                lblInspectorTitle.Text = string.Format("⚠️ Yönetici yetkisi yok: {0} kayıtlı ayar uygulanmadı (profilde korunuyor). 'Yönetici Olarak Aç' ile devam edin.", preservedProfileTweakLines.Count);
+            {
+                lblInspectorTitle.Text = string.Format("Yönetici yetkisi yok: {0} kayıtlı ayar uygulanmadı (profilde korunuyor). 'Yönetici Olarak Aç' ile devam edin.", preservedProfileTweakLines.Count);
+                lblInspectorTitle.ForeColor = ArgonTheme.Alert;
+            }
+            if (!isRenderUiMode)
+            {
+                this.HandleCreated += (sndH, evtH) =>
+                {
+                    if (!autoStartSyncedOnStartup)
+                    {
+                        autoStartSyncedOnStartup = true;
+                        SyncAutoStartCheckboxFromSystem();
+                    }
+                };
+            }
             this.Shown += (snd2, evt2) =>
             {
-                SyncAutoStartCheckboxFromSystem();
+                if (!isRenderUiMode && !autoStartSyncedOnStartup)
+                {
+                    autoStartSyncedOnStartup = true;
+                    SyncAutoStartCheckboxFromSystem();
+                }
                 UpdateRebootAndReloadBannerVisibility();
                 LayoutNavBarButtons();
             };
@@ -9858,61 +15584,68 @@ namespace ArgonLatencyStudio
                 }));
             allTweaks.Add(fps04);
 
-            // FPS-05: Memory Management & Smart Standby List Purger
+            // FPS-05: Memory Management & Virtual Memory Stability Shield
             var fps05 = new TweakDefinition
             {
                 Id = "FPS_MEMORY_ENGINE",
                 Category = "FPS",
                 HardwareTag = "ALL",
-                BadgeText = "AKILLI RAM TEMİZLEYİCİ",
+                BadgeText = "BELLEK & SANAL BELLEK",
                 BadgeColor = colFps,
-                RequiresAdmin = false,
-                Title = "Oyun İçi Akıllı RAM & Önbellek Temizleyici",
-                SummaryDescription = "Windows'ta biriken gereksiz önbelleği (Standby RAM) açık olan oyuna dokunmadan temizleyerek uzun süreli oyunlarda takılmayı önler.",
-                DeepTechnicalWhy = "Genellikle 1-2 saat oyun oynadıktan sonra başlayan anlık FPS takılmalarını (RAM şişmesini) engellemek ve sistem dosyalarını hızlı RAM'de tutmak için kullanılır.",
-                TargetPathOrApi = "Akıllı Bellek & Önbellek Motoru",
-                QueryOriginalOrDefaultSummary = () => "PagingExec=" + vault.ReadRegistryDisplay("HKLM", memMgmtKey, "DisablePagingExecutive", "0"),
+                RequiresAdmin = true,
+                Title = "Windows Bellek & Sanal Bellek (Pagefile) Kararlılık Kalkanı",
+                SummaryDescription = "DisablePagingExecutive kilidini kaldırarak Windows çekirdeğinin ve oyunların (PoE 2 vb.) 16 GB RAM'de takılmadan çalışmasını sağlar; zararlı çalışan küme (RAM cleaner) budamalarını engelleyerek mikro takılmaları önler.",
+                DeepTechnicalWhy = "16 GB sistemlerde DisablePagingExecutive=1 değeri çekirdeği fiziksel RAM'e hapsederek PoE 2 gibi yüksek bellek tüketen oyunlarda bellek daralmasına ve çökmeye yol açar. Ayrıca arka plandaki süreçleri sürekli pagefile'a tahliye eden sahte RAM temizleyiciler disk I/O fırtınası başlatıp 1-2 saniyelik mikro takılmalar yaratır. Güvenli yaklaşım: Paging'i serbest bırakmak (0), NVMe üzerinde esnek dinamik pagefile ve C: üzerinde sistem yönetimli kaza dökümü alanı sağlamaktır.",
+                TargetPathOrApi = @"HKLM\...\Memory Management (DisablePagingExecutive=0, Dinamik NVMe Pagefile)",
+                QueryOriginalOrDefaultSummary = () => "PagingExec=" + vault.ReadRegistryDisplay("HKLM", memMgmtKey, "DisablePagingExecutive", "0") + ", Pagefiles=" + vault.ReadRegistryDisplay("HKLM", memMgmtKey, "PagingFiles", "Varsayılan"),
                 RevertAction = () =>
                 {
-                    autoStandbyCleanerActive = false;
                     vault.RevertRegistryTracked("HKLM", memMgmtKey, "DisablePagingExecutive");
                     vault.RevertRegistryTracked("HKLM", memMgmtKey, "LargeSystemCache");
+                    vault.RevertRegistryTracked("HKLM", memMgmtKey, "PagingFiles");
                 }
             };
             fps05.Variations.Add(new TweakVariation(
-                "Akıllı Oyun Korumalı Temizlik + Sistem RAM Kilidi",
-                "Açık Oyuna Dokunmadan Arka Planı Temizle + Çekirdeği RAM'de Tut",
-                "Oyun esnasında sıfır takılma ile arka plan belleğini ferahlatmak için kullanılır.",
-                "Oyun Korumalı RAM Temizliği + Disk Takası Kapalı",
+                "Windows Bellek Kararlılık Modu (Paging Serbest, DisablePagingExecutive=0)",
+                "Çekirdek Kilitlenmesini Kaldır + Otomatik Çalışan Küme Budamasını Kapat",
+                "16 GB RAM'li sistemlerde PoE 2 ve modern oyunlarda takılma ve çökmeyi önler.",
+                "Paging Serbest (0), LargeSystemCache=0, Budama Yok",
                 () =>
                 {
-                    autoStandbyCleanerActive = true;
-                    ExecuteSmartRamAndStandbyPurge(true);
                     if (isAdmin)
                     {
-                        vault.SetRegistryTracked(fps05.Title, "HKLM", memMgmtKey, "DisablePagingExecutive", 1, RegistryValueKind.DWord);
+                        vault.SetRegistryTracked(fps05.Title, "HKLM", memMgmtKey, "DisablePagingExecutive", 0, RegistryValueKind.DWord);
                         vault.SetRegistryTracked(fps05.Title, "HKLM", memMgmtKey, "LargeSystemCache", 0, RegistryValueKind.DWord);
                     }
                 }));
             fps05.Variations.Add(new TweakVariation(
-                "Derin Önbellek Boşaltma (Tam Temizlik)",
-                "Birikmiş Tüm Windows Standby Önbelleğini Hemen Boşalt",
-                "Ağır bir oyuna girmeden önce maksimum boş RAM elde etmek için kullanılır.",
-                "Tam Önbellek (Standby List) Temizliği",
+                "NVMe Dinamik Pagefile & Kararlılık Kalkanı (C: Sistem + M: 16-48 GB NVMe)",
+                "C: Kaza Dökümü Alanı + Hızlı M: NVMe 16-48 GB Dinamik Tavan",
+                "Ağır oyun yüklerinde commit limitinin taşmasını ve kilitlenmeleri önler.",
+                "DisablePagingExecutive=0 + C:(0 0) + M:(16384 49152)",
                 () =>
                 {
-                    autoStandbyCleanerActive = true;
-                    ExecuteSmartRamAndStandbyPurge(false);
+                    if (isAdmin)
+                    {
+                        vault.SetRegistryTracked(fps05.Title, "HKLM", memMgmtKey, "DisablePagingExecutive", 0, RegistryValueKind.DWord);
+                        vault.SetRegistryTracked(fps05.Title, "HKLM", memMgmtKey, "LargeSystemCache", 0, RegistryValueKind.DWord);
+                        string[] pf = new string[] { @"C:\pagefile.sys 0 0", @"M:\pagefile.sys 16384 49152" };
+                        vault.SetRegistryTracked(fps05.Title, "HKLM", memMgmtKey, "PagingFiles", pf, RegistryValueKind.MultiString);
+                    }
                 }));
             fps05.Variations.Add(new TweakVariation(
-                "Sadece RAM Dolduğunda Otomatik Temizle (%75 Üzeri)",
-                "Yalnızca Bellek %75'i Geçtiğinde Arka Planı Hafiflet",
-                "16 GB veya 32 GB RAM'li sistemlerde sadece ihtiyaç duyulduğunda devreye girmesi için kullanılır.",
-                "Otomatik %75 Eşik Koruması",
+                "Tek Seferlik Güvenli Standby List Tahliyesi (RAM Budaması Yok)",
+                "Yalnızca Birikmiş Standby Önbelleğini Boşalt (Diske Yazma Yok)",
+                "Oyun öncesi belleği ferahlatır; süreçleri pagefile'a dökmeyerek takılmayı engeller.",
+                "Tek Seferlik Standby Purge (NtSetSystemInformation 80)",
                 () =>
                 {
-                    autoStandbyCleanerActive = true;
-                    ExecuteSmartRamAndStandbyPurge(true);
+                    ExecuteSmartRamAndStandbyPurge(false, false);
+                    if (isAdmin)
+                    {
+                        vault.SetRegistryTracked(fps05.Title, "HKLM", memMgmtKey, "DisablePagingExecutive", 0, RegistryValueKind.DWord);
+                        vault.SetRegistryTracked(fps05.Title, "HKLM", memMgmtKey, "LargeSystemCache", 0, RegistryValueKind.DWord);
+                    }
                 }));
             allTweaks.Add(fps05);
 
@@ -10881,17 +16614,19 @@ namespace ArgonLatencyStudio
 
         private void InitializeStudioUI()
         {
-            this.Text = "ARGON LATENCY STUDIO v4.0 — Windows Low Latency, Kernel Timer & TCP/IP Engineering Utility" + (isAdmin ? " [ADMINISTRATOR]" : " [STANDARD]");
+            this.AutoScaleMode = AutoScaleMode.Dpi;
+            this.AutoScaleDimensions = new SizeF(96F, 96F);
+            this.Text = "Argon Studio v4.0 — Windows Sistem, Özelleştirme ve Düşük Gecikme" + (isAdmin ? " [Yönetici]" : " [Standart]");
             this.Size = new Size(1380, 890);
             this.StartPosition = FormStartPosition.CenterScreen;
-            this.BackColor = Color.FromArgb(13, 16, 23);
-            this.ForeColor = Color.White;
+            this.BackColor = ArgonTheme.BgCanvas;
+            this.ForeColor = ArgonTheme.TextPrimary;
             this.Font = new Font("Segoe UI", 9f, FontStyle.Regular);
             this.DoubleBuffered = true;
 
             try
             {
-                int dark = 1;
+                int dark = ArgonTheme.IsLightMode ? 0 : 1;
                 NativeMethods.DwmSetWindowAttribute(this.Handle, 20, ref dark, sizeof(int));
                 NativeMethods.DwmSetWindowAttribute(this.Handle, 19, ref dark, sizeof(int));
             }
@@ -10910,112 +16645,141 @@ namespace ArgonLatencyStudio
             if (appIcon == null) appIcon = SystemIcons.Shield;
             try { this.Icon = appIcon; } catch { }
 
-            // 1. Executive Utility Header Bar (42px Height - Clean, Non-intrusive)
-            pnlTopHeader = new Panel
+            // 0. Native Winaero-Style Top MenuStrip
+            MenuStrip mnuMain = new MenuStrip
             {
                 Dock = DockStyle.Top,
-                Height = 42,
-                BackColor = Color.FromArgb(16, 20, 29)
+                BackColor = ArgonTheme.BgSurface,
+                ForeColor = ArgonTheme.TextPrimary,
+                Font = new Font("Segoe UI", 9.0f, FontStyle.Regular),
+                Padding = new Padding(4, 2, 4, 2),
+                RenderMode = ArgonTheme.IsLightMode ? ToolStripRenderMode.System : ToolStripRenderMode.Professional
             };
-            pnlTopHeader.Paint += (s, e) =>
+            this.MainMenuStrip = mnuMain;
+            this.Controls.Add(mnuMain);
+
+            ToolStripMenuItem mnuFile = new ToolStripMenuItem(Loc.T("Dosya", "File"));
+            mnuFile.DropDownItems.Add(Loc.T("Aktif Ayarları Profil Olarak Kaydet...", "Save Active Settings as Profile..."), null, (s, e) => PromptAndSaveCustomNamedProfile());
+            mnuFile.DropDownItems.Add(Loc.T("Profiller ve Yedekler", "Profiles & Backups"), null, (s, e) => NavigateToPageKey("tab:10", true));
+            mnuFile.DropDownItems.Add(new ToolStripSeparator());
+            mnuFile.DropDownItems.Add(Loc.T("Sistem Tepsisine Küçült", "Minimize to System Tray"), null, (s, e) => { this.Hide(); });
+            mnuFile.DropDownItems.Add(Loc.T("Çıkış (Ayarlar Korunur)", "Exit (Keep Settings)"), null, (s, e) => this.Close());
+            mnuMain.Items.Add(mnuFile);
+
+            ToolStripMenuItem mnuActions = new ToolStripMenuItem(Loc.T("Eylemler", "Actions"));
+            mnuActions.DropDownItems.Add(Loc.T("Seçili Donanım Profilini Uygula (Akıllı Profil)", "Apply Selected Hardware Profile"), null, (s, e) => ApplyHardwareAwareSmartTune());
+            mnuActions.DropDownItems.Add(Loc.T("Canlı Windows Durumunu Eşitle", "Sync Live OS Truth"), null, (s, e) => ProbeAllTweaksLiveOsTruthAndOptionallySync(true));
+            mnuActions.DropDownItems.Add(new ToolStripSeparator());
+            mnuActions.DropDownItems.Add(Loc.T("Bu Sayfayı Varsayılana Sıfırla", "Reset This Page to Defaults"), null, (s, e) => ResetActivePageToDefaults());
+            mnuActions.DropDownItems.Add(Loc.T("Tüm Ayarları Fabrika Varsayılanına Döndür", "Reset All Tweaks to Defaults"), null, (s, e) => RevertAllActiveTweaksToOriginal());
+            mnuMain.Items.Add(mnuActions);
+
+            mnuBookmarksRoot = new ToolStripMenuItem(Loc.T("Yer İmleri", "Bookmarks"));
+            mnuMain.Items.Add(mnuBookmarksRoot);
+
+            ToolStripMenuItem mnuNavigation = new ToolStripMenuItem(Loc.T("Gezinme", "Navigation"));
+            mnuNavigation.DropDownItems.Add(Loc.T("Geri", "Back"), null, (s, e) => NavigateHistoryBack());
+            mnuNavigation.DropDownItems.Add(Loc.T("İleri", "Forward"), null, (s, e) => NavigateHistoryForward());
+            mnuNavigation.DropDownItems.Add(new ToolStripSeparator());
+            mnuNavigation.DropDownItems.Add(Loc.T("Başlangıç — Sistem Bilgileri", "Home — System Information"), null, (s, e) => NavigateToPageKey("tab:11", true));
+            mnuNavigation.DropDownItems.Add(Loc.T("Son Değişiklikler ve Günlük", "Recent Changes & Audit Log"), null, (s, e) => NavigateToPageKey("tab:9", true));
+            mnuMain.Items.Add(mnuNavigation);
+
+            ToolStripMenuItem mnuView = new ToolStripMenuItem(Loc.T("Görünüm", "View"));
+            ToolStripMenuItem mnuThemeLight = new ToolStripMenuItem(Loc.T("Winaero Açık Tema", "Winaero Light Theme"));
+            mnuThemeLight.Checked = ArgonTheme.IsLightMode;
+            mnuThemeLight.Click += (s, e) => SwitchUiThemeMode("LIGHT");
+            ToolStripMenuItem mnuThemeDark = new ToolStripMenuItem(Loc.T("Argon Koyu Tema (Varsayılan)", "Argon Dark Theme (Default)"));
+            mnuThemeDark.Checked = !ArgonTheme.IsLightMode;
+            mnuThemeDark.Click += (s, e) => SwitchUiThemeMode("DARK");
+            mnuView.DropDownItems.Add(mnuThemeLight);
+            mnuView.DropDownItems.Add(mnuThemeDark);
+            mnuView.DropDownItems.Add(new ToolStripSeparator());
+            mnuView.DropDownItems.Add(Loc.T("Dili Değiştir (TR / EN)", "Switch Language (TR / EN)"), null, (s, e) => ApplyLanguage(Loc.IsEnglish ? "TR" : "EN"));
+            mnuMain.Items.Add(mnuView);
+
+            ToolStripMenuItem mnuTools = new ToolStripMenuItem(Loc.T("Araçlar", "Tools"));
+            mnuTools.DropDownItems.Add(Loc.T("Kayıt Defterinde Aç (Regedit)", "Open Key in Regedit"), null, (s, e) => OpenCurrentPageInRegedit());
+            mnuTools.DropDownItems.Add(Loc.T("Windows Gezgini'ni Yeniden Başlat (Explorer)", "Restart Windows Explorer"), null, (s, e) =>
             {
-                using (Pen borderPen = new Pen(Color.FromArgb(34, 43, 62), 1))
+                WinaeroCustomizeCatalog.RestartExplorerProcess();
+                AppendConsoleLog("Windows Gezgini (explorer.exe) yeniden başlatıldı.");
+            });
+            mnuTools.DropDownItems.Add(Loc.T("Simge Önbelleğini Yenile", "Rebuild Icon Cache"), null, (s, e) =>
+            {
+                WinaeroCustomizeCatalog.RebuildIconCache();
+                AppendConsoleLog("Windows simge önbelleği yenileme komutu gönderildi.");
+            });
+            mnuTools.DropDownItems.Add(new ToolStripSeparator());
+            mnuTools.DropDownItems.Add(Loc.T("İşlemci Güç Yöneticisi...", "CPU Power Manager..."), null, (s, e) => ShowAdvancedPowerPolicyDialog());
+            mnuTools.DropDownItems.Add(Loc.T("DWM ve Sunum Danışmanı...", "DWM & Presentation Advisor..."), null, (s, e) => ShowPresentationAdvisorDialog());
+            mnuTools.DropDownItems.Add(Loc.T("InputLab ve USB Topoloji...", "InputLab & USB Topology..."), null, (s, e) => ShowInputLabDiagnosticsDialog());
+            mnuTools.DropDownItems.Add(Loc.T("PCIe MSI ve Kesme Yöneticisi...", "PCIe MSI & Interrupt Manager..."), null, (s, e) => ShowInterruptMsiExplorerDialog());
+            mnuTools.DropDownItems.Add(Loc.T("Sanal Bellek Danışmanı...", "Virtual Memory Advisor..."), null, (s, e) => ShowVirtualMemoryAdvisorDialog());
+            mnuMain.Items.Add(mnuTools);
+
+            ToolStripMenuItem mnuHelp = new ToolStripMenuItem(Loc.T("Yardım", "Help"));
+            mnuHelp.DropDownItems.Add(Loc.T("Sistem Bilgileri ve Durum Özeti", "System Info & Status"), null, (s, e) => NavigateToPageKey("tab:11", true));
+            mnuHelp.DropDownItems.Add(Loc.T("StateVault Değişiklik Günlüğü", "StateVault Audit Log"), null, (s, e) => NavigateToPageKey("tab:9", true));
+            mnuMain.Items.Add(mnuHelp);
+
+            // 1. Left Winaero Explorer TreeView Rail
+            pnlLeftNav = new Panel
+            {
+                Dock = DockStyle.Left,
+                Width = 346,
+                BackColor = ArgonTheme.BgSurface,
+                Padding = new Padding(0, 2, 1, 0)
+            };
+            pnlLeftNav.Paint += (s, e) =>
+            {
+                using (Pen borderPen = new Pen(ArgonTheme.BorderSubtle, 1))
                 {
-                    e.Graphics.DrawLine(borderPen, 0, pnlTopHeader.Height - 1, pnlTopHeader.Width, pnlTopHeader.Height - 1);
+                    e.Graphics.DrawLine(borderPen, pnlLeftNav.Width - 1, 0, pnlLeftNav.Width - 1, pnlLeftNav.Height);
                 }
             };
-            this.Controls.Add(pnlTopHeader);
+            this.Controls.Add(pnlLeftNav);
 
-            Panel pnlBrandEmblem = new Panel
+            // Bottom Compact System Controls inside Left Tree Rail
+            Panel pnlLeftBottom = new Panel
             {
-                Size = new Size(28, 28),
-                Location = new Point(10, 7),
-                BackColor = Color.FromArgb(20, 27, 40)
+                Dock = DockStyle.Bottom,
+                Height = isAdmin ? 104 : 138,
+                BackColor = ArgonTheme.BgSurface,
+                Padding = new Padding(10, 6, 10, 8)
             };
-            pnlBrandEmblem.Paint += (s, e) =>
+            pnlLeftBottom.Paint += (s, e) =>
             {
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-                using (Pen p = new Pen(Color.FromArgb(16, 185, 129), 1.4f))
+                using (Pen p = new Pen(ArgonTheme.BorderSubtle, 1))
                 {
-                    e.Graphics.DrawRectangle(p, 1, 1, pnlBrandEmblem.Width - 3, pnlBrandEmblem.Height - 3);
+                    e.Graphics.DrawLine(p, 8, 0, pnlLeftBottom.Width - 8, 0);
                 }
-                if (appIcon != null)
-                {
-                    try { e.Graphics.DrawIcon(appIcon, new Rectangle(4, 4, 20, 20)); return; } catch { }
-                }
-                TechnicalIconRenderer.DrawTweakVectorIcon(e.Graphics, new Rectangle(4, 4, 20, 20), "LAT_TIMER", "LATENCY", "ALL", Color.FromArgb(16, 185, 129));
             };
-            pnlTopHeader.Controls.Add(pnlBrandEmblem);
+            pnlLeftNav.Controls.Add(pnlLeftBottom);
 
-            Label lblBrand = new Label
+            lblSidebarPulse = new Label
             {
-                Text = "ARGON STUDIO",
-                Font = new Font("Segoe UI", 10.5f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(52, 211, 153),
-                AutoSize = true,
-                Location = new Point(44, 10)
+                Text = "CPU -- °C  ·  GPU -- °C  ·  -- ms",
+                Font = new Font("Consolas", 7.8f, FontStyle.Regular),
+                ForeColor = ArgonTheme.TextMuted,
+                AutoSize = false,
+                AutoEllipsis = true,
+                Size = new Size(322, 18),
+                Location = new Point(10, 6),
+                UseMnemonic = false
             };
-            pnlTopHeader.Controls.Add(lblBrand);
-
-            Label lblVersionPill = new Label
-            {
-                Text = "v4.0 PRO",
-                Font = new Font("Segoe UI", 7.2f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(56, 189, 248),
-                BackColor = Color.FromArgb(20, 32, 50),
-                AutoSize = true,
-                Location = new Point(164, 13),
-                Padding = new Padding(3, 1, 3, 1)
-            };
-            pnlTopHeader.Controls.Add(lblVersionPill);
-
-            lblProfCaption = new Label
-            {
-                Text = Loc.T("PROFİL:", "PROFILE:"),
-                Font = new Font("Segoe UI", 7.6f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(148, 163, 184),
-                AutoSize = true,
-                Location = new Point(236, 13)
-            };
-            pnlTopHeader.Controls.Add(lblProfCaption);
-
-            cmbProfileSelector = new ComboBox
-            {
-                DropDownStyle = ComboBoxStyle.DropDownList,
-                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
-                BackColor = Color.FromArgb(12, 15, 22),
-                ForeColor = Color.FromArgb(56, 189, 248),
-                Location = new Point(292, 9),
-                Size = new Size(185, 24)
-            };
-            cmbProfileSelector.SelectedIndexChanged += (s, e) => OnTopProfileDropdownSelected();
-            mainToolTip.SetToolTip(cmbProfileSelector, "Hazır sistem profilleri veya kendi isimlendirip kaydettiğiniz özel profiller arasında anında geçiş yapın.");
-            pnlTopHeader.Controls.Add(cmbProfileSelector);
-
-            btnQuickSaveProf = new Button
-            {
-                Text = Loc.T("+ Kaydet", "+ Save"),
-                Font = new Font("Segoe UI", 7.6f, FontStyle.Bold),
-                FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(30, 58, 138),
-                ForeColor = Color.White,
-                Size = new Size(62, 24),
-                Location = new Point(482, 9),
-                Cursor = Cursors.Hand
-            };
-            btnQuickSaveProf.FlatAppearance.BorderSize = 1;
-            btnQuickSaveProf.FlatAppearance.BorderColor = Color.FromArgb(59, 130, 246);
-            btnQuickSaveProf.Click += (s, e) => PromptAndSaveCustomNamedProfile();
-            mainToolTip.SetToolTip(btnQuickSaveProf, "Şu an açık olan tüm ayarlarınızı kendi vereceğiniz bir isimle özel profil olarak kaydeder.");
-            pnlTopHeader.Controls.Add(btnQuickSaveProf);
+            pnlLeftBottom.Controls.Add(lblSidebarPulse);
 
             lblLiveSystemStatusPill = new Label
             {
-                Text = "● Sistem: " + allTweaks.Count + " Ayar Taranıyor",
+                Text = "Sistem durumu taranıyor...",
                 Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(52, 211, 153),
-                AutoSize = true,
-                Location = new Point(552, 12),
+                ForeColor = ArgonTheme.Accent,
+                AutoSize = false,
+                AutoEllipsis = true,
+                Size = new Size(322, 18),
+                Location = new Point(10, 25),
+                UseMnemonic = false,
                 Cursor = Cursors.Hand
             };
             lblLiveSystemStatusPill.Click += (s, e) =>
@@ -11025,18 +16789,362 @@ namespace ArgonLatencyStudio
                 if (pendingReboot > 0)
                     PromptAndRestartComputerNow();
                 else
-                    SwitchActiveTab(9);
+                    NavigateToPageKey("tab:9", true);
             };
-            mainToolTip.SetToolTip(lblLiveSystemStatusPill, "Canlı sistem durumunu incelemek veya bekleyen Windows restart ayarlarını devreye almak için tıklayın.");
-            pnlTopHeader.Controls.Add(lblLiveSystemStatusPill);
+            mainToolTip.SetToolTip(lblLiveSystemStatusPill, "Canlı sistem durumunu ve değişiklik günlüğünü açmak için tıklayın.");
+            pnlLeftBottom.Controls.Add(lblLiveSystemStatusPill);
 
-            // Hidden legacy labels kept for 100% caller compatibility
-            lblTopTimer = CreateHeaderBadge("Timer: 15.625 ms", Color.FromArgb(52, 211, 153), 0, 0);
-            lblTopPing = CreateHeaderBadge("Ping: --", Color.FromArgb(56, 189, 248), 0, 0);
-            lblTopRam = CreateHeaderBadge("RAM: --", Color.FromArgb(251, 191, 36), 0, 0);
-            lblTopActiveCount = CreateHeaderBadge("Aktif: 0 / " + allTweaks.Count, Color.FromArgb(168, 85, 247), 0, 0);
-            lblTopCpuSensor = CreateHeaderBadge("CPU: --", Color.FromArgb(251, 146, 60), 0, 0);
-            lblTopGpuSensor = CreateHeaderBadge("GPU: --", Color.FromArgb(52, 211, 153), 0, 0);
+            chkAutoStart = new CheckBox
+            {
+                Text = Loc.T("Windows ile başlat", "Start with Windows"),
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Regular),
+                ForeColor = ArgonTheme.TextPrimary,
+                BackColor = ArgonTheme.BgSurface,
+                AutoSize = true,
+                UseMnemonic = false,
+                Location = new Point(10, 48),
+                Cursor = Cursors.Hand
+            };
+            chkAutoStart.CheckedChanged += (s, e) => OnAutoStartToggled();
+            mainToolTip.SetToolTip(chkAutoStart, "Windows oturumu açıldığında Argon görev zamanlayıcı üzerinden otomatik başlatılır.");
+            pnlLeftBottom.Controls.Add(chkAutoStart);
+
+            chkRevertOnExit = new CheckBox
+            {
+                Text = Loc.T("Çıkışta varsayılanlara döndür", "Revert on exit"),
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Regular),
+                ForeColor = ArgonTheme.TextMuted,
+                BackColor = ArgonTheme.BgSurface,
+                AutoSize = true,
+                UseMnemonic = false,
+                Location = new Point(10, 72),
+                Cursor = Cursors.Hand
+            };
+            chkRevertOnExit.CheckedChanged += (s, e) => SetRevertOnExit(chkRevertOnExit.Checked);
+            mainToolTip.SetToolTip(chkRevertOnExit, "Etkin olduğunda Argon kapanırken aktif ayarları fabrika durumuna döndürür.");
+            pnlLeftBottom.Controls.Add(chkRevertOnExit);
+
+            btnElevate = null;
+            if (!isAdmin)
+            {
+                btnElevate = new Button
+                {
+                    Text = Loc.T("Yönetici Olarak Aç", "Run as Administrator"),
+                    Image = WindowsShellIcons.GetIcon("shield", 16),
+                    ImageAlign = ContentAlignment.MiddleLeft,
+                    TextImageRelation = TextImageRelation.ImageBeforeText,
+                    Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                    FlatStyle = FlatStyle.Flat,
+                    BackColor = ArgonTheme.AlertSoft,
+                    ForeColor = ArgonTheme.Alert,
+                    Size = new Size(322, 28),
+                    Location = new Point(10, 102),
+                    UseMnemonic = false,
+                    Cursor = Cursors.Hand
+                };
+                btnElevate.FlatAppearance.BorderSize = 1;
+                btnElevate.FlatAppearance.BorderColor = ArgonTheme.Alert;
+                btnElevate.Click += (s, e) => RestartAsAdministrator();
+                pnlLeftBottom.Controls.Add(btnElevate);
+            }
+
+            // Build colorful Windows Shell ImageList for TreeView
+            tvIconList = new ImageList
+            {
+                ImageSize = new Size(16, 16),
+                ColorDepth = ColorDepth.Depth32Bit
+            };
+            string[] shellIconKeys = new string[]
+            {
+                "info", "pc", "bookmarks", "recent", "win11", "appearance", "colors", "display", "sound",
+                "behavior", "mouse", "keyboard", "lock", "boot", "explorer", "drive", "navpane", "netdrive",
+                "shortcuts", "context", "tools", "privacy", "network", "globe", "kernel", "processes",
+                "automation", "diag", "search", "refresh", "shield", "settings"
+            };
+            foreach (string ik in shellIconKeys)
+            {
+                try
+                {
+                    Bitmap b = WindowsShellIcons.GetIcon(ik, 16);
+                    if (b != null) tvIconList.Images.Add(ik, b);
+                }
+                catch { }
+            }
+
+            tvMainNav = new TreeView
+            {
+                Dock = DockStyle.Fill,
+                BorderStyle = BorderStyle.None,
+                BackColor = ArgonTheme.BgSurface,
+                ForeColor = ArgonTheme.TextPrimary,
+                Font = new Font("Segoe UI", 9.0f, FontStyle.Regular),
+                ImageList = tvIconList,
+                ShowLines = true,
+                ShowPlusMinus = true,
+                ShowRootLines = true,
+                FullRowSelect = true,
+                HideSelection = false,
+                HotTracking = true,
+                ItemHeight = 23,
+                Indent = 18
+            };
+            tvMainNav.AfterSelect += (s, e) =>
+            {
+                if (isPopulatingNavTree || e.Node == null) return;
+                string tag = e.Node.Tag as string;
+                if (string.IsNullOrEmpty(tag)) return;
+                if (txtGlobalSearch != null && !string.IsNullOrEmpty(txtGlobalSearch.Text))
+                    txtGlobalSearch.Text = "";
+                NavigateToPageKey(tag, true);
+            };
+            pnlLeftNav.Controls.Add(tvMainNav);
+            pnlLeftBottom.SendToBack();
+            tvMainNav.BringToFront();
+
+            BuildNavigationTree();
+
+            // Keep legacy pnlNavBar reference harmlessly initialized (not added to form) for callers
+            pnlNavBar = new Panel { Visible = false };
+
+            // 2. Winaero-Style Top Toolbar (Search Left + Icon Buttons Center + Argon Profiles & Quick Actions Right)
+            pnlTopHeader = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 44,
+                BackColor = ArgonTheme.BgCanvas,
+                Padding = new Padding(10, 6, 12, 6)
+            };
+            pnlTopHeader.Paint += (s, e) =>
+            {
+                using (Pen borderPen = new Pen(ArgonTheme.BorderSubtle, 1))
+                {
+                    e.Graphics.DrawLine(borderPen, 0, pnlTopHeader.Height - 1, pnlTopHeader.Width, pnlTopHeader.Height - 1);
+                }
+            };
+            this.Controls.Add(pnlTopHeader);
+
+            FlowLayoutPanel flowHeaderLeft = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                WrapContents = false,
+                FlowDirection = FlowDirection.LeftToRight,
+                BackColor = ArgonTheme.BgCanvas,
+                Padding = new Padding(0, 1, 0, 0)
+            };
+            pnlTopHeader.Controls.Add(flowHeaderLeft);
+
+            // Search box wrapper (matching Winaero's top-left Search for a tweak)
+            Panel pnlSearchWrap = new Panel
+            {
+                Size = new Size(216, 28),
+                BackColor = ArgonTheme.BgInput,
+                Margin = new Padding(0, 1, 8, 0)
+            };
+            pnlSearchWrap.Paint += (s, e) =>
+            {
+                using (Pen p = new Pen(ArgonTheme.BorderSubtle, 1))
+                    e.Graphics.DrawRectangle(p, 0, 0, pnlSearchWrap.Width - 1, pnlSearchWrap.Height - 1);
+                ArgonIconPack.DrawIcon(e.Graphics, new Rectangle(7, 7, 14, 14), "search", ArgonTheme.TextMuted);
+            };
+            lblSearchIcon = new Label { Visible = false, Text = "Ara:" };
+            txtGlobalSearch = new TextBox
+            {
+                BorderStyle = BorderStyle.None,
+                BackColor = ArgonTheme.BgInput,
+                ForeColor = ArgonTheme.TextPrimary,
+                Font = new Font("Segoe UI", 8.8f, FontStyle.Regular),
+                Location = new Point(26, 6),
+                Width = 182
+            };
+            txtGlobalSearch.TextChanged += (s, e) => ApplySearchFilter(txtGlobalSearch.Text);
+            mainToolTip.SetToolTip(txtGlobalSearch, "Tüm Winaero Özelleştirme ve Argon Performans ayarlarında anında arama yapın (örn. Sağ Tık, Nagle, Timer, Görev Çubuğu).");
+            pnlSearchWrap.Controls.Add(txtGlobalSearch);
+            flowHeaderLeft.Controls.Add(pnlSearchWrap);
+
+            Func<string, Image, string, EventHandler, Button> createToolBtn = (txt, ico, tip, onClick) =>
+            {
+                Button tb = new Button
+                {
+                    Text = txt,
+                    Image = ico,
+                    ImageAlign = ContentAlignment.MiddleCenter,
+                    Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+                    FlatStyle = FlatStyle.Flat,
+                    BackColor = ArgonTheme.BgCanvas,
+                    ForeColor = ArgonTheme.TextPrimary,
+                    Size = new Size(28, 28),
+                    Margin = new Padding(1, 1, 2, 0),
+                    UseMnemonic = false,
+                    Cursor = Cursors.Hand
+                };
+                tb.FlatAppearance.BorderSize = 0;
+                tb.FlatAppearance.MouseOverBackColor = ArgonTheme.BgSurfaceHover;
+                if (!string.IsNullOrEmpty(tip)) mainToolTip.SetToolTip(tb, tip);
+                if (onClick != null) tb.Click += onClick;
+                flowHeaderLeft.Controls.Add(tb);
+                return tb;
+            };
+
+            btnNavBack = createToolBtn("<", null, Loc.T("Önceki Sayfa", "Back"), (s, e) => NavigateHistoryBack());
+            btnNavForward = createToolBtn(">", null, Loc.T("Sonraki Sayfa", "Forward"), (s, e) => NavigateHistoryForward());
+            createToolBtn("", WindowsShellIcons.GetIcon("info", 16), Loc.T("Başlangıç — Sistem Bilgileri", "Home — System Information"), (s, e) => NavigateToPageKey("tab:11", true));
+            createToolBtn("", WindowsShellIcons.GetIcon("recent", 16), Loc.T("Son Değişiklikler ve Günlük", "Recent Changes & Log"), (s, e) => NavigateToPageKey("tab:9", true));
+            btnBookmarkPageTop = createToolBtn("", WindowsShellIcons.GetIcon("bookmarks", 16), Loc.T("Bu Sayfayı Yer İmlerine Ekle / Çıkar", "Bookmark This Page"), (s, e) => ToggleBookmarkForCurrentPage());
+            createToolBtn("", WindowsShellIcons.GetIcon("refresh", 16), Loc.T("Windows Gezgini'ni (Explorer) Yeniden Başlat", "Restart Windows Explorer"), (s, e) =>
+            {
+                WinaeroCustomizeCatalog.RestartExplorerProcess();
+                AppendConsoleLog("Windows Gezgini (explorer.exe) yeniden başlatıldı.");
+            });
+
+            FlowLayoutPanel flowHeaderRight = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Right,
+                AutoSize = true,
+                WrapContents = false,
+                FlowDirection = FlowDirection.LeftToRight,
+                BackColor = ArgonTheme.BgCanvas,
+                Padding = new Padding(8, 1, 0, 0)
+            };
+            pnlTopHeader.Controls.Add(flowHeaderRight);
+            flowHeaderLeft.BringToFront();
+
+            lblProfCaption = new Label { Visible = false, Text = "Profil:" };
+            cmbProfileSelector = new ComboBox
+            {
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Font = new Font("Segoe UI", 8.4f, FontStyle.Regular),
+                BackColor = ArgonTheme.BgSurface,
+                ForeColor = ArgonTheme.TextPrimary,
+                Width = 158,
+                Margin = new Padding(0, 3, 4, 0)
+            };
+            cmbProfileSelector.SelectedIndexChanged += (s, e) => OnTopProfileDropdownSelected();
+            mainToolTip.SetToolTip(cmbProfileSelector, "Kayıtlı profiller arasında geçiş yapın.");
+            flowHeaderRight.Controls.Add(cmbProfileSelector);
+
+            btnQuickSaveProf = new Button
+            {
+                Text = " " + Loc.T("Kaydet", "Save"),
+                Image = ArgonIconPack.GetIcon("save", ArgonTheme.TextPrimary, 14),
+                ImageAlign = ContentAlignment.MiddleLeft,
+                TextImageRelation = TextImageRelation.ImageBeforeText,
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Regular),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = ArgonTheme.BgSurface,
+                ForeColor = ArgonTheme.TextPrimary,
+                AutoSize = true,
+                MinimumSize = new Size(72, 28),
+                Height = 28,
+                Padding = new Padding(6, 0, 6, 0),
+                Margin = new Padding(0, 1, 5, 0),
+                UseMnemonic = false,
+                Cursor = Cursors.Hand
+            };
+            btnQuickSaveProf.FlatAppearance.BorderSize = 1;
+            btnQuickSaveProf.FlatAppearance.BorderColor = ArgonTheme.BorderSubtle;
+            btnQuickSaveProf.Click += (s, e) => PromptAndSaveCustomNamedProfile();
+            mainToolTip.SetToolTip(btnQuickSaveProf, "Aktif ayarları yeni veya mevcut bir profil olarak kaydedin.");
+            flowHeaderRight.Controls.Add(btnQuickSaveProf);
+
+            btnSmartTuneTop = new Button
+            {
+                Text = " " + Loc.T("Akıllı Profil", "Smart Profile"),
+                Image = ArgonIconPack.GetIcon("zap", Color.White, 14),
+                ImageAlign = ContentAlignment.MiddleLeft,
+                TextImageRelation = TextImageRelation.ImageBeforeText,
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = ArgonTheme.Accent,
+                ForeColor = Color.White,
+                AutoSize = true,
+                MinimumSize = new Size(102, 28),
+                Height = 28,
+                Padding = new Padding(8, 0, 8, 0),
+                Margin = new Padding(0, 1, 5, 0),
+                UseMnemonic = false,
+                Cursor = Cursors.Hand
+            };
+            btnSmartTuneTop.FlatAppearance.BorderSize = 0;
+            btnSmartTuneTop.Click += (s, e) => ApplyHardwareAwareSmartTune();
+            mainToolTip.SetToolTip(btnSmartTuneTop, "Algılanan işlemci ve ekran kartına uygun güvenli düşük gecikme profilini uygular.");
+            flowHeaderRight.Controls.Add(btnSmartTuneTop);
+
+            btnResetAllTop = new Button
+            {
+                Text = " " + Loc.T("Fabrika Sıfırla", "Reset All"),
+                Image = ArgonIconPack.GetIcon("reset", ArgonTheme.Alert, 14),
+                ImageAlign = ContentAlignment.MiddleLeft,
+                TextImageRelation = TextImageRelation.ImageBeforeText,
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = ArgonTheme.AlertSoft,
+                ForeColor = ArgonTheme.Alert,
+                AutoSize = true,
+                MinimumSize = new Size(100, 28),
+                Height = 28,
+                Padding = new Padding(6, 0, 6, 0),
+                Margin = new Padding(0, 1, 5, 0),
+                UseMnemonic = false,
+                Cursor = Cursors.Hand
+            };
+            btnResetAllTop.FlatAppearance.BorderSize = 1;
+            btnResetAllTop.FlatAppearance.BorderColor = ArgonTheme.Alert;
+            btnResetAllTop.Click += (s, e) => RevertAllActiveTweaksToOriginal();
+            mainToolTip.SetToolTip(btnResetAllTop, "StateVault üzerinden izlenen tüm performans ayarlarını orijinal Windows varsayılanlarına geri yükler.");
+            flowHeaderRight.Controls.Add(btnResetAllTop);
+
+            btnLangToggle = new Button
+            {
+                Text = Loc.IsEnglish ? "EN" : "TR",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = ArgonTheme.BgSurface,
+                ForeColor = ArgonTheme.TextPrimary,
+                Size = new Size(36, 28),
+                Margin = new Padding(0, 1, 5, 0),
+                UseMnemonic = false,
+                Cursor = Cursors.Hand
+            };
+            btnLangToggle.FlatAppearance.BorderSize = 1;
+            btnLangToggle.FlatAppearance.BorderColor = ArgonTheme.BorderSubtle;
+            btnLangToggle.Click += (s, e) => ApplyLanguage(Loc.IsEnglish ? "TR" : "EN");
+            mainToolTip.SetToolTip(btnLangToggle, "Dil değiştir / Switch Language (TR / EN)");
+            flowHeaderRight.Controls.Add(btnLangToggle);
+
+            btnMinimizeTray = new Button
+            {
+                Text = " " + Loc.T("Tepsi", "Tray"),
+                Image = ArgonIconPack.GetIcon("tray", ArgonTheme.TextMuted, 14),
+                ImageAlign = ContentAlignment.MiddleLeft,
+                TextImageRelation = TextImageRelation.ImageBeforeText,
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Regular),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = ArgonTheme.BgSurface,
+                ForeColor = ArgonTheme.TextSecondary,
+                AutoSize = true,
+                MinimumSize = new Size(64, 28),
+                Height = 28,
+                Padding = new Padding(6, 0, 6, 0),
+                Margin = new Padding(0, 1, 0, 0),
+                UseMnemonic = false,
+                Cursor = Cursors.Hand
+            };
+            btnMinimizeTray.FlatAppearance.BorderSize = 1;
+            btnMinimizeTray.FlatAppearance.BorderColor = ArgonTheme.BorderSubtle;
+            btnMinimizeTray.Click += (s, e) =>
+            {
+                this.Hide();
+                trayIcon.ShowBalloonTip(1500, "Argon Studio v4.0", "Sistem tepsisinde aktif.", ToolTipIcon.Info);
+            };
+            flowHeaderRight.Controls.Add(btnMinimizeTray);
+
+            // Hidden legacy badges preserved for telemetry callers
+            lblTopTimer = CreateHeaderBadge("Timer: 15.625 ms", ArgonTheme.Accent, 0, 0);
+            lblTopPing = CreateHeaderBadge("Ping: --", ArgonTheme.Accent, 0, 0);
+            lblTopRam = CreateHeaderBadge("RAM: --", ArgonTheme.Accent, 0, 0);
+            lblTopActiveCount = CreateHeaderBadge("Aktif: 0 / " + allTweaks.Count, ArgonTheme.Accent, 0, 0);
+            lblTopCpuSensor = CreateHeaderBadge("CPU: --", ArgonTheme.Accent, 0, 0);
+            lblTopGpuSensor = CreateHeaderBadge("GPU: --", ArgonTheme.Accent, 0, 0);
             lblTopTimer.Visible = false;
             lblTopPing.Visible = false;
             lblTopRam.Visible = false;
@@ -11044,292 +17152,20 @@ namespace ArgonLatencyStudio
             lblTopCpuSensor.Visible = false;
             lblTopGpuSensor.Visible = false;
 
-            chkRevertOnExit = new CheckBox
-            {
-                Text = Loc.T("Çıkışta sıfırla", "Revert on exit"),
-                Font = new Font("Segoe UI", 7.6f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(203, 213, 225),
-                BackColor = Color.FromArgb(16, 20, 29),
-                AutoSize = true,
-                Cursor = Cursors.Hand
-            };
-            chkRevertOnExit.CheckedChanged += (s, e) => SetRevertOnExit(chkRevertOnExit.Checked);
-            mainToolTip.SetToolTip(chkRevertOnExit, "Açıkken: program kapanınca tüm ayarlar fabrika varsayılanına döner.");
-            pnlTopHeader.Controls.Add(chkRevertOnExit);
-
-            chkAutoStart = new CheckBox
-            {
-                Text = Loc.T("Windows ile başlat", "Start with Windows"),
-                Font = new Font("Segoe UI", 7.6f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(203, 213, 225),
-                BackColor = Color.FromArgb(16, 20, 29),
-                AutoSize = true,
-                Cursor = Cursors.Hand
-            };
-            chkAutoStart.CheckedChanged += (s, e) => OnAutoStartToggled();
-            mainToolTip.SetToolTip(chkAutoStart, "Oturum açılınca Argon yönetici yetkisiyle tepside sessizce başlar.");
-            pnlTopHeader.Controls.Add(chkAutoStart);
-
-            btnSmartTuneTop = new Button
-            {
-                Text = Loc.T("⚡ Akıllı Profil", "⚡ Smart Profile"),
-                Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
-                FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(16, 185, 129),
-                ForeColor = Color.Black,
-                Size = new Size(115, 24),
-                Cursor = Cursors.Hand
-            };
-            btnSmartTuneTop.FlatAppearance.BorderSize = 0;
-            btnSmartTuneTop.Click += (s, e) => ApplyHardwareAwareSmartTune();
-            mainToolTip.SetToolTip(btnSmartTuneTop, "Sisteminize ve seçili profilinize en uygun güvenli ayarları tek tıkla uygular.");
-            pnlTopHeader.Controls.Add(btnSmartTuneTop);
-
-            btnResetAllTop = new Button
-            {
-                Text = Loc.T("↺ Fabrika Sıfırla", "↺ Reset All"),
-                Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
-                FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(153, 27, 27),
-                ForeColor = Color.White,
-                Size = new Size(118, 24),
-                Cursor = Cursors.Hand
-            };
-            btnResetAllTop.FlatAppearance.BorderSize = 1;
-            btnResetAllTop.FlatAppearance.BorderColor = Color.FromArgb(220, 38, 38);
-            btnResetAllTop.Click += (s, e) => RevertAllActiveTweaksToOriginal();
-            mainToolTip.SetToolTip(btnResetAllTop, "Orijinal fabrika değerlerini birebir geri yükler ve canlı OS denetimiyle sıfırlandığını doğrular.");
-            pnlTopHeader.Controls.Add(btnResetAllTop);
-
-            btnMinimizeTray = new Button
-            {
-                Text = Loc.T("– Tepsiye Küçült", "– Tray"),
-                Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
-                FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(30, 41, 59),
-                ForeColor = Color.FromArgb(203, 213, 225),
-                Size = new Size(120, 24),
-                Cursor = Cursors.Hand
-            };
-            btnMinimizeTray.FlatAppearance.BorderSize = 1;
-            btnMinimizeTray.FlatAppearance.BorderColor = Color.FromArgb(65, 78, 105);
-            btnMinimizeTray.Click += (s, e) =>
-            {
-                this.Hide();
-                trayIcon.ShowBalloonTip(1500, "Argon Studio v4.0", "Arka planda aktif. Ayarlarınız korunuyor.", ToolTipIcon.Info);
-            };
-            pnlTopHeader.Controls.Add(btnMinimizeTray);
-
-            btnLangToggle = new Button
-            {
-                Text = Loc.IsEnglish ? "🌐 EN" : "🌐 TR",
-                Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
-                FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(20, 32, 50),
-                ForeColor = Color.FromArgb(56, 189, 248),
-                Size = new Size(62, 24),
-                Cursor = Cursors.Hand
-            };
-            btnLangToggle.FlatAppearance.BorderSize = 1;
-            btnLangToggle.FlatAppearance.BorderColor = Color.FromArgb(56, 189, 248);
-            btnLangToggle.Click += (s, e) =>
-            {
-                string nextLang = Loc.IsEnglish ? "TR" : "EN";
-                ApplyLanguage(nextLang);
-            };
-            mainToolTip.SetToolTip(btnLangToggle, "Dili Değiştir / Switch Language (Türkçe / English)");
-            pnlTopHeader.Controls.Add(btnLangToggle);
-
-            btnElevate = null;
-            if (!isAdmin)
-            {
-                btnElevate = new Button
-                {
-                    Text = Loc.T("🛡️ Yönetici Aç", "🛡️ Admin"),
-                    Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
-                    FlatStyle = FlatStyle.Flat,
-                    BackColor = Color.FromArgb(217, 119, 6),
-                    ForeColor = Color.Black,
-                    Size = new Size(100, 24),
-                    Cursor = Cursors.Hand
-                };
-                btnElevate.FlatAppearance.BorderSize = 0;
-                btnElevate.Click += (s, e) => RestartAsAdministrator();
-                pnlTopHeader.Controls.Add(btnElevate);
-            }
-
-            Action layoutTopHeader = () =>
-            {
-                int w = pnlTopHeader.ClientSize.Width > 0 ? pnlTopHeader.ClientSize.Width : 1380;
-                bool isCompact = (w < 1440);
-
-                // Left Flow: Dynamic spacing prevents any DPI overlaps
-                int lx = 10;
-                pnlBrandEmblem.Location = new Point(lx, 7);
-                lx += pnlBrandEmblem.Width + 8;
-
-                lblBrand.Location = new Point(lx, 10);
-                int brandW = Math.Max(130, lblBrand.PreferredSize.Width);
-                lx += brandW + 8;
-
-                lblVersionPill.Location = new Point(lx, 12);
-                lx += Math.Max(55, lblVersionPill.PreferredSize.Width) + 12;
-
-                lblProfCaption.Location = new Point(lx, 13);
-                lx += lblProfCaption.PreferredSize.Width + 6;
-
-                cmbProfileSelector.Location = new Point(lx, 9);
-                cmbProfileSelector.Width = isCompact ? 145 : 175;
-                lx += cmbProfileSelector.Width + 6;
-
-                btnQuickSaveProf.Text = isCompact ? "+" : Loc.T("+ Kaydet", "+ Save");
-                btnQuickSaveProf.Width = isCompact ? 30 : Math.Max(74, btnQuickSaveProf.PreferredSize.Width + 10);
-                btnQuickSaveProf.Location = new Point(lx, 9);
-                lx += btnQuickSaveProf.Width + 10;
-
-                lblLiveSystemStatusPill.Location = new Point(lx, 12);
-
-                // Right Flow
-                int rx = w - 10;
-
-                btnMinimizeTray.Text = isCompact ? Loc.T("Tepsi", "Tray") : Loc.T("- Tepsiye", "- Tray");
-                btnMinimizeTray.Width = isCompact ? 60 : Math.Max(85, btnMinimizeTray.PreferredSize.Width + 8);
-                rx -= btnMinimizeTray.Width;
-                btnMinimizeTray.Location = new Point(rx, 9);
-                rx -= 5;
-
-                btnLangToggle.Width = 62;
-                rx -= btnLangToggle.Width;
-                btnLangToggle.Location = new Point(rx, 9);
-                rx -= 6;
-
-                btnResetAllTop.Text = isCompact ? Loc.T("Sıfırla", "Reset") : Loc.T("↺ Fabrika Sıfırla", "↺ Reset All");
-                btnResetAllTop.Width = isCompact ? 68 : Math.Max(118, btnResetAllTop.PreferredSize.Width + 12);
-                rx -= btnResetAllTop.Width;
-                btnResetAllTop.Location = new Point(rx, 9);
-                rx -= 6;
-
-                btnSmartTuneTop.Text = isCompact ? Loc.T("Akıllı Ayar", "Smart Tune") : Loc.T("⚡ Akıllı Profil", "⚡ Smart Profile");
-                btnSmartTuneTop.Width = isCompact ? 86 : Math.Max(115, btnSmartTuneTop.PreferredSize.Width + 12);
-                rx -= btnSmartTuneTop.Width;
-                btnSmartTuneTop.Location = new Point(rx, 9);
-                rx -= 10;
-
-                if (btnElevate != null)
-                {
-                    btnElevate.Text = isCompact ? Loc.T("Yönetici", "Admin") : Loc.T("🛡️ Yönetici Aç", "🛡️ Admin");
-                    btnElevate.Width = isCompact ? 80 : Math.Max(100, btnElevate.PreferredSize.Width + 10);
-                    rx -= btnElevate.Width;
-                    btnElevate.Location = new Point(rx, 9);
-                    rx -= 8;
-                }
-
-                rx -= chkAutoStart.PreferredSize.Width;
-                chkAutoStart.Location = new Point(rx, 13);
-                rx -= 8;
-
-                rx -= chkRevertOnExit.PreferredSize.Width;
-                chkRevertOnExit.Location = new Point(rx, 13);
-            };
-            pnlTopHeader.Resize += (s, e) => layoutTopHeader();
-            layoutTopHeader();
             RefreshProfileSelectorCombo();
 
-            // 2. Compact Navigation Bar (10 Technical Category Tabs + Global Search)
-            pnlNavBar = new Panel
-            {
-                Dock = DockStyle.Top,
-                Height = 36,
-                BackColor = Color.FromArgb(20, 25, 36)
-            };
-            pnlNavBar.Paint += (s, e) =>
-            {
-                using (Pen borderPen = new Pen(Color.FromArgb(34, 43, 62), 1))
-                {
-                    e.Graphics.DrawLine(borderPen, 0, pnlNavBar.Height - 1, pnlNavBar.Width, pnlNavBar.Height - 1);
-                }
-            };
-            this.Controls.Add(pnlNavBar);
-
-            string[] tabNames = new string[]
-            {
-                "Donanım (4)",
-                "Ağ (0/11)",
-                "Timer (0/8)",
-                "Grafik (0/9)",
-                "Sistem (0/7)",
-                "Kernel (0/8)",
-                "İşlemler",
-                "Otomasyon",
-                "Tanı Test",
-                "Günlük",
-                "Ayarlar"
-            };
-
-            int navX = 10;
-            for (int i = 0; i < tabNames.Length; i++)
-            {
-                int tabIdx = i;
-                Button btnNav = new Button
-                {
-                    Text = tabNames[i],
-                    Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
-                    FlatStyle = FlatStyle.Flat,
-                    AutoSize = false,
-                    UseMnemonic = false,
-                    Height = 26,
-                    Location = new Point(navX, 5),
-                    Cursor = Cursors.Hand,
-                    Padding = new Padding(2, 0, 2, 0)
-                };
-                btnNav.FlatAppearance.BorderSize = 0;
-                btnNav.Click += (s, e) =>
-                {
-                    if (!string.IsNullOrEmpty(txtGlobalSearch.Text))
-                        txtGlobalSearch.Text = "";
-                    SwitchActiveTab(tabIdx);
-                };
-                pnlNavBar.Controls.Add(btnNav);
-                navButtons.Add(btnNav);
-                navX += btnNav.PreferredSize.Width + 4;
-            }
-
-            lblSearchIcon = new Label
-            {
-                Text = "Ara:",
-                Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(148, 163, 184),
-                AutoSize = true
-            };
-            pnlNavBar.Controls.Add(lblSearchIcon);
-
-            txtGlobalSearch = new TextBox
-            {
-                Width = 165,
-                BackColor = Color.FromArgb(12, 15, 22),
-                ForeColor = Color.FromArgb(56, 189, 248),
-                BorderStyle = BorderStyle.FixedSingle,
-                Font = new Font("Segoe UI", 8.0f, FontStyle.Regular)
-            };
-            txtGlobalSearch.TextChanged += (s, e) => ApplySearchFilter(txtGlobalSearch.Text);
-            mainToolTip.SetToolTip(txtGlobalSearch, "TÜM SEKMELERDE GENEL ARAMA:\nNagle, MPO, Teredo, Timer, Ryzen, NVIDIA, USB, Hibernation vb. yazarak 45 ayarın tamamında arama yapabilirsiniz.");
-            pnlNavBar.Controls.Add(txtGlobalSearch);
-
-            pnlNavBar.Resize += (s, e) => LayoutNavBarButtons();
-            LayoutNavBarButtons();
-
-            // 3. Intelligent Reboot & Adapter Reload Notification Bar (Zero False Positives)
+            // 3. Reboot & Adapter Reload Banner
             pnlRebootWarningBanner = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 38,
-                BackColor = Color.FromArgb(42, 26, 14),
+                Height = 36,
+                BackColor = ArgonTheme.AlertSoft,
                 Visible = false,
-                Padding = new Padding(10, 5, 10, 5)
+                Padding = new Padding(14, 4, 14, 4)
             };
             pnlRebootWarningBanner.Paint += (s, e) =>
             {
-                using (Pen bPen = new Pen(Color.FromArgb(217, 119, 6), 1))
+                using (Pen bPen = new Pen(ArgonTheme.Alert, 1))
                 {
                     e.Graphics.DrawLine(bPen, 0, pnlRebootWarningBanner.Height - 1, pnlRebootWarningBanner.Width, pnlRebootWarningBanner.Height - 1);
                 }
@@ -11338,12 +17174,12 @@ namespace ArgonLatencyStudio
 
             btnDismissBanner = new Button
             {
-                Text = "✕",
-                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                Text = "Kapat",
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Regular),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.Transparent,
-                ForeColor = Color.FromArgb(148, 163, 184),
-                Width = 26,
+                ForeColor = ArgonTheme.TextMuted,
+                Width = 52,
                 Dock = DockStyle.Right,
                 Cursor = Cursors.Hand
             };
@@ -11357,11 +17193,11 @@ namespace ArgonLatencyStudio
 
             btnRebootPcBanner = new Button
             {
-                Text = "⚡ Bilgisayarı Yeniden Başlat",
+                Text = "Yeniden Başlat",
                 Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
                 FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(245, 158, 11),
-                ForeColor = Color.Black,
+                BackColor = ArgonTheme.Alert,
+                ForeColor = Color.White,
                 AutoSize = true,
                 Dock = DockStyle.Right,
                 Padding = new Padding(12, 0, 12, 0),
@@ -11374,11 +17210,11 @@ namespace ArgonLatencyStudio
 
             btnSoftReloadNow = new Button
             {
-                Text = "🔄 Ağ Kartını Şimdi Yenile",
+                Text = "Ağ Kartını Yenile",
                 Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
                 FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(14, 165, 233),
-                ForeColor = Color.Black,
+                BackColor = ArgonTheme.Accent,
+                ForeColor = Color.White,
                 AutoSize = true,
                 Dock = DockStyle.Right,
                 Padding = new Padding(12, 0, 12, 0),
@@ -11393,23 +17229,133 @@ namespace ArgonLatencyStudio
             {
                 Text = "Durum bilgisi yükleniyor...",
                 Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(253, 224, 71),
+                ForeColor = ArgonTheme.TextPrimary,
                 Dock = DockStyle.Fill,
                 AutoEllipsis = true,
                 TextAlign = ContentAlignment.MiddleLeft
             };
             pnlRebootWarningBanner.Controls.Add(lblRebootBannerText);
 
-            // 4. Compact 2-Line Hover Inspector Status Bar at Bottom
+            // 4. Right Detail Page Header (Winaero 32x32 Icon + Page Title + "Reset this page to defaults" + "Open in Regedit")
+            pnlDetailHeader = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 60,
+                BackColor = ArgonTheme.BgSurface,
+                Padding = new Padding(14, 8, 16, 8)
+            };
+            pnlDetailHeader.Paint += (s, e) =>
+            {
+                using (Pen p = new Pen(ArgonTheme.BorderSubtle, 1))
+                {
+                    e.Graphics.DrawLine(p, 0, pnlDetailHeader.Height - 1, pnlDetailHeader.Width, pnlDetailHeader.Height - 1);
+                }
+            };
+            this.Controls.Add(pnlDetailHeader);
+
+            pbDetailPageIcon = new PictureBox
+            {
+                Location = new Point(16, 12),
+                Size = new Size(36, 36),
+                SizeMode = PictureBoxSizeMode.CenterImage,
+                BackColor = Color.Transparent,
+                Image = WindowsShellIcons.GetIcon("info", 32)
+            };
+            pnlDetailHeader.Controls.Add(pbDetailPageIcon);
+
+            lblCurrentPageTitle = new Label
+            {
+                Text = Loc.T("Bilgisayar Özellikleri ve Sistem Monitörü", "System Information & Hardware Monitor"),
+                Font = new Font("Segoe UI", 13.0f, FontStyle.Regular),
+                ForeColor = ArgonTheme.TextPrimary,
+                AutoSize = false,
+                AutoEllipsis = true,
+                Location = new Point(60, 8),
+                Size = new Size(520, 26),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                TextAlign = ContentAlignment.MiddleLeft,
+                UseMnemonic = false
+            };
+            pnlDetailHeader.Controls.Add(lblCurrentPageTitle);
+
+            lblDetailPageSub = new Label
+            {
+                Text = "Argon Studio v4.0 · Tüm değişiklikler StateVault ile geri alınabilir şekilde kaydedilir",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Regular),
+                ForeColor = ArgonTheme.TextMuted,
+                AutoSize = false,
+                AutoEllipsis = true,
+                Location = new Point(62, 34),
+                Size = new Size(520, 18),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                TextAlign = ContentAlignment.MiddleLeft,
+                UseMnemonic = false
+            };
+            pnlDetailHeader.Controls.Add(lblDetailPageSub);
+
+            btnResetPageDefaults = new Button
+            {
+                Text = " " + Loc.T("Bu sayfayı varsayılana sıfırla", "Reset this page to defaults"),
+                Image = ArgonIconPack.GetIcon("reset", ArgonTheme.TextSecondary, 14),
+                ImageAlign = ContentAlignment.MiddleLeft,
+                TextImageRelation = TextImageRelation.ImageBeforeText,
+                Font = new Font("Segoe UI", 8.4f, FontStyle.Regular),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = ArgonTheme.BgCanvas,
+                ForeColor = ArgonTheme.TextPrimary,
+                Size = new Size(204, 28),
+                Location = new Point(840, 15),
+                Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                UseMnemonic = false,
+                Cursor = Cursors.Hand
+            };
+            btnResetPageDefaults.FlatAppearance.BorderSize = 1;
+            btnResetPageDefaults.FlatAppearance.BorderColor = ArgonTheme.BorderSubtle;
+            btnResetPageDefaults.Click += (s, e) => ResetActivePageToDefaults();
+            pnlDetailHeader.Controls.Add(btnResetPageDefaults);
+
+            btnOpenInRegedit = new Button
+            {
+                Text = " " + Loc.T("Regedit'te Aç", "Open in Regedit"),
+                Image = WindowsShellIcons.GetIcon("tools", 16),
+                ImageAlign = ContentAlignment.MiddleLeft,
+                TextImageRelation = TextImageRelation.ImageBeforeText,
+                Font = new Font("Segoe UI", 8.4f, FontStyle.Regular),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = ArgonTheme.BgCanvas,
+                ForeColor = ArgonTheme.TextPrimary,
+                Size = new Size(124, 28),
+                Location = new Point(708, 15),
+                Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                UseMnemonic = false,
+                Cursor = Cursors.Hand
+            };
+            btnOpenInRegedit.FlatAppearance.BorderSize = 1;
+            btnOpenInRegedit.FlatAppearance.BorderColor = ArgonTheme.BorderSubtle;
+            btnOpenInRegedit.Click += (s, e) => OpenCurrentPageInRegedit();
+            pnlDetailHeader.Controls.Add(btnOpenInRegedit);
+
+            pnlDetailHeader.Resize += (s, e) =>
+            {
+                int w = pnlDetailHeader.ClientSize.Width;
+                btnResetPageDefaults.Location = new Point(Math.Max(360, w - btnResetPageDefaults.Width - 16), 15);
+                btnOpenInRegedit.Location = new Point(Math.Max(230, btnResetPageDefaults.Left - btnOpenInRegedit.Width - 8), 15);
+                int titleMaxW = Math.Max(180, btnOpenInRegedit.Left - 72);
+                lblCurrentPageTitle.Width = titleMaxW;
+                lblDetailPageSub.Width = titleMaxW;
+            };
+
+            // 5. Compact Hover Inspector Status Bar at Bottom
             pnlInspectorFooter = new Panel
             {
                 Dock = DockStyle.Bottom,
-                Height = 46,
-                BackColor = Color.FromArgb(15, 19, 28)
+                Height = 44,
+                BackColor = ArgonTheme.BgSurface,
+                Padding = new Padding(16, 4, 16, 4)
             };
             pnlInspectorFooter.Paint += (s, e) =>
             {
-                using (Pen borderPen = new Pen(Color.FromArgb(34, 43, 62), 1))
+                using (Pen borderPen = new Pen(ArgonTheme.BorderSubtle, 1))
                 {
                     e.Graphics.DrawLine(borderPen, 0, 0, pnlInspectorFooter.Width, 0);
                 }
@@ -11418,42 +17364,51 @@ namespace ArgonLatencyStudio
 
             lblInspectorTitle = new Label
             {
-                Text = "Hazır — Herhangi bir ayarın üzerine gelerek canlı Windows değerini, kayıt defteri yolunu ve teknik amacını inceleyebilirsiniz.",
-                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(56, 189, 248),
-                AutoSize = true,
-                Location = new Point(12, 5)
+                Text = "Hazır — Herhangi bir ayarın üzerine gelerek canlı Windows değerini ve kayıt yolunu inceleyebilirsiniz.",
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                ForeColor = ArgonTheme.Accent,
+                AutoSize = false,
+                AutoEllipsis = true,
+                Size = new Size(900, 17),
+                Location = new Point(16, 5),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                UseMnemonic = false
             };
             pnlInspectorFooter.Controls.Add(lblInspectorTitle);
 
             lblInspectorPath = new Label
             {
-                Text = "Canlı OS Algılama (Live OS Truth): Kayıt Defteri, Güç Planı, Win32 SPI ve Kernel gerçek zamanlı denetlenir.",
+                Text = "Canlı OS Doğrulaması: Kayıt Defteri, Güç Planı, Win32 SPI ve Kernel gerçek zamanlı denetlenir.",
                 Font = new Font("Consolas", 7.8f, FontStyle.Regular),
-                ForeColor = Color.FromArgb(148, 163, 184),
-                AutoSize = true,
-                Location = new Point(12, 24)
+                ForeColor = ArgonTheme.TextMuted,
+                AutoSize = false,
+                AutoEllipsis = true,
+                Size = new Size(900, 16),
+                Location = new Point(16, 23),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                UseMnemonic = false
             };
             pnlInspectorFooter.Controls.Add(lblInspectorPath);
 
-            // 5. Right Sidebar (NetAdapter Repair-style Network Settings, Hardware Telemetry & Live Audit Console)
-            BuildRightTelemetryAndNetworkSidebar();
-
-            // 6. Main Content Host (Left/Center Compact Table Workspace)
+            // 6. Main Content Host
             pnlContentHost = new Panel
             {
                 Dock = DockStyle.Fill,
-                BackColor = Color.FromArgb(13, 16, 23)
+                BackColor = ArgonTheme.BgCanvas
             };
             this.Controls.Add(pnlContentHost);
 
-            pnlRightSidebar.SendToBack();
-            pnlRebootWarningBanner.SendToBack();
-            pnlNavBar.SendToBack();
-            pnlTopHeader.SendToBack();
-            pnlInspectorFooter.SendToBack();
-            pnlContentHost.BringToFront();
+            // Exact Reverse Z-Order Docking (Highest index is processed FIRST by WinForms layout):
+            // MenuStrip -> TopToolbar -> LeftTreeNav -> BottomFooter -> RebootBanner -> DetailHeader -> ContentHost(Fill)
+            this.Controls.SetChildIndex(pnlContentHost, 0);
+            this.Controls.SetChildIndex(pnlDetailHeader, 1);
+            this.Controls.SetChildIndex(pnlRebootWarningBanner, 2);
+            this.Controls.SetChildIndex(pnlInspectorFooter, 3);
+            this.Controls.SetChildIndex(pnlLeftNav, 4);
+            this.Controls.SetChildIndex(pnlTopHeader, 5);
+            this.Controls.SetChildIndex(mnuMain, 6);
 
+            BuildSystemMonitorView();
             BuildProgressiveHardwareMatrixView();
             viewNetwork = BuildTweakCategoryFlowView("NETWORK");
             viewLatency = BuildTweakCategoryFlowView("LATENCY");
@@ -11467,291 +17422,944 @@ namespace ArgonLatencyStudio
             BuildSettingsView();
             BuildGlobalSearchView();
 
+            viewCustomizePage = new Panel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = ArgonTheme.BgCanvas,
+                Visible = false
+            };
+            pnlContentHost.Controls.Add(viewCustomizePage);
+
             // Record each card's original parent container for seamless global search
             foreach (var c in allCards)
             {
                 cardHomeContainers[c] = c.Parent;
             }
 
-            // Tray Menu
+            if (ArgonTheme.IsLightMode)
+            {
+                ApplyAdaptiveLightDarkNormalization(this);
+            }
+
+            // Clean Tray Menu (zero emojis)
             trayMenu = new ContextMenuStrip();
             trayMenu.Items.Add("Argon Studio v4.0 Penceresini Aç", null, (s, e) => { this.Show(); this.WindowState = FormWindowState.Normal; this.Activate(); });
             trayMenu.Items.Add(new ToolStripSeparator());
-            trayMenu.Items.Add("Seçili Donanım Matrisini Otomatik Uygula", null, (s, e) => ApplyHardwareAwareSmartTune());
-            trayMenu.Items.Add("Gerçek Windows Durumunu (Live OS) Algıla & Eşitle", null, (s, e) => ProbeAllTweaksLiveOsTruthAndOptionallySync(true));
-            trayMenu.Items.Add("Şimdi Akıllı RAM & Standby Temizle", null, (s, e) => ExecuteSmartRamAndStandbyPurge(true));
-            trayMenu.Items.Add("⚡ İşlemci Güç Yöneticisi (EPP / Boost / Core Parking)...", null, (s, e) => ShowAdvancedPowerPolicyDialog());
-            trayMenu.Items.Add("🎮 DWM / Flip Model & MPO Danışmanı...", null, (s, e) => ShowPresentationAdvisorDialog());
-            trayMenu.Items.Add("Makine Varsayılanlarına Döndür (Fabrika Sıfırla)", null, (s, e) => RevertAllActiveTweaksToOriginal());
+            trayMenu.Items.Add("Seçili Donanım Profilini Uygula", null, (s, e) => ApplyHardwareAwareSmartTune());
+            trayMenu.Items.Add("Canlı Windows Durumunu Eşitle", null, (s, e) => ProbeAllTweaksLiveOsTruthAndOptionallySync(true));
+            trayMenu.Items.Add("RAM ve DNS Önbelleğini Temizle", null, (s, e) => ExecuteSmartRamAndStandbyPurge(true));
+            trayMenu.Items.Add("İşlemci Güç Yöneticisi...", null, (s, e) => ShowAdvancedPowerPolicyDialog());
+            trayMenu.Items.Add("DWM ve Sunum Danışmanı...", null, (s, e) => ShowPresentationAdvisorDialog());
+            trayMenu.Items.Add("InputLab ve USB Topoloji...", null, (s, e) => ShowInputLabDiagnosticsDialog());
+            trayMenu.Items.Add("PCIe MSI ve Kesme Yöneticisi...", null, (s, e) => ShowInterruptMsiExplorerDialog());
+            trayMenu.Items.Add("Sanal Bellek Danışmanı...", null, (s, e) => ShowVirtualMemoryAdvisorDialog());
+            mnuTrayLinuxScroll = new ToolStripMenuItem("Linux-like Scroll: " + ((linuxScrollEngine != null && linuxScrollEngine.IsRunning) ? "Aktif" : "Kapalı"));
+            mnuTrayLinuxScroll.Checked = (linuxScrollEngine != null && linuxScrollEngine.IsRunning);
+            mnuTrayLinuxScroll.Click += (s, e) => ToggleLinuxlikeScroll();
+            trayMenu.Items.Add(mnuTrayLinuxScroll);
+            trayMenu.Items.Add("Fabrika Varsayılanlarına Döndür", null, (s, e) => RevertAllActiveTweaksToOriginal());
             trayMenu.Items.Add(new ToolStripSeparator());
             mnuRevertOnExit = new ToolStripMenuItem("Çıkışta varsayılanlara dön");
             mnuRevertOnExit.CheckOnClick = true;
             mnuRevertOnExit.Checked = revertOnExit;
             mnuRevertOnExit.CheckedChanged += (s, e) => SetRevertOnExit(mnuRevertOnExit.Checked);
             trayMenu.Items.Add(mnuRevertOnExit);
-            mnuExit = new ToolStripMenuItem("Programdan Çık (Açık Ayarlar Sabit Kalır)");
+            mnuExit = new ToolStripMenuItem("Programdan Çık (Ayarlar Korunur)");
             mnuExit.Click += (s, e) => this.Close();
             trayMenu.Items.Add(mnuExit);
             UpdateExitMenuText();
 
             trayIcon = new NotifyIcon
             {
-                Text = "Argon Low Latency Studio v4.0",
+                Text = "Argon Studio v4.0",
                 Icon = appIcon,
                 ContextMenuStrip = trayMenu,
                 Visible = true
             };
             trayIcon.DoubleClick += (s, e) => { this.Show(); this.WindowState = FormWindowState.Normal; this.Activate(); };
 
+            this.HandleCreated += (s, e) =>
+            {
+                if (currentActiveTabIndex == 8 && card3RawHook != null)
+                {
+                    card3RawHook.AttachAndRegister(this.Handle);
+                    if (card3RawUiTimer != null) card3RawUiTimer.Start();
+                }
+            };
+            this.HandleDestroyed += (s, e) =>
+            {
+                if (card3RawUiTimer != null) card3RawUiTimer.Stop();
+                if (card3RawHook != null) card3RawHook.UnregisterAndDetach();
+            };
             this.FormClosing += (s, e) =>
             {
                 PerformCleanShutdownKeepSettings();
             };
 
-            int osMaj, osMin, osBuild, osUbr;
-            string osDispVer;
-            NativeMethods.GetRealOsVersionInfo(out osMaj, out osMin, out osBuild, out osUbr, out osDispVer);
-            string osFriendly = (osMaj >= 10 && osBuild >= 22000) ? "Windows 11" : string.Format("Windows {0}.{1}", osMaj, osMin);
-            AppendConsoleLog(string.Format("{0} {1} (Build {2}.{3}, {4})", osFriendly, osDispVer, osBuild, osUbr, Environment.Is64BitOperatingSystem ? "64-bit" : "32-bit").Replace("  ", " "));
-            AppendConsoleLog("Argon Latency Studio v4.0 Yüklendi — Yetki: " + (isAdmin ? "Yönetici (Administrator)" : "Standart Kullanıcı"));
-            AppendConsoleLog(string.Format("Algılanan CPU: {0} ({1}C/{2}T)", detectedHw.CpuName, detectedHw.PhysicalCores, detectedHw.LogicalThreads));
-            AppendConsoleLog("Algılanan GPU: " + detectedHw.GpuName);
+            AppendConsoleLog(string.IsNullOrEmpty(detectedHw.OsDisplayTitle) ? "Windows Başlatıldı" : detectedHw.OsDisplayTitle);
+            AppendConsoleLog("Argon Studio v4.0 Hazır — Yetki: " + (isAdmin ? "Yönetici" : "Standart Kullanıcı"));
+            AppendConsoleLog(string.Format("CPU: {0} ({1}C/{2}T)", detectedHw.CpuName, detectedHw.PhysicalCores, detectedHw.LogicalThreads));
+            AppendConsoleLog("GPU: " + detectedHw.GpuName);
             ProbeLiveNetworkSidebarDetails();
 
-            SwitchActiveTab(0);
+            RebuildBookmarksMenuAndTree();
+            NavigateToPageKey("tab:11", true);
             RefreshHardwareMatrixCards();
         }
 
-        private void BuildRightTelemetryAndNetworkSidebar()
+        private void BuildSystemMonitorView()
         {
-            pnlRightSidebar = new Panel
+            viewSystemMonitor = new Panel
             {
-                Dock = DockStyle.Right,
-                Width = 420,
-                BackColor = Color.FromArgb(16, 20, 29),
-                Padding = new Padding(10, 8, 10, 8)
+                Dock = DockStyle.Fill,
+                AutoScroll = true,
+                BackColor = ArgonTheme.BgCanvas,
+                Padding = new Padding(22, 16, 22, 20),
+                Visible = true
             };
-            pnlRightSidebar.Paint += (s, e) =>
-            {
-                using (Pen p = new Pen(Color.FromArgb(34, 43, 62), 1))
-                {
-                    e.Graphics.DrawLine(p, 0, 0, 0, pnlRightSidebar.Height);
-                }
-            };
-            this.Controls.Add(pnlRightSidebar);
+            pnlContentHost.Controls.Add(viewSystemMonitor);
+            sidebarRowLabels.Clear();
 
-            // Top Section: Network & Hardware Key-Value Grid (Fixed Height 398px)
-            Panel pnlSidebarTopGrid = new Panel
+            TableLayoutPanel tblStack = new TableLayoutPanel
             {
                 Dock = DockStyle.Top,
-                Height = 398,
-                BackColor = Color.FromArgb(16, 20, 29)
-            };
-            pnlRightSidebar.Controls.Add(pnlSidebarTopGrid);
-
-            // Group 1 Header: Current Network Settings + Ping IP / Ping DNS / Flush / Refresh buttons
-            grpNetAdapter = new Label
-            {
-                Text = Loc.T("AĞ ADAPTÖRÜ VE BAĞLANTI", "NETWORK & ADAPTER"),
-                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(56, 189, 248),
                 AutoSize = true,
-                Location = new Point(2, 4),
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 1,
+                RowCount = 3,
+                BackColor = ArgonTheme.BgCanvas,
+                Margin = new Padding(0),
+                Padding = new Padding(0)
+            };
+            tblStack.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            tblStack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            tblStack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            tblStack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            viewSystemMonitor.Controls.Add(tblStack);
+
+            // ── 1. OVERVIEW HEADER CARD ─────────────────────────────────────────
+            Panel pnlOverview = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 112,
+                BackColor = ArgonTheme.BgSurface,
+                Margin = new Padding(0, 0, 0, 14),
+                Padding = new Padding(18, 14, 18, 12)
+            };
+            pnlOverview.Paint += (s, e) =>
+            {
+                using (Pen p = new Pen(ArgonTheme.BorderSubtle, 1))
+                    e.Graphics.DrawRectangle(p, 0, 0, pnlOverview.Width - 1, pnlOverview.Height - 1);
+            };
+            tblStack.Controls.Add(pnlOverview, 0, 0);
+
+            PictureBox picSysIcon = new PictureBox
+            {
+                Size = new Size(28, 28),
+                Location = new Point(18, 14),
+                SizeMode = PictureBoxSizeMode.CenterImage,
+                Image = ArgonIconPack.GetIcon("windows", ArgonTheme.Accent, 22),
+                BackColor = Color.Transparent
+            };
+            pnlOverview.Controls.Add(picSysIcon);
+
+            lblMonitorTitle = new Label
+            {
+                Text = Loc.T("Bilgisayar Özellikleri ve Sistem Monitörü", "Hardware Specifications & System Monitor"),
+                Font = new Font("Segoe UI Semibold", 11.5f, FontStyle.Bold),
+                ForeColor = ArgonTheme.TextPrimary,
+                AutoSize = true,
+                Location = new Point(54, 12),
                 UseMnemonic = false
             };
-            pnlSidebarTopGrid.Controls.Add(grpNetAdapter);
+            pnlOverview.Controls.Add(lblMonitorTitle);
 
-            btnSidePingIp = CreateActionButton(pnlSidebarTopGrid, 152, 1, 62, 21, "Ping IP", Color.FromArgb(30, 41, 59));
-            btnSidePingIp.Font = new Font("Segoe UI", 7.2f, FontStyle.Bold);
+            lblMonitorSub = new Label
+            {
+                Text = Loc.T("Algılanan tüm sistem bileşenleri, bellek profilleri, görüntü çıkışları ve anlık sensör telemetrisi.",
+                    "Detected hardware inventory, memory configuration, display outputs, and live sensor telemetry."),
+                Font = new Font("Segoe UI", 8.5f, FontStyle.Regular),
+                ForeColor = ArgonTheme.TextMuted,
+                AutoSize = true,
+                Location = new Point(54, 34),
+                UseMnemonic = false
+            };
+            pnlOverview.Controls.Add(lblMonitorSub);
+
+            Button btnMonRefresh = CreateActionButton(pnlOverview, 0, 14, 108, 30,
+                Loc.T("  Yenile", "  Refresh"), ArgonTheme.BgSurfaceAlt);
+            btnMonRefresh.ForeColor = ArgonTheme.TextPrimary;
+            btnMonRefresh.Font = new Font("Segoe UI", 8.4f, FontStyle.Bold);
+            btnMonRefresh.FlatAppearance.BorderSize = 1;
+            btnMonRefresh.FlatAppearance.BorderColor = ArgonTheme.BorderSubtle;
+            btnMonRefresh.Image = ArgonIconPack.GetIcon("refresh", ArgonTheme.TextSecondary, 14);
+            btnMonRefresh.ImageAlign = ContentAlignment.MiddleLeft;
+            btnMonRefresh.TextAlign = ContentAlignment.MiddleCenter;
+            btnMonRefresh.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            btnMonRefresh.Click += (s, e) =>
+            {
+                if (detectedHw != null) detectedHw.ProbeExtendedHardwareSpecs();
+                ProbeLiveNetworkSidebarDetails();
+                RunAsyncPingCheck();
+                PopulateSystemMonitorStaticSpecs();
+                UpdateSystemMonitorLiveTelemetry();
+                AppendConsoleLog(Loc.T("Donanım ve ağ sensör envanteri yenilendi.", "Hardware & network inventory refreshed."));
+            };
+
+            Button btnGoOptimize = CreateActionButton(pnlOverview, 0, 14, 166, 30,
+                Loc.T("  Donanım Ayarları", "  Hardware Tuning"), ArgonTheme.Accent);
+            btnGoOptimize.ForeColor = Color.White;
+            btnGoOptimize.Font = new Font("Segoe UI", 8.4f, FontStyle.Bold);
+            btnGoOptimize.Image = ArgonIconPack.GetIcon("sliders", Color.White, 14);
+            btnGoOptimize.ImageAlign = ContentAlignment.MiddleLeft;
+            btnGoOptimize.TextAlign = ContentAlignment.MiddleCenter;
+            btnGoOptimize.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            btnGoOptimize.Click += (s, e) => SwitchActiveTab(0);
+
+            pnlOverview.Resize += (s, e) =>
+            {
+                int w = pnlOverview.ClientSize.Width;
+                btnGoOptimize.Location = new Point(Math.Max(420, w - 18 - btnGoOptimize.Width), 14);
+                btnMonRefresh.Location = new Point(btnGoOptimize.Left - 8 - btnMonRefresh.Width, 14);
+            };
+            btnGoOptimize.Location = new Point(Math.Max(420, 1080 - 18 - btnGoOptimize.Width), 14);
+            btnMonRefresh.Location = new Point(btnGoOptimize.Left - 8 - btnMonRefresh.Width, 14);
+
+            // 4 clean overview KPI strips on bottom of Overview Card
+            TableLayoutPanel tblKpi = new TableLayoutPanel
+            {
+                Location = new Point(18, 62),
+                Size = new Size(1040, 38),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                ColumnCount = 4,
+                RowCount = 1,
+                BackColor = ArgonTheme.BgSurfaceHover
+            };
+            for (int i = 0; i < 4; i++) tblKpi.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25f));
+            pnlOverview.Controls.Add(tblKpi);
+
+            monSysOsVal = CreateMonitorKpiCell(tblKpi, 0, Loc.T("İŞLETİM SİSTEMİ", "OPERATING SYSTEM"), "--");
+            monSysPlanVal = CreateMonitorKpiCell(tblKpi, 1, Loc.T("GÜÇ PLANI / YETKİ", "POWER PLAN / MODE"), "--");
+            monSysTimerVal = CreateMonitorKpiCell(tblKpi, 2, Loc.T("ÇEKİRDEK ZAMANLAYICI", "KERNEL TIMER"), "--");
+            monSysActiveVal = CreateMonitorKpiCell(tblKpi, 3, Loc.T("AKTİF OPTİMİZASYON", "ACTIVE TUNINGS"), "--");
+
+            // ── 2. ROW 1: CPU & GPU CARDS ───────────────────────────────────────
+            TableLayoutPanel tblRow1 = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                Height = 296,
+                ColumnCount = 2,
+                RowCount = 1,
+                BackColor = ArgonTheme.BgCanvas,
+                Margin = new Padding(0, 0, 0, 14)
+            };
+            tblRow1.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
+            tblRow1.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
+            tblRow1.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+            tblStack.Controls.Add(tblRow1, 0, 1);
+
+            Panel cardCpu = CreateMonitorCardPanel(new Padding(0, 0, 7, 0));
+            tblRow1.Controls.Add(cardCpu, 0, 0);
+
+            PictureBox picCpuBrand = new PictureBox
+            {
+                Size = new Size(42, 42),
+                Location = new Point(16, 14),
+                SizeMode = PictureBoxSizeMode.CenterImage,
+                Image = ArgonIconPack.GetVendorBadgeIcon(detectedHw != null ? detectedHw.CpuName : "", 34),
+                BackColor = ArgonTheme.BgSurfaceHover
+            };
+            cardCpu.Controls.Add(picCpuBrand);
+
+            lblMonCpuHdr = new Label
+            {
+                Text = Loc.T("İŞLEMCİ (CPU)", "PROCESSOR (CPU)"),
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                ForeColor = ArgonTheme.Accent,
+                AutoSize = true,
+                Location = new Point(68, 13),
+                UseMnemonic = false
+            };
+            cardCpu.Controls.Add(lblMonCpuHdr);
+
+            txtHwCpuName = new TextBox
+            {
+                ReadOnly = true,
+                BorderStyle = BorderStyle.None,
+                BackColor = ArgonTheme.BgSurface,
+                ForeColor = ArgonTheme.TextPrimary,
+                Font = new Font("Segoe UI Semibold", 10.2f, FontStyle.Bold),
+                Location = new Point(68, 30),
+                Size = new Size(420, 22),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                Text = detectedHw != null ? string.Format("{0} ({1}C / {2}T)", detectedHw.CpuName, detectedHw.PhysicalCores, detectedHw.LogicalThreads) : "--"
+            };
+            cardCpu.Controls.Add(txtHwCpuName);
+
+            int cy = 66;
+            Label monCpuCoresLbl;
+            CreateMonitorLabelRow(cardCpu, Loc.T("Soket & Çekirdek", "Socket & Cores"), ref cy, ArgonTheme.TextPrimary, out monCpuCoresLbl);
+            monCpuCoresLbl.Tag = "STATIC_CPU_CORES";
+
+            Label monCpuCacheLbl;
+            CreateMonitorLabelRow(cardCpu, Loc.T("Önbellek & Turbo", "Cache & Max Clock"), ref cy, ArgonTheme.TextSecondary, out monCpuCacheLbl);
+            monCpuCacheLbl.Tag = "STATIC_CPU_CACHE";
+
+            CreateMonitorLabelRow(cardCpu, Loc.T("Paket Sıcaklığı", "Package Temp"), ref cy, ArgonTheme.TextPrimary, out monCpuTempVal);
+            CreateMonitorLabelRow(cardCpu, Loc.T("Toplam Yük", "Total Load"), ref cy, ArgonTheme.Accent, out monCpuLoadVal);
+            monCpuLoadBar = CreateMonitorBarPanel(cardCpu, cy - 2, () => monCpuLoadPct, ArgonTheme.Accent);
+            cy += 14;
+            CreateMonitorLabelRow(cardCpu, Loc.T("Saat / Çekirdek V", "Clock / Core V"), ref cy, ArgonTheme.TextPrimary, out monCpuClockVal);
+            CreateMonitorLabelRow(cardCpu, Loc.T("Paket Gücü", "Package Power"), ref cy, ArgonTheme.TextSecondary, out monCpuPowerVal);
+            txtHwCpuTelemetry = CreateMonitorTextBoxRow(cardCpu, Loc.T("Canlı Özet", "Live Summary"), ref cy, ArgonTheme.TextMuted);
+
+            // GPU Card
+            Panel cardGpu = CreateMonitorCardPanel(new Padding(7, 0, 0, 0));
+            tblRow1.Controls.Add(cardGpu, 1, 0);
+
+            PictureBox picGpuBrand = new PictureBox
+            {
+                Size = new Size(42, 42),
+                Location = new Point(16, 14),
+                SizeMode = PictureBoxSizeMode.CenterImage,
+                Image = ArgonIconPack.GetVendorBadgeIcon(detectedHw != null ? detectedHw.GpuName : "", 34),
+                BackColor = ArgonTheme.BgSurfaceHover
+            };
+            cardGpu.Controls.Add(picGpuBrand);
+
+            lblMonGpuHdr = new Label
+            {
+                Text = Loc.T("EKRAN KARTI (GPU)", "GRAPHICS ADAPTER (GPU)"),
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                ForeColor = ArgonTheme.Accent,
+                AutoSize = true,
+                Location = new Point(68, 13),
+                UseMnemonic = false
+            };
+            cardGpu.Controls.Add(lblMonGpuHdr);
+
+            txtHwGpuName = new TextBox
+            {
+                ReadOnly = true,
+                BorderStyle = BorderStyle.None,
+                BackColor = ArgonTheme.BgSurface,
+                ForeColor = ArgonTheme.TextPrimary,
+                Font = new Font("Segoe UI Semibold", 10.2f, FontStyle.Bold),
+                Location = new Point(68, 30),
+                Size = new Size(420, 22),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                Text = detectedHw != null ? detectedHw.GpuName : "--"
+            };
+            cardGpu.Controls.Add(txtHwGpuName);
+
+            int gy = 66;
+            Label monGpuDriverLbl;
+            CreateMonitorLabelRow(cardGpu, Loc.T("Sürücü / VRAM", "Driver / VRAM"), ref gy, ArgonTheme.TextPrimary, out monGpuDriverLbl);
+            monGpuDriverLbl.Tag = "STATIC_GPU_DRIVER";
+
+            CreateMonitorLabelRow(cardGpu, Loc.T("Core Sıcaklık", "Core Temp"), ref gy, ArgonTheme.TextPrimary, out monGpuTempVal);
+            CreateMonitorLabelRow(cardGpu, Loc.T("Hotspot / Bellek", "Hotspot / Memory"), ref gy, ArgonTheme.TextSecondary, out monGpuHotspotVal);
+            CreateMonitorLabelRow(cardGpu, Loc.T("GPU Yükü", "GPU Load"), ref gy, ArgonTheme.Accent, out monGpuLoadVal);
+            monGpuLoadBar = CreateMonitorBarPanel(cardGpu, gy - 2, () => monGpuLoadPct, ArgonTheme.Accent);
+            cy = gy + 14;
+            gy += 14;
+            CreateMonitorLabelRow(cardGpu, Loc.T("Çekirdek / Bellek Hz", "Core / Mem Clock"), ref gy, ArgonTheme.TextPrimary, out monGpuClockVal);
+            CreateMonitorLabelRow(cardGpu, Loc.T("Güç & Fan RPM", "Power & Fan RPM"), ref gy, ArgonTheme.TextSecondary, out monGpuPowerFanVal);
+            CreateMonitorLabelRow(cardGpu, Loc.T("Ayrılmış VRAM", "Dedicated VRAM"), ref gy, ArgonTheme.TextSecondary, out monGpuVramVal);
+            txtHwGpuTelemetry = new TextBox { Visible = false, Text = "--" };
+            cardGpu.Controls.Add(txtHwGpuTelemetry);
+
+            // ── 3. ROW 2: MEMORY & BOARD / STORAGE  |  NETWORK & DISPLAYS ───────
+            TableLayoutPanel tblRow2 = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                Height = 352,
+                ColumnCount = 2,
+                RowCount = 1,
+                BackColor = ArgonTheme.BgCanvas,
+                Margin = new Padding(0, 0, 0, 8)
+            };
+            tblRow2.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
+            tblRow2.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
+            tblRow2.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+            tblStack.Controls.Add(tblRow2, 0, 2);
+
+            // Left Card: Memory, Motherboard, BIOS, Storage
+            Panel cardMemBoard = CreateMonitorCardPanel(new Padding(0, 0, 7, 0));
+            tblRow2.Controls.Add(cardMemBoard, 0, 0);
+
+            PictureBox picRamIcon = new PictureBox
+            {
+                Size = new Size(34, 34),
+                Location = new Point(16, 14),
+                SizeMode = PictureBoxSizeMode.CenterImage,
+                Image = ArgonIconPack.GetIcon("memory", ArgonTheme.Accent, 20),
+                BackColor = ArgonTheme.BgSurfaceHover
+            };
+            cardMemBoard.Controls.Add(picRamIcon);
+
+            lblMonRamHdr = new Label
+            {
+                Text = Loc.T("BELLEK, ANAKART VE DEPOLAMA", "MEMORY, MOTHERBOARD & STORAGE"),
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                ForeColor = ArgonTheme.Accent,
+                AutoSize = true,
+                Location = new Point(60, 21),
+                UseMnemonic = false
+            };
+            cardMemBoard.Controls.Add(lblMonRamHdr);
+
+            int my = 58;
+            CreateMonitorLabelRow(cardMemBoard, Loc.T("Bellek Kapasitesi", "Total Memory"), ref my, ArgonTheme.TextPrimary, out monRamCapVal);
+            CreateMonitorLabelRow(cardMemBoard, Loc.T("Tip & Hız (DIMM)", "Type & Speed"), ref my, ArgonTheme.TextSecondary, out monRamSpecVal);
+            CreateMonitorLabelRow(cardMemBoard, Loc.T("Anlık Kullanım", "Live Usage"), ref my, ArgonTheme.Accent, out monRamLiveVal);
+            monRamLoadBar = CreateMonitorBarPanel(cardMemBoard, my - 2, () => monRamLoadPct, ArgonTheme.Accent);
+            my += 14;
+            txtHwRamUsage = new TextBox { Visible = false, Text = "--" };
+            cardMemBoard.Controls.Add(txtHwRamUsage);
+            txtHwTimerActive = new TextBox { Visible = false, Text = "--" };
+            cardMemBoard.Controls.Add(txtHwTimerActive);
+
+            CreateMonitorMultilineRow(cardMemBoard, Loc.T("Bellek Yuvaları", "Memory Slots"), ref my, 46, ArgonTheme.TextSecondary, out monRamSlotsVal);
+
+            lblMonBoardHdr = new Label
+            {
+                Text = Loc.T("PLATFORM & DİSKLER", "PLATFORM & DRIVES"),
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
+                ForeColor = ArgonTheme.TextMuted,
+                AutoSize = true,
+                Location = new Point(16, my + 2),
+                UseMnemonic = false
+            };
+            cardMemBoard.Controls.Add(lblMonBoardHdr);
+            my += 22;
+
+            CreateMonitorLabelRow(cardMemBoard, Loc.T("Anakart", "Motherboard"), ref my, ArgonTheme.TextPrimary, out monBoardVal);
+            CreateMonitorLabelRow(cardMemBoard, Loc.T("BIOS Sürümü", "BIOS Version"), ref my, ArgonTheme.TextSecondary, out monBiosVal);
+            CreateMonitorMultilineRow(cardMemBoard, Loc.T("Depolama (SMART)", "Storage & Temp"), ref my, 52, ArgonTheme.TextSecondary, out monStorageVal);
+
+            // Right Card: Network Adapter, Ping Diagnostics & Connected Displays
+            Panel cardNetDisp = CreateMonitorCardPanel(new Padding(7, 0, 0, 0));
+            tblRow2.Controls.Add(cardNetDisp, 1, 0);
+
+            PictureBox picNetIcon = new PictureBox
+            {
+                Size = new Size(34, 34),
+                Location = new Point(16, 14),
+                SizeMode = PictureBoxSizeMode.CenterImage,
+                Image = ArgonIconPack.GetIcon("network", ArgonTheme.Accent, 20),
+                BackColor = ArgonTheme.BgSurfaceHover
+            };
+            cardNetDisp.Controls.Add(picNetIcon);
+
+            lblMonNetHdr = new Label
+            {
+                Text = Loc.T("AĞ ADAPTÖRÜ & GÖRÜNTÜ ÇIKIŞLARI", "NETWORK ADAPTER & DISPLAYS"),
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                ForeColor = ArgonTheme.Accent,
+                AutoSize = true,
+                Location = new Point(60, 21),
+                UseMnemonic = false
+            };
+            cardNetDisp.Controls.Add(lblMonNetHdr);
+
+            // Quick network actions aligned neatly in bottom right or header row
+            FlowLayoutPanel flwNetActions = new FlowLayoutPanel
+            {
+                Location = new Point(16, 54),
+                Size = new Size(490, 28),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false,
+                BackColor = ArgonTheme.BgSurface
+            };
+            cardNetDisp.Controls.Add(flwNetActions);
+
+            btnSidePingIp = CreateActionButton(flwNetActions, 0, 0, 82, 24, "Ping 1.1.1.1", ArgonTheme.BgSurfaceHover);
+            btnSidePingIp.Font = new Font("Segoe UI", 7.8f, FontStyle.Bold);
+            btnSidePingIp.ForeColor = ArgonTheme.TextPrimary;
             btnSidePingIp.FlatAppearance.BorderSize = 1;
-            btnSidePingIp.FlatAppearance.BorderColor = Color.FromArgb(56, 189, 248);
-            btnSidePingIp.UseMnemonic = false;
-            mainToolTip.SetToolTip(btnSidePingIp, "Cloudflare (1.1.1.1) omurgasına anlık ICMP Ping gönderir ve sonucu konsola yazar.");
+            btnSidePingIp.FlatAppearance.BorderColor = ArgonTheme.BorderSubtle;
+            btnSidePingIp.Margin = new Padding(0, 0, 6, 0);
             btnSidePingIp.Click += (s, e) => RunQuickSidebarPingTarget("1.1.1.1", "Cloudflare IP");
 
-            btnSidePingDns = CreateActionButton(pnlSidebarTopGrid, 218, 1, 66, 21, "Ping DNS", Color.FromArgb(30, 41, 59));
-            btnSidePingDns.Font = new Font("Segoe UI", 7.2f, FontStyle.Bold);
+            btnSidePingDns = CreateActionButton(flwNetActions, 0, 0, 82, 24, "Ping 8.8.8.8", ArgonTheme.BgSurfaceHover);
+            btnSidePingDns.Font = new Font("Segoe UI", 7.8f, FontStyle.Bold);
+            btnSidePingDns.ForeColor = ArgonTheme.TextPrimary;
             btnSidePingDns.FlatAppearance.BorderSize = 1;
-            btnSidePingDns.FlatAppearance.BorderColor = Color.FromArgb(52, 211, 153);
-            btnSidePingDns.UseMnemonic = false;
-            mainToolTip.SetToolTip(btnSidePingDns, "Google Public DNS (8.8.8.8) sunucusuna anlık ICMP Ping gönderir ve sonucu konsola yazar.");
+            btnSidePingDns.FlatAppearance.BorderColor = ArgonTheme.BorderSubtle;
+            btnSidePingDns.Margin = new Padding(0, 0, 6, 0);
             btnSidePingDns.Click += (s, e) => RunQuickSidebarPingTarget("8.8.8.8", "Google DNS");
 
-            btnSideFlush = CreateActionButton(pnlSidebarTopGrid, 288, 1, 46, 21, Loc.T("Temizle", "Clear"), Color.FromArgb(30, 41, 59));
-            btnSideFlush.Font = new Font("Segoe UI", 7.2f, FontStyle.Bold);
+            btnSideFlush = CreateActionButton(flwNetActions, 0, 0, 126, 24, Loc.T("DNS/ARP Temizle", "Flush DNS/ARP"), ArgonTheme.BgSurfaceHover);
+            btnSideFlush.Font = new Font("Segoe UI", 7.8f, FontStyle.Bold);
+            btnSideFlush.ForeColor = ArgonTheme.TextSecondary;
             btnSideFlush.FlatAppearance.BorderSize = 1;
-            btnSideFlush.FlatAppearance.BorderColor = Color.FromArgb(148, 163, 184);
-            btnSideFlush.UseMnemonic = false;
-            mainToolTip.SetToolTip(btnSideFlush, "DNS önbelleğini (FlushDNS) ve ARP tablosunu anında temizler.");
+            btnSideFlush.FlatAppearance.BorderColor = ArgonTheme.BorderSubtle;
+            btnSideFlush.Margin = new Padding(0, 0, 6, 0);
             btnSideFlush.Click += (s, e) =>
             {
                 ExecuteInstantNetworkQueueFlush();
-                AppendConsoleLog("DNS Çözümleyici Önbelleği ve ARP tablosu temizlendi.");
+                AppendConsoleLog(Loc.T("DNS Çözümleyici Önbelleği ve ARP tablosu temizlendi.", "DNS resolver cache and ARP table flushed."));
             };
 
-            btnSideRefreshNet = CreateActionButton(pnlSidebarTopGrid, 338, 1, 24, 21, "↻", Color.FromArgb(16, 185, 129));
-            btnSideRefreshNet.ForeColor = Color.Black;
-            btnSideRefreshNet.Font = new Font("Segoe UI", 8.0f, FontStyle.Bold);
-            btnSideRefreshNet.UseMnemonic = false;
-            mainToolTip.SetToolTip(btnSideRefreshNet, "Ağ adaptörü, IP, Gateway, DNS ve Ping bilgilerini yeniler.");
+            btnSideRefreshNet = CreateActionButton(flwNetActions, 0, 0, 74, 24, Loc.T("Yenile", "Refresh"), ArgonTheme.BgSurfaceHover);
+            btnSideRefreshNet.Font = new Font("Segoe UI", 7.8f, FontStyle.Bold);
+            btnSideRefreshNet.ForeColor = ArgonTheme.Accent;
+            btnSideRefreshNet.FlatAppearance.BorderSize = 1;
+            btnSideRefreshNet.FlatAppearance.BorderColor = ArgonTheme.BorderSubtle;
             btnSideRefreshNet.Click += (s, e) =>
             {
                 ProbeLiveNetworkSidebarDetails();
                 RunAsyncPingCheck();
-                AppendConsoleLog("Ağ adaptörü ve telemetri bilgileri güncellendi.");
+                AppendConsoleLog(Loc.T("Ağ adaptörü ve telemetri bilgileri güncellendi.", "Network adapter & telemetry refreshed."));
             };
 
-            Action layoutSidebarTopButtons = () =>
-            {
-                int curW = pnlSidebarTopGrid.ClientSize.Width > 0 ? pnlSidebarTopGrid.ClientSize.Width : 400;
-                int rx = curW - 2;
-
-                btnSideRefreshNet.Size = new Size(24, 22);
-                rx -= btnSideRefreshNet.Width;
-                btnSideRefreshNet.Location = new Point(rx, 1);
-                rx -= 4;
-
-                int fW = Math.Max(60, btnSideFlush.PreferredSize.Width + 10);
-                rx -= fW;
-                btnSideFlush.Size = new Size(fW, 22);
-                btnSideFlush.Location = new Point(rx, 1);
-                rx -= 4;
-
-                int pdW = Math.Max(72, btnSidePingDns.PreferredSize.Width + 10);
-                rx -= pdW;
-                btnSidePingDns.Size = new Size(pdW, 22);
-                btnSidePingDns.Location = new Point(rx, 1);
-                rx -= 4;
-
-                int piW = Math.Max(62, btnSidePingIp.PreferredSize.Width + 10);
-                rx -= piW;
-                btnSidePingIp.Size = new Size(piW, 22);
-                btnSidePingIp.Location = new Point(rx, 1);
-            };
-            pnlSidebarTopGrid.Resize += (s, e) => layoutSidebarTopButtons();
-            layoutSidebarTopButtons();
-
-            int ry = 27;
-            txtNetHostAdmin = CreateSidebarReadOnlyRow(pnlSidebarTopGrid, "Sistem / Yetki", ref ry, Color.FromArgb(226, 232, 240));
-            txtNetAdapter = CreateSidebarReadOnlyRow(pnlSidebarTopGrid, "Ağ Adaptörü", ref ry, Color.FromArgb(56, 189, 248));
-            txtNetLocalIp = CreateSidebarReadOnlyRow(pnlSidebarTopGrid, "Yerel IPv4 / Maske", ref ry, Color.FromArgb(226, 232, 240));
-            txtNetGateway = CreateSidebarReadOnlyRow(pnlSidebarTopGrid, "Varsayılan Geçit", ref ry, Color.FromArgb(203, 213, 225));
-            txtNetDns = CreateSidebarReadOnlyRow(pnlSidebarTopGrid, "DNS Sunucuları", ref ry, Color.FromArgb(52, 211, 153));
-            txtNetMac = CreateSidebarReadOnlyRow(pnlSidebarTopGrid, "MAC (Fiziksel)", ref ry, Color.FromArgb(203, 213, 225));
-            txtNetPingLive = CreateSidebarReadOnlyRow(pnlSidebarTopGrid, "Canlı Ping / RTT", ref ry, Color.FromArgb(52, 211, 153));
-
-            ry += 6;
-            lblHwHdr = new Label
-            {
-                Text = Loc.T("DONANIM İZLEME", "HARDWARE MONITOR"),
-                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(251, 191, 36),
-                AutoSize = true,
-                Location = new Point(2, ry)
-            };
-            pnlSidebarTopGrid.Controls.Add(lblHwHdr);
-            ry += 20;
-
-            txtHwCpuName = CreateSidebarReadOnlyRow(pnlSidebarTopGrid, "İşlemci (CPU)", ref ry, Color.FromArgb(226, 232, 240));
-            txtHwCpuTelemetry = CreateSidebarReadOnlyRow(pnlSidebarTopGrid, "CPU Sıcaklık / Yük", ref ry, Color.FromArgb(251, 146, 60));
-            txtHwGpuName = CreateSidebarReadOnlyRow(pnlSidebarTopGrid, "Ekran Kartı (GPU)", ref ry, Color.FromArgb(226, 232, 240));
-            txtHwGpuTelemetry = CreateSidebarReadOnlyRow(pnlSidebarTopGrid, "GPU Core / Hotspot", ref ry, Color.FromArgb(52, 211, 153));
-            txtHwRamUsage = CreateSidebarReadOnlyRow(pnlSidebarTopGrid, "Sistem Belleği", ref ry, Color.FromArgb(251, 191, 36));
-            txtHwTimerActive = CreateSidebarReadOnlyRow(pnlSidebarTopGrid, "Timer & Aktif Ayar", ref ry, Color.FromArgb(56, 189, 248));
-
-            txtHwCpuName.Text = string.Format("{0} ({1}C/{2}T)", detectedHw.CpuName, detectedHw.PhysicalCores, detectedHw.LogicalThreads);
-            txtHwGpuName.Text = detectedHw.GpuName;
-
-            // Bottom Footer of Right Sidebar: Network Traffic Stats (Sent / Received MB)
-            Panel pnlSidebarTrafficFooter = new Panel
-            {
-                Dock = DockStyle.Bottom,
-                Height = 22,
-                BackColor = Color.FromArgb(16, 20, 29)
-            };
-            pnlRightSidebar.Controls.Add(pnlSidebarTrafficFooter);
+            int ny = 88;
+            txtNetHostAdmin = CreateMonitorTextBoxRow(cardNetDisp, Loc.T("Makine / Yetki", "Host / Privilege"), ref ny, ArgonTheme.TextSecondary);
+            txtNetAdapter = CreateMonitorTextBoxRow(cardNetDisp, Loc.T("Ağ Adaptörü", "Network Adapter"), ref ny, ArgonTheme.TextPrimary);
+            CreateMonitorLabelRow(cardNetDisp, Loc.T("Bağlantı Hızı", "Link Speed"), ref ny, ArgonTheme.Accent, out monNicSpeedVal);
+            txtNetLocalIp = CreateMonitorTextBoxRow(cardNetDisp, Loc.T("IPv4 / Maske", "IPv4 / Mask"), ref ny, ArgonTheme.TextPrimary);
+            txtNetGateway = CreateMonitorTextBoxRow(cardNetDisp, Loc.T("Varsayılan Geçit", "Default Gateway"), ref ny, ArgonTheme.TextSecondary);
+            txtNetDns = CreateMonitorTextBoxRow(cardNetDisp, Loc.T("DNS Sunucuları", "DNS Servers"), ref ny, ArgonTheme.TextSecondary);
+            txtNetMac = CreateMonitorTextBoxRow(cardNetDisp, Loc.T("MAC Adresi", "Physical MAC"), ref ny, ArgonTheme.TextMuted);
+            txtNetPingLive = CreateMonitorTextBoxRow(cardNetDisp, Loc.T("Canlı Ping / RTT", "Live Ping / RTT"), ref ny, ArgonTheme.Accent);
+            CreateMonitorMultilineRow(cardNetDisp, Loc.T("Ekranlar", "Displays"), ref ny, 38, ArgonTheme.TextSecondary, out monDisplaysVal);
 
             lblNetTrafficStats = new Label
             {
-                Text = "Ağ Trafiği: Gönderilen: -- MB | Alınan: -- MB",
-                Font = new Font("Consolas", 7.6f, FontStyle.Regular),
-                ForeColor = Color.FromArgb(148, 163, 184),
+                Text = "Gönderilen: -- MB | Alınan: -- MB",
+                Font = new Font("Consolas", 8.0f, FontStyle.Regular),
+                ForeColor = ArgonTheme.TextMuted,
                 AutoSize = true,
-                Location = new Point(2, 4)
+                Location = new Point(16, Math.Min(326, ny + 4)),
+                UseMnemonic = false
             };
-            pnlSidebarTrafficFooter.Controls.Add(lblNetTrafficStats);
+            cardNetDisp.Controls.Add(lblNetTrafficStats);
 
-            // Header for Live Console Log
-            Panel pnlConsoleHdr = new Panel
-            {
-                Dock = DockStyle.Top,
-                Height = 22,
-                BackColor = Color.FromArgb(16, 20, 29)
-            };
-            pnlRightSidebar.Controls.Add(pnlConsoleHdr);
+            // Store references on panel Tag for quick lookup in PopulateSystemMonitorStaticSpecs
+            cardCpu.Tag = new Label[] { monCpuCoresLbl, monCpuCacheLbl };
+            cardGpu.Tag = monGpuDriverLbl;
 
-            lblSideEventLogHeader = new Label
-            {
-                Text = Loc.T("SİSTEM OLAY GÜNLÜĞÜ", "SYSTEM EVENT LOG"),
-                Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(167, 243, 208),
-                AutoSize = true,
-                Location = new Point(2, 3)
-            };
-            pnlConsoleHdr.Controls.Add(lblSideEventLogHeader);
-
-            // Multiline Console TextBox (NetAdapter Repair Bottom-Right Log Window)
-            txtLiveConsoleLog = new TextBox
-            {
-                Dock = DockStyle.Fill,
-                Multiline = true,
-                ReadOnly = true,
-                ScrollBars = ScrollBars.Vertical,
-                BackColor = Color.FromArgb(10, 13, 19),
-                ForeColor = Color.FromArgb(167, 243, 208),
-                BorderStyle = BorderStyle.FixedSingle,
-                Font = new Font("Consolas", 7.8f, FontStyle.Regular)
-            };
-            pnlRightSidebar.Controls.Add(txtLiveConsoleLog);
-
-            pnlSidebarTrafficFooter.SendToBack();
-            pnlSidebarTopGrid.SendToBack();
-            pnlConsoleHdr.BringToFront();
-            txtLiveConsoleLog.BringToFront();
+            PopulateSystemMonitorStaticSpecs();
         }
 
-        private TextBox CreateSidebarReadOnlyRow(Control parent, string labelText, ref int y, Color valueColor)
+        private Panel CreateMonitorCardPanel(Padding margin)
+        {
+            Panel p = new Panel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = ArgonTheme.BgSurface,
+                Margin = margin
+            };
+            p.Paint += (s, e) =>
+            {
+                using (Pen border = new Pen(ArgonTheme.BorderSubtle, 1))
+                    e.Graphics.DrawRectangle(border, 0, 0, p.Width - 1, p.Height - 1);
+            };
+            return p;
+        }
+
+        private Label CreateMonitorKpiCell(TableLayoutPanel tbl, int col, string caption, string initialValue)
+        {
+            Panel cell = new Panel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = ArgonTheme.BgSurfaceHover,
+                Margin = new Padding(col == 0 ? 0 : 6, 0, 0, 0),
+                Padding = new Padding(10, 4, 10, 4)
+            };
+            Label lblCap = new Label
+            {
+                Text = caption,
+                Font = new Font("Segoe UI", 7.0f, FontStyle.Bold),
+                ForeColor = ArgonTheme.TextMuted,
+                AutoSize = true,
+                Location = new Point(10, 3),
+                UseMnemonic = false
+            };
+            Label lblVal = new Label
+            {
+                Text = initialValue,
+                Font = new Font("Consolas", 8.5f, FontStyle.Bold),
+                ForeColor = ArgonTheme.TextPrimary,
+                AutoSize = false,
+                Size = new Size(220, 17),
+                AutoEllipsis = true,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                Location = new Point(10, 18),
+                UseMnemonic = false
+            };
+            cell.Controls.Add(lblCap);
+            cell.Controls.Add(lblVal);
+            tbl.Controls.Add(cell, col, 0);
+            return lblVal;
+        }
+
+        private void CreateMonitorLabelRow(Control parent, string labelText, ref int y, Color valueColor, out Label valueLabel)
         {
             Label lbl = new Label
             {
                 Text = labelText,
-                Font = new Font("Segoe UI", 7.6f, FontStyle.Regular),
-                ForeColor = Color.FromArgb(165, 180, 202),
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Regular),
+                ForeColor = ArgonTheme.TextMuted,
                 AutoSize = false,
-                Size = new Size(118, 20),
+                Size = new Size(134, 20),
                 TextAlign = ContentAlignment.MiddleLeft,
-                Location = new Point(2, y + 1),
+                Location = new Point(16, y),
                 UseMnemonic = false
             };
             parent.Controls.Add(lbl);
 
-            int pWidth = parent.ClientSize.Width > 0 ? parent.ClientSize.Width : 400;
+            int pw = parent.Width > 200 ? parent.Width : 520;
+            valueLabel = new Label
+            {
+                Text = "--",
+                Font = new Font("Consolas", 8.4f, FontStyle.Bold),
+                ForeColor = valueColor,
+                AutoSize = false,
+                AutoEllipsis = true,
+                Size = new Size(Math.Max(180, pw - 172), 20),
+                TextAlign = ContentAlignment.MiddleLeft,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                Location = new Point(154, y),
+                UseMnemonic = false
+            };
+            parent.Controls.Add(valueLabel);
+            y += 24;
+        }
+
+        private void CreateMonitorMultilineRow(Control parent, string labelText, ref int y, int height, Color valueColor, out Label valueLabel)
+        {
+            Label lbl = new Label
+            {
+                Text = labelText,
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Regular),
+                ForeColor = ArgonTheme.TextMuted,
+                AutoSize = false,
+                Size = new Size(134, 20),
+                TextAlign = ContentAlignment.TopLeft,
+                Location = new Point(16, y + 2),
+                UseMnemonic = false
+            };
+            parent.Controls.Add(lbl);
+
+            int pw = parent.Width > 200 ? parent.Width : 520;
+            valueLabel = new Label
+            {
+                Text = "--",
+                Font = new Font("Consolas", 8.0f, FontStyle.Regular),
+                ForeColor = valueColor,
+                AutoSize = false,
+                Size = new Size(Math.Max(180, pw - 172), height),
+                TextAlign = ContentAlignment.TopLeft,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                Location = new Point(154, y + 2),
+                UseMnemonic = false
+            };
+            parent.Controls.Add(valueLabel);
+            y += height + 4;
+        }
+
+        private TextBox CreateMonitorTextBoxRow(Control parent, string labelText, ref int y, Color valueColor)
+        {
+            Label lbl = new Label
+            {
+                Text = labelText,
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Regular),
+                ForeColor = ArgonTheme.TextMuted,
+                AutoSize = false,
+                Size = new Size(134, 20),
+                TextAlign = ContentAlignment.MiddleLeft,
+                Location = new Point(16, y),
+                UseMnemonic = false
+            };
+            parent.Controls.Add(lbl);
+
+            int pw = parent.Width > 200 ? parent.Width : 520;
             TextBox txt = new TextBox
             {
                 ReadOnly = true,
-                BackColor = Color.FromArgb(11, 14, 21),
+                BorderStyle = BorderStyle.None,
+                BackColor = ArgonTheme.BgSurface,
                 ForeColor = valueColor,
-                BorderStyle = BorderStyle.FixedSingle,
-                Font = new Font("Consolas", 7.8f, FontStyle.Bold),
-                Location = new Point(122, y),
-                Size = new Size(Math.Max(265, pWidth - 128), 20),
+                Font = new Font("Consolas", 8.4f, FontStyle.Bold),
+                Location = new Point(154, y + 2),
+                Size = new Size(Math.Max(180, pw - 172), 18),
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
-                Text = "Okunuyor..."
+                Text = "--"
             };
             parent.Controls.Add(txt);
             sidebarRowLabels[txt] = lbl;
             y += 24;
             return txt;
+        }
+
+        private Panel CreateMonitorBarPanel(Control parent, int y, Func<float> getPct, Color fill)
+        {
+            int pw = parent.Width > 200 ? parent.Width : 520;
+            Panel bar = new Panel
+            {
+                Location = new Point(154, y),
+                Size = new Size(Math.Max(180, pw - 172), 5),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                BackColor = ArgonTheme.BgSurfaceHover
+            };
+            bar.Paint += (s, e) =>
+            {
+                float pct = Math.Max(0f, Math.Min(100f, getPct()));
+                int fw = (int)Math.Round((bar.Width * pct) / 100.0);
+                if (fw > 0)
+                {
+                    Color barColor = pct >= 90f ? ArgonTheme.Alert : fill;
+                    using (SolidBrush br = new SolidBrush(barColor))
+                        e.Graphics.FillRectangle(br, 0, 0, fw, bar.Height);
+                }
+            };
+            parent.Controls.Add(bar);
+            return bar;
+        }
+
+        private void PopulateSystemMonitorStaticSpecs()
+        {
+            if (detectedHw == null) return;
+            try
+            {
+                if (monSysOsVal != null)
+                {
+                    monSysOsVal.Text = string.IsNullOrEmpty(detectedHw.OsDisplayTitle) ? Environment.OSVersion.VersionString : detectedHw.OsDisplayTitle;
+                }
+                if (monSysPlanVal != null)
+                {
+                    string planName = "High Performance";
+                    try
+                    {
+                        Guid activePlanGuid;
+                        if (vault != null) planName = vault.GetActivePowerSchemeInfo(out activePlanGuid);
+                    }
+                    catch { }
+                    monSysPlanVal.Text = string.Format("{0} | {1}", planName, isAdmin ? "Admin" : Loc.T("Standart", "Standard"));
+                }
+
+                if (txtHwCpuName != null)
+                    txtHwCpuName.Text = detectedHw.CpuName;
+
+                if (txtHwGpuName != null)
+                    txtHwGpuName.Text = detectedHw.GpuName;
+
+                if (viewSystemMonitor != null)
+                {
+                    foreach (Control outer in viewSystemMonitor.Controls)
+                    {
+                        TableLayoutPanel tbl = outer as TableLayoutPanel;
+                        if (tbl == null) continue;
+                        foreach (Control rowCtl in tbl.Controls)
+                        {
+                            TableLayoutPanel row = rowCtl as TableLayoutPanel;
+                            if (row == null) continue;
+                            foreach (Control card in row.Controls)
+                            {
+                                Label[] cpuTag = card.Tag as Label[];
+                                if (cpuTag != null && cpuTag.Length == 2)
+                                {
+                                    string socket = string.IsNullOrEmpty(detectedHw.CpuSocket) ? "-" : detectedHw.CpuSocket;
+                                    cpuTag[0].Text = string.Format("{0} | {1}C / {2}T | Base/Boost: {3} MHz",
+                                        socket, detectedHw.PhysicalCores, detectedHw.LogicalThreads, detectedHw.CpuMaxClockMhz);
+                                    double l2Mb = detectedHw.CpuL2CacheKb / 1024.0;
+                                    double l3Mb = detectedHw.CpuL3CacheKb / 1024.0;
+                                    cpuTag[1].Text = string.Format("L2: {0:0.#} MB | L3: {1:0.#} MB | {2}",
+                                        l2Mb, l3Mb, string.IsNullOrEmpty(detectedHw.CpuManufacturer) ? "x86_64" : detectedHw.CpuManufacturer);
+                                }
+                                Label gpuTag = card.Tag as Label;
+                                if (gpuTag != null && object.Equals(gpuTag.Tag, "STATIC_GPU_DRIVER"))
+                                {
+                                    string vramStr = detectedHw.GpuVramMb > 0 ? string.Format("{0} MB", detectedHw.GpuVramMb) : "--";
+                                    string drv = string.IsNullOrEmpty(detectedHw.GpuDriverVersion) ? "--" : detectedHw.GpuDriverVersion;
+                                    string date = string.IsNullOrEmpty(detectedHw.GpuDriverDate) ? "" : (" (" + detectedHw.GpuDriverDate + ")");
+                                    gpuTag.Text = string.Format("{0}{1} | {2} VRAM", drv, date, vramStr);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (monRamCapVal != null)
+                {
+                    monRamCapVal.Text = string.Format("{0:0.0} GB ({1} {2})", detectedHw.TotalRamGb,
+                        Math.Max(1, detectedHw.RamModules.Count), Loc.T("Modül", "DIMM"));
+                }
+                if (monRamSpecVal != null)
+                {
+                    string ramType = string.IsNullOrEmpty(detectedHw.RamTypeLabel) ? "DDR" : detectedHw.RamTypeLabel;
+                    string spd = detectedHw.RamSpeedMhz > 0 ? (detectedHw.RamSpeedMhz + " MT/s") : "-- MT/s";
+                    monRamSpecVal.Text = string.Format("{0} @ {1}", ramType, spd);
+                }
+                if (monRamSlotsVal != null)
+                {
+                    monRamSlotsVal.Text = detectedHw.RamModules.Count > 0
+                        ? string.Join("\n", detectedHw.RamModules.ToArray())
+                        : Loc.T("SMBIOS modül bilgisi okunamadı.", "No SMBIOS DIMM info reported.");
+                }
+                if (monBoardVal != null)
+                {
+                    string mb = (detectedHw.BaseboardManufacturer + " " + detectedHw.BaseboardProduct).Trim();
+                    monBoardVal.Text = string.IsNullOrEmpty(mb) ? "--" : mb;
+                }
+                if (monBiosVal != null)
+                {
+                    string bv = string.IsNullOrEmpty(detectedHw.BiosVersion) ? "--" : detectedHw.BiosVersion;
+                    string bd = string.IsNullOrEmpty(detectedHw.BiosDate) ? "" : (" (" + detectedHw.BiosDate + ")");
+                    monBiosVal.Text = bv + bd;
+                }
+                if (monDisplaysVal != null)
+                {
+                    monDisplaysVal.Text = detectedHw.Displays.Count > 0
+                        ? string.Join("\n", detectedHw.Displays.ToArray())
+                        : "--";
+                }
+                if (monNicSpeedVal != null)
+                {
+                    monNicSpeedVal.Text = detectedHw.NicLinkSpeedMbps > 0
+                        ? string.Format("{0} Mbps Full-Duplex", detectedHw.NicLinkSpeedMbps)
+                        : "--";
+                }
+                UpdateSystemMonitorStorageSummary();
+            }
+            catch { }
+        }
+
+        private void UpdateSystemMonitorStorageSummary()
+        {
+            if (monStorageVal == null || detectedHw == null) return;
+            try
+            {
+                if (sensorEngine != null && sensorEngine.StorageTemps != null && sensorEngine.StorageTemps.Count > 0)
+                {
+                    monStorageVal.Text = string.Join("\n", sensorEngine.StorageTemps.ToArray());
+                }
+                else if (detectedHw.StorageDrives.Count > 0)
+                {
+                    monStorageVal.Text = string.Join("\n", detectedHw.StorageDrives.ToArray());
+                }
+                else
+                {
+                    monStorageVal.Text = "--";
+                }
+            }
+            catch { }
+        }
+
+        private void UpdateSystemMonitorLiveTelemetry()
+        {
+            try
+            {
+                int activeCount = 0;
+                foreach (var t in allTweaks) if (t.IsEnabled) activeCount++;
+                if (monSysActiveVal != null)
+                {
+                    monSysActiveVal.Text = string.Format("{0} / {1} {2}", activeCount, allTweaks.Count, Loc.T("Aktif", "Active"));
+                    monSysActiveVal.ForeColor = activeCount > 0 ? ArgonTheme.Accent : ArgonTheme.TextSecondary;
+                }
+                if (monSysTimerVal != null)
+                {
+                    uint minR, maxR, curR;
+                    if (NativeMethods.NtQueryTimerResolution(out minR, out maxR, out curR) == 0)
+                    {
+                        double ms = curR / 10000.0;
+                        monSysTimerVal.Text = string.Format("{0:0.000} ms ({1:0} Hz)", ms, 1000.0 / Math.Max(0.1, ms));
+                        monSysTimerVal.ForeColor = ms <= 1.05 ? ArgonTheme.Accent : ArgonTheme.TextPrimary;
+                    }
+                }
+
+                if (lblSidebarPulse != null)
+                {
+                    string cT = (sensorEngine != null && sensorEngine.CpuPackageTemp >= 0) ? string.Format("{0:0}°C", sensorEngine.CpuPackageTemp) : "--°C";
+                    string gT = (sensorEngine != null && sensorEngine.GpuCoreTemp >= 0) ? string.Format("{0:0}°C", sensorEngine.GpuCoreTemp) : "--°C";
+                    lblSidebarPulse.Text = string.Format("CPU {0}  ·  GPU {1}", cT, gT);
+                }
+
+                if (sensorEngine != null && appSettings != null && appSettings.EnableTelemetrySensors)
+                {
+                    if (monCpuTempVal != null)
+                    {
+                        monCpuTempVal.Text = sensorEngine.CpuPackageTemp >= 0
+                            ? string.Format("{0:0.0} °C", sensorEngine.CpuPackageTemp)
+                            : (isAdmin ? Loc.T("Sensör bekleniyor", "Waiting sensor") : Loc.T("Yönetici gerekir", "Admin required"));
+                        monCpuTempVal.ForeColor = sensorEngine.CpuPackageTemp >= 85f ? ArgonTheme.Alert : ArgonTheme.TextPrimary;
+                    }
+                    if (monCpuLoadVal != null)
+                    {
+                        monCpuLoadPct = sensorEngine.CpuTotalLoad >= 0 ? sensorEngine.CpuTotalLoad : 0f;
+                        monCpuLoadVal.Text = sensorEngine.CpuTotalLoad >= 0 ? string.Format("%{0:0.0}", sensorEngine.CpuTotalLoad) : "--";
+                        if (monCpuLoadBar != null) monCpuLoadBar.Invalidate();
+                    }
+                    if (monCpuClockVal != null)
+                    {
+                        string clk = sensorEngine.CpuClockAvgMhz > 0 ? string.Format("{0:0} MHz", sensorEngine.CpuClockAvgMhz) : "-- MHz";
+                        string eff = sensorEngine.CpuEffectiveClockMhz > 0 ? string.Format(" (Eff: {0:0})", sensorEngine.CpuEffectiveClockMhz) : "";
+                        string vlt = sensorEngine.CpuCoreVoltage > 0 ? string.Format(" | {0:0.000} V", sensorEngine.CpuCoreVoltage) : "";
+                        monCpuClockVal.Text = clk + eff + vlt;
+                    }
+                    if (monCpuPowerVal != null)
+                    {
+                        monCpuPowerVal.Text = sensorEngine.CpuPowerWatts > 0 ? string.Format("{0:0.0} W", sensorEngine.CpuPowerWatts) : "-- W";
+                    }
+
+                    if (monGpuTempVal != null)
+                    {
+                        monGpuTempVal.Text = sensorEngine.GpuCoreTemp >= 0 ? string.Format("{0:0.0} °C", sensorEngine.GpuCoreTemp) : "-- °C";
+                        monGpuTempVal.ForeColor = sensorEngine.GpuCoreTemp >= 85f ? ArgonTheme.Alert : ArgonTheme.TextPrimary;
+                    }
+                    if (monGpuHotspotVal != null)
+                    {
+                        string hs = sensorEngine.GpuHotspotTemp >= 0 ? string.Format("Hotspot {0:0.0}°C", sensorEngine.GpuHotspotTemp) : "Hotspot --";
+                        string mt = sensorEngine.GpuMemoryTemp >= 0 ? string.Format(" | Mem {0:0.0}°C", sensorEngine.GpuMemoryTemp) : "";
+                        monGpuHotspotVal.Text = hs + mt;
+                        monGpuHotspotVal.ForeColor = sensorEngine.GpuHotspotTemp >= 95f ? ArgonTheme.Alert : ArgonTheme.TextSecondary;
+                    }
+                    if (monGpuLoadVal != null)
+                    {
+                        monGpuLoadPct = sensorEngine.GpuCoreLoad >= 0 ? sensorEngine.GpuCoreLoad : 0f;
+                        monGpuLoadVal.Text = sensorEngine.GpuCoreLoad >= 0 ? string.Format("%{0:0.0}", sensorEngine.GpuCoreLoad) : "--";
+                        if (monGpuLoadBar != null) monGpuLoadBar.Invalidate();
+                    }
+                    if (monGpuClockVal != null)
+                    {
+                        string gc = sensorEngine.GpuCoreClockMhz > 0 ? string.Format("{0:0} MHz", sensorEngine.GpuCoreClockMhz) : "-- MHz";
+                        string gm = sensorEngine.GpuMemClockMhz > 0 ? string.Format(" / Mem {0:0} MHz", sensorEngine.GpuMemClockMhz) : "";
+                        monGpuClockVal.Text = gc + gm;
+                    }
+                    if (monGpuPowerFanVal != null)
+                    {
+                        string pw = sensorEngine.GpuPowerWatts > 0 ? string.Format("{0:0.0} W", sensorEngine.GpuPowerWatts) : "-- W";
+                        string fn = sensorEngine.GpuFanRpm > 0 ? string.Format(" | Fan {0:0} RPM", sensorEngine.GpuFanRpm) : "";
+                        monGpuPowerFanVal.Text = pw + fn;
+                    }
+                    if (monGpuVramVal != null)
+                    {
+                        if (sensorEngine.GpuMemTotalMb > 0)
+                            monGpuVramVal.Text = string.Format("{0:0} / {1:0} MB", sensorEngine.GpuMemUsedMb, sensorEngine.GpuMemTotalMb);
+                        else if (sensorEngine.GpuMemUsedMb > 0)
+                            monGpuVramVal.Text = string.Format("{0:0} MB", sensorEngine.GpuMemUsedMb);
+                        else
+                            monGpuVramVal.Text = "--";
+                    }
+
+                    UpdateSystemMonitorStorageSummary();
+                }
+
+                // Live OS RAM Usage bar
+                NativeMethods.MEMORYSTATUSEX mem = new NativeMethods.MEMORYSTATUSEX();
+                if (NativeMethods.GlobalMemoryStatusEx(mem) && monRamLiveVal != null)
+                {
+                    double totalGb = mem.ullTotalPhys / (1024.0 * 1024.0 * 1024.0);
+                    double availGb = mem.ullAvailPhys / (1024.0 * 1024.0 * 1024.0);
+                    monRamLoadPct = (float)mem.dwMemoryLoad;
+                    monRamLiveVal.Text = string.Format("%{0} ({1:0.0} / {2:0.0} GB)", mem.dwMemoryLoad, totalGb - availGb, totalGb);
+                    if (monRamLoadBar != null) monRamLoadBar.Invalidate();
+                }
+            }
+            catch { }
         }
 
         private void AppendConsoleLog(string message)
@@ -11916,19 +18524,19 @@ namespace ArgonLatencyStudio
         {
             Panel pnlColHdr = new Panel
             {
-                Height = 26,
-                Width = 820,
-                Margin = new Padding(0, 0, 0, 3),
-                BackColor = Color.FromArgb(22, 28, 41)
+                Height = 28,
+                Width = 900,
+                Margin = new Padding(0, 2, 0, 4),
+                BackColor = ArgonTheme.BgSurfaceHover
             };
 
             Label lblCol1 = new Label
             {
                 Text = Loc.T("DURUM & DONANIM / SİSTEM AYARI", "STATUS & HARDWARE / SYSTEM TWEAK") + (string.IsNullOrEmpty(sectionTitle) ? "" : (" (" + sectionTitle + ")")),
-                Font = new Font("Segoe UI", 7.5f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(148, 163, 184),
+                Font = new Font("Segoe UI", 7.6f, FontStyle.Bold),
+                ForeColor = ArgonTheme.TextMuted,
                 AutoSize = true,
-                Location = new Point(10, 6),
+                Location = new Point(12, 7),
                 UseMnemonic = false
             };
             pnlColHdr.Controls.Add(lblCol1);
@@ -11937,10 +18545,10 @@ namespace ArgonLatencyStudio
             Label lblCol2 = new Label
             {
                 Text = Loc.T("UYGULAMA MODU / VARYASYON", "APPLICATION MODE / VARIATION"),
-                Font = new Font("Segoe UI", 7.5f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(56, 189, 248),
+                Font = new Font("Segoe UI", 7.6f, FontStyle.Bold),
+                ForeColor = ArgonTheme.Accent,
                 AutoSize = true,
-                Location = new Point(400, 6),
+                Location = new Point(420, 7),
                 UseMnemonic = false
             };
             pnlColHdr.Controls.Add(lblCol2);
@@ -11949,10 +18557,10 @@ namespace ArgonLatencyStudio
             Label lblCol3 = new Label
             {
                 Text = Loc.T("CANLI OS DEĞERİ", "LIVE OS VALUE"),
-                Font = new Font("Segoe UI", 7.5f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(52, 211, 153),
+                Font = new Font("Segoe UI", 7.6f, FontStyle.Bold),
+                ForeColor = ArgonTheme.TextSecondary,
                 AutoSize = true,
-                Location = new Point(650, 6),
+                Location = new Point(700, 7),
                 UseMnemonic = false
             };
             pnlColHdr.Controls.Add(lblCol3);
@@ -11962,17 +18570,18 @@ namespace ArgonLatencyStudio
             {
                 int w = Math.Max(520, pnlColHdr.ClientSize.Width);
                 int rightX = w - 6;
-                rightX -= 27; // btnInfoInspect (22px + 5px margin)
+                rightX -= 28; // btnInfoInspect (24px + 4px)
+                rightX -= 29; // reserved btnGearConfig slot
 
                 int badgeW = w >= 800 ? 168 : (w >= 700 ? 152 : 132);
                 int badgeX = rightX - badgeW;
                 rightX -= (badgeW + 6);
 
-                int comboW = w >= 800 ? 250 : (w >= 700 ? 220 : 185);
+                int comboW = w >= 980 ? 290 : (w >= 820 ? 250 : (w >= 680 ? 215 : 175));
                 int comboX = rightX - comboW;
 
-                lblCol2.Location = new Point(comboX, 6);
-                lblCol3.Location = new Point(badgeX + 6, 6);
+                lblCol2.Location = new Point(comboX, 7);
+                lblCol3.Location = new Point(badgeX + 6, 7);
             };
 
             return pnlColHdr;
@@ -11983,8 +18592,8 @@ namespace ArgonLatencyStudio
             viewDashboard = new Panel
             {
                 Dock = DockStyle.Fill,
-                BackColor = Color.FromArgb(13, 16, 23),
-                Padding = new Padding(10, 8, 10, 8)
+                BackColor = ArgonTheme.BgCanvas,
+                Padding = new Padding(18, 12, 18, 10)
             };
             pnlContentHost.Controls.Add(viewDashboard);
 
@@ -11992,12 +18601,12 @@ namespace ArgonLatencyStudio
             Panel pnlMatrixTop = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 142,
-                BackColor = Color.FromArgb(18, 23, 34)
+                Height = 148,
+                BackColor = ArgonTheme.BgSurface
             };
             pnlMatrixTop.Paint += (s, e) =>
             {
-                using (Pen p = new Pen(Color.FromArgb(36, 46, 66), 1))
+                using (Pen p = new Pen(ArgonTheme.BorderSubtle, 1))
                 {
                     e.Graphics.DrawRectangle(p, 0, 0, pnlMatrixTop.Width - 1, pnlMatrixTop.Height - 1);
                 }
@@ -12008,9 +18617,10 @@ namespace ArgonLatencyStudio
             {
                 Text = Loc.T("DONANIM PROFİLİ VE OPTİMİZASYON SEVİYESİ", "HARDWARE PROFILE & OPTIMIZATION LEVEL"),
                 Font = new Font("Segoe UI", 8.8f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(52, 211, 153),
+                ForeColor = ArgonTheme.Accent,
                 AutoSize = true,
-                Location = new Point(12, 8)
+                Location = new Point(14, 10),
+                UseMnemonic = false
             };
             pnlMatrixTop.Controls.Add(lblMatTitle);
 
@@ -12018,21 +18628,22 @@ namespace ArgonLatencyStudio
             lblCpuPick = new Label
             {
                 Text = Loc.T("1. İşlemci (CPU) Mimarisi:", "1. Processor (CPU) Architecture:"),
-                Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(203, 213, 225),
+                Font = new Font("Segoe UI", 7.9f, FontStyle.Bold),
+                ForeColor = ArgonTheme.TextSecondary,
                 AutoSize = true,
-                Location = new Point(12, 30)
+                Location = new Point(14, 34),
+                UseMnemonic = false
             };
             pnlMatrixTop.Controls.Add(lblCpuPick);
 
             cmbCpuSelector = new ComboBox
             {
                 DropDownStyle = ComboBoxStyle.DropDownList,
-                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
-                BackColor = Color.FromArgb(12, 15, 22),
-                ForeColor = Color.FromArgb(56, 189, 248),
-                Location = new Point(12, 48),
-                Size = new Size(250, 24)
+                Font = new Font("Segoe UI", 8.4f, FontStyle.Bold),
+                BackColor = ArgonTheme.BgSurfaceHover,
+                ForeColor = ArgonTheme.TextPrimary,
+                Location = new Point(14, 52),
+                Size = new Size(270, 24)
             };
             cmbCpuSelector.Items.AddRange(new object[]
             {
@@ -12054,21 +18665,22 @@ namespace ArgonLatencyStudio
             lblGpuPick = new Label
             {
                 Text = Loc.T("2. Ekran Kartı (GPU) Mimarisi:", "2. Graphics Card (GPU) Architecture:"),
-                Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(203, 213, 225),
+                Font = new Font("Segoe UI", 7.9f, FontStyle.Bold),
+                ForeColor = ArgonTheme.TextSecondary,
                 AutoSize = true,
-                Location = new Point(272, 30)
+                Location = new Point(296, 34),
+                UseMnemonic = false
             };
             pnlMatrixTop.Controls.Add(lblGpuPick);
 
             cmbGpuSelector = new ComboBox
             {
                 DropDownStyle = ComboBoxStyle.DropDownList,
-                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
-                BackColor = Color.FromArgb(12, 15, 22),
-                ForeColor = Color.FromArgb(52, 211, 153),
-                Location = new Point(272, 48),
-                Size = new Size(240, 24)
+                Font = new Font("Segoe UI", 8.4f, FontStyle.Bold),
+                BackColor = ArgonTheme.BgSurfaceHover,
+                ForeColor = ArgonTheme.TextPrimary,
+                Location = new Point(296, 52),
+                Size = new Size(260, 24)
             };
             cmbGpuSelector.Items.AddRange(new object[]
             {
@@ -12089,37 +18701,46 @@ namespace ArgonLatencyStudio
             lblTierPick = new Label
             {
                 Text = Loc.T("3. Optimizasyon Kademesi:", "3. Optimization Level:"),
-                Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(203, 213, 225),
+                Font = new Font("Segoe UI", 7.9f, FontStyle.Bold),
+                ForeColor = ArgonTheme.TextSecondary,
                 AutoSize = true,
-                Location = new Point(522, 30)
+                Location = new Point(568, 34),
+                UseMnemonic = false
             };
             pnlMatrixTop.Controls.Add(lblTierPick);
 
-            btnTier1 = CreateActionButton(pnlMatrixTop, 522, 47, 96, 25, Loc.T("1: Dengeli", "1: Balanced"), Color.FromArgb(37, 45, 64));
-            btnTier2 = CreateActionButton(pnlMatrixTop, 622, 47, 96, 25, Loc.T("2: Espor", "2: Esports"), Color.FromArgb(16, 185, 129));
-            btnTier2.ForeColor = Color.Black;
-            btnTier3 = CreateActionButton(pnlMatrixTop, 722, 47, 96, 25, Loc.T("3: Ekstrem", "3: Extreme"), Color.FromArgb(37, 45, 64));
+            btnTier1 = CreateActionButton(pnlMatrixTop, 568, 51, 98, 25, Loc.T("1: Dengeli", "1: Balanced"), ArgonTheme.BgSurfaceHover);
+            btnTier2 = CreateActionButton(pnlMatrixTop, 670, 51, 98, 25, Loc.T("2: Espor", "2: Esports"), ArgonTheme.Accent);
+            btnTier2.ForeColor = Color.White;
+            btnTier3 = CreateActionButton(pnlMatrixTop, 772, 51, 98, 25, Loc.T("3: Ekstrem", "3: Extreme"), ArgonTheme.BgSurfaceHover);
 
-            btnTier1.Font = new Font("Segoe UI", 7.6f, FontStyle.Bold);
-            btnTier2.Font = new Font("Segoe UI", 7.6f, FontStyle.Bold);
-            btnTier3.Font = new Font("Segoe UI", 7.6f, FontStyle.Bold);
+            btnTier1.Font = new Font("Segoe UI", 7.8f, FontStyle.Bold);
+            btnTier2.Font = new Font("Segoe UI", 7.8f, FontStyle.Bold);
+            btnTier3.Font = new Font("Segoe UI", 7.8f, FontStyle.Bold);
 
             btnTier1.Click += (s, e) => SelectProgressiveTier(1);
             btnTier2.Click += (s, e) => SelectProgressiveTier(2);
             btnTier3.Click += (s, e) => SelectProgressiveTier(3);
 
             // Action Buttons Row
-            btnSmartApply = CreateActionButton(pnlMatrixTop, 12, 80, 410, 32,
-                Loc.T("⚡ SEÇİLİ PROFİLİ TEK TIKLA UYGULA", "⚡ APPLY SELECTED PROFILE (ONE-CLICK)"), Color.FromArgb(16, 185, 129));
-            btnSmartApply.ForeColor = Color.Black;
-            btnSmartApply.Font = new Font("Segoe UI", 8.2f, FontStyle.Bold);
+            btnSmartApply = CreateActionButton(pnlMatrixTop, 14, 84, 410, 32,
+                Loc.T("  Seçili Donanım Profilini Uygula", "  Apply Selected Hardware Profile"), ArgonTheme.Accent);
+            btnSmartApply.ForeColor = Color.White;
+            btnSmartApply.Font = new Font("Segoe UI", 8.4f, FontStyle.Bold);
+            btnSmartApply.Image = ArgonIconPack.GetIcon("zap", Color.White, 15);
+            btnSmartApply.ImageAlign = ContentAlignment.MiddleLeft;
+            btnSmartApply.TextAlign = ContentAlignment.MiddleCenter;
             btnSmartApply.Click += (s, e) => ApplyHardwareAwareSmartTune();
             mainToolTip.SetToolTip(btnSmartApply, "Seçtiğiniz İşlemci + Ekran Kartı ikilisine özel Windows çekirdek/sürücü ayarlarını, çakışma kurallarını ve kademe seviyesini tek tıkla uygular.");
 
-            btnAutoDetectReset = CreateActionButton(pnlMatrixTop, 430, 80, 190, 32,
-                Loc.T("Donanımımı Otomatik Algıla", "Auto-Detect Hardware"), Color.FromArgb(14, 165, 233));
-            btnAutoDetectReset.ForeColor = Color.Black;
+            btnAutoDetectReset = CreateActionButton(pnlMatrixTop, 432, 84, 210, 32,
+                Loc.T("  Donanımı Otomatik Algıla", "  Auto-Detect Hardware"), ArgonTheme.BgSurfaceHover);
+            btnAutoDetectReset.ForeColor = ArgonTheme.TextPrimary;
+            btnAutoDetectReset.FlatAppearance.BorderSize = 1;
+            btnAutoDetectReset.FlatAppearance.BorderColor = ArgonTheme.BorderSubtle;
+            btnAutoDetectReset.Image = ArgonIconPack.GetIcon("cpu", ArgonTheme.Accent, 14);
+            btnAutoDetectReset.ImageAlign = ContentAlignment.MiddleLeft;
+            btnAutoDetectReset.TextAlign = ContentAlignment.MiddleCenter;
             btnAutoDetectReset.Click += (s, e) =>
             {
                 cmbCpuSelector.SelectedIndex = (int)detectedHw.RecommendedCpuProfile;
@@ -12129,65 +18750,72 @@ namespace ArgonLatencyStudio
                 AppendConsoleLog("Donanım matrisi sistem algılamasına göre sıfırlandı.");
             };
 
-            btnQuickRam = CreateActionButton(pnlMatrixTop, 628, 80, 190, 32,
-                Loc.T("Anlık RAM & DNS Temizle", "Instant RAM & DNS Purge"), Color.FromArgb(51, 65, 85));
+            btnQuickRam = CreateActionButton(pnlMatrixTop, 650, 84, 210, 32,
+                Loc.T("  RAM & DNS Önbelleği Temizle", "  Purge RAM & DNS Cache"), ArgonTheme.BgSurfaceHover);
+            btnQuickRam.ForeColor = ArgonTheme.TextPrimary;
+            btnQuickRam.FlatAppearance.BorderSize = 1;
+            btnQuickRam.FlatAppearance.BorderColor = ArgonTheme.BorderSubtle;
+            btnQuickRam.Image = ArgonIconPack.GetIcon("memory", ArgonTheme.TextSecondary, 14);
+            btnQuickRam.ImageAlign = ContentAlignment.MiddleLeft;
+            btnQuickRam.TextAlign = ContentAlignment.MiddleCenter;
             btnQuickRam.UseMnemonic = false;
             btnQuickRam.Click += (s, e) =>
             {
-                ExecuteSmartRamAndStandbyPurge(true);
+                ExecuteSmartRamAndStandbyPurge(true, false);
                 ExecuteInstantNetworkQueueFlush();
-                AppendConsoleLog("RAM Çalışma Kümesi, Standby List ve DNS önbelleği temizlendi.");
+                AppendConsoleLog("Standby List ve DNS önbelleği güvenle temizlendi (Disk takas fırtınası önlendi).");
             };
 
             lblMatrixSummary = new Label
             {
                 Text = "Aktif Kombinasyon Özeti hazırlanıyor...",
-                Font = new Font("Segoe UI", 7.8f, FontStyle.Regular),
-                ForeColor = Color.FromArgb(165, 180, 202),
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Regular),
+                ForeColor = ArgonTheme.TextMuted,
                 AutoSize = true,
-                Location = new Point(12, 118)
+                Location = new Point(14, 122),
+                UseMnemonic = false
             };
             pnlMatrixTop.Controls.Add(lblMatrixSummary);
 
             Action layoutMatrixTop = () =>
             {
-                int availW = Math.Max(760, pnlMatrixTop.ClientSize.Width - 24);
-                int tierBlockW = Math.Max(296, (int)(availW * 0.36));
+                int availW = Math.Max(760, pnlMatrixTop.ClientSize.Width - 28);
+                int tierBlockW = Math.Max(296, (int)(availW * 0.34));
                 int eachTierW = (tierBlockW - 8) / 3;
                 int comboSpace = availW - tierBlockW - 20;
                 int cpuComboW = Math.Max(210, comboSpace / 2);
                 int gpuComboW = Math.Max(200, comboSpace - cpuComboW);
 
-                lblCpuPick.Location = new Point(12, 30);
-                cmbCpuSelector.Location = new Point(12, 48);
+                lblCpuPick.Location = new Point(14, 34);
+                cmbCpuSelector.Location = new Point(14, 52);
                 cmbCpuSelector.Width = cpuComboW;
 
-                lblGpuPick.Location = new Point(cmbCpuSelector.Right + 10, 30);
-                cmbGpuSelector.Location = new Point(cmbCpuSelector.Right + 10, 48);
+                lblGpuPick.Location = new Point(cmbCpuSelector.Right + 10, 34);
+                cmbGpuSelector.Location = new Point(cmbCpuSelector.Right + 10, 52);
                 cmbGpuSelector.Width = gpuComboW;
 
                 int tierStartX = cmbGpuSelector.Right + 10;
-                lblTierPick.Location = new Point(tierStartX, 30);
-                btnTier1.Location = new Point(tierStartX, 47);
+                lblTierPick.Location = new Point(tierStartX, 34);
+                btnTier1.Location = new Point(tierStartX, 51);
                 btnTier1.Size = new Size(eachTierW, 25);
 
-                btnTier2.Location = new Point(btnTier1.Right + 4, 47);
+                btnTier2.Location = new Point(btnTier1.Right + 4, 51);
                 btnTier2.Size = new Size(eachTierW, 25);
 
-                btnTier3.Location = new Point(btnTier2.Right + 4, 47);
+                btnTier3.Location = new Point(btnTier2.Right + 4, 51);
                 btnTier3.Size = new Size(eachTierW, 25);
 
-                int smartW = Math.Max(380, (int)(availW * 0.50));
+                int smartW = Math.Max(360, (int)(availW * 0.44));
                 int remW = availW - smartW - 16;
-                int subBtnW = Math.Max(160, remW / 2);
+                int subBtnW = Math.Max(165, remW / 2);
 
-                btnSmartApply.Location = new Point(12, 80);
+                btnSmartApply.Location = new Point(14, 84);
                 btnSmartApply.Size = new Size(smartW, 32);
 
-                btnAutoDetectReset.Location = new Point(btnSmartApply.Right + 8, 80);
+                btnAutoDetectReset.Location = new Point(btnSmartApply.Right + 8, 84);
                 btnAutoDetectReset.Size = new Size(subBtnW, 32);
 
-                btnQuickRam.Location = new Point(btnAutoDetectReset.Right + 8, 80);
+                btnQuickRam.Location = new Point(btnAutoDetectReset.Right + 8, 84);
                 btnQuickRam.Size = new Size(subBtnW, 32);
             };
             pnlMatrixTop.Resize += (s, e) => layoutMatrixTop();
@@ -12205,7 +18833,7 @@ namespace ArgonLatencyStudio
                 FlowDirection = FlowDirection.TopDown,
                 WrapContents = false,
                 Padding = new Padding(0, 4, 0, 8),
-                BackColor = Color.FromArgb(13, 16, 23)
+                BackColor = ArgonTheme.BgCanvas
             };
             viewDashboard.Controls.Add(flowHardwareSpecificCards);
 
@@ -12217,7 +18845,7 @@ namespace ArgonLatencyStudio
             {
                 if (tweak.Category != "HARDWARE") continue;
                 var card = new MultiVariationTweakCard(tweak, mainToolTip, OnTweakCardToggled, OnTweakCardHovered);
-                card.Width = Math.Max(540, viewDashboard.ClientSize.Width - 28);
+                card.Width = Math.Max(540, viewDashboard.ClientSize.Width - 36);
                 flowHardwareSpecificCards.Controls.Add(card);
                 allCards.Add(card);
             }
@@ -12236,14 +18864,14 @@ namespace ArgonLatencyStudio
         private void SelectProgressiveTier(int tier)
         {
             selectedProgressiveTier = tier;
-            btnTier1.BackColor = (tier == 1) ? Color.FromArgb(56, 189, 248) : Color.FromArgb(37, 45, 64);
-            btnTier1.ForeColor = (tier == 1) ? Color.Black : Color.White;
+            btnTier1.BackColor = (tier == 1) ? ArgonTheme.Accent : ArgonTheme.BgSurfaceHover;
+            btnTier1.ForeColor = (tier == 1) ? Color.White : ArgonTheme.TextSecondary;
 
-            btnTier2.BackColor = (tier == 2) ? Color.FromArgb(16, 185, 129) : Color.FromArgb(37, 45, 64);
-            btnTier2.ForeColor = (tier == 2) ? Color.Black : Color.White;
+            btnTier2.BackColor = (tier == 2) ? ArgonTheme.Accent : ArgonTheme.BgSurfaceHover;
+            btnTier2.ForeColor = (tier == 2) ? Color.White : ArgonTheme.TextSecondary;
 
-            btnTier3.BackColor = (tier == 3) ? Color.FromArgb(244, 63, 94) : Color.FromArgb(37, 45, 64);
-            btnTier3.ForeColor = (tier == 3) ? Color.Black : Color.White;
+            btnTier3.BackColor = (tier == 3) ? ArgonTheme.Alert : ArgonTheme.BgSurfaceHover;
+            btnTier3.ForeColor = (tier == 3) ? Color.White : ArgonTheme.TextSecondary;
 
             RefreshHardwareMatrixCards();
             if (!isLoadingProfile) SaveUserProfileState();
@@ -12541,50 +19169,7 @@ namespace ArgonLatencyStudio
 
         private void LayoutNavBarButtons()
         {
-            if (pnlNavBar == null || navButtons == null || navButtons.Count == 0) return;
-
-            int w = pnlNavBar.ClientSize.Width > 0 ? pnlNavBar.ClientSize.Width : 1380;
-
-            // Search box positioning at right edge
-            int searchW = 0;
-            if (txtGlobalSearch != null && lblSearchIcon != null)
-            {
-                txtGlobalSearch.Width = 100;
-                txtGlobalSearch.Location = new Point(w - txtGlobalSearch.Width - 10, 6);
-                lblSearchIcon.Location = new Point(txtGlobalSearch.Left - lblSearchIcon.PreferredSize.Width - 4, 8);
-                searchW = txtGlobalSearch.Width + lblSearchIcon.PreferredSize.Width + 18;
-            }
-
-            int availForTabs = w - searchW - 12;
-
-            int totalPrefW = 0;
-            for (int i = 0; i < navButtons.Count; i++)
-            {
-                totalPrefW += navButtons[i].PreferredSize.Width + 6;
-            }
-
-            double scale = 1.0;
-            if (totalPrefW > availForTabs && totalPrefW > 0)
-            {
-                scale = (double)availForTabs / totalPrefW;
-            }
-
-            int nx = 6;
-            for (int i = 0; i < navButtons.Count; i++)
-            {
-                var btn = navButtons[i];
-                btn.Location = new Point(nx, 5);
-                if (scale < 1.0)
-                {
-                    btn.Width = Math.Max(38, (int)(btn.PreferredSize.Width * scale));
-                    nx += btn.Width + 1;
-                }
-                else
-                {
-                    btn.Width = btn.PreferredSize.Width + 6;
-                    nx += btn.Width + 3;
-                }
-            }
+            // Left vertical navigation rail handles sizing cleanly via FlowLayoutPanel.
         }
 
         private void LayoutRebootWarningBannerControls()
@@ -12637,30 +19222,30 @@ namespace ArgonLatencyStudio
             {
                 string rName = rebootTitles[0];
                 if (rebootTitles.Count > 1) rName += string.Format(" (+{0})", rebootTitles.Count - 1);
-                lblRebootBannerText.Text = string.Format("⚠️ {0} sistem ayarı [Restart: {1}], {2} ağ ayarı [Ağ Yenileme] bekliyor.", rebootCount, rName, reloadPendingCount);
-                lblRebootBannerText.ForeColor = Color.FromArgb(253, 224, 71);
+                lblRebootBannerText.Text = string.Format("Restart Bekliyor ({0}) ve Ağ Yenileme ({1}): Değişikliklerin tam uygulanması gerekir.", rebootCount, reloadPendingCount);
+                lblRebootBannerText.ForeColor = ArgonTheme.Alert;
                 btnRebootPcBanner.Visible = true;
-                btnRebootPcBanner.Text = string.Format("⚡ Bilgisayarı Yeniden Başlat ({0})", rebootCount);
+                btnRebootPcBanner.Text = string.Format("Yeniden Başlat ({0})", rebootCount);
                 btnSoftReloadNow.Visible = true;
-                btnSoftReloadNow.Text = string.Format("🔄 Ağ Kartını Yenile ({0})", reloadPendingCount);
+                btnSoftReloadNow.Text = string.Format("Ağ Kartını Yenile ({0})", reloadPendingCount);
             }
             else if (rebootCount > 0)
             {
                 string names = rebootTitles[0];
                 if (rebootTitles.Count > 1) names += ", " + rebootTitles[1];
                 if (rebootTitles.Count > 2) names += string.Format(" (+{0} daha)", rebootTitles.Count - 2);
-                lblRebootBannerText.Text = string.Format("⚠️ Restart Bekliyor ({0} Ayar): {1} — Windows çekirdeğinde tam devreye girmesi için yeniden başlatma gerekir.", rebootCount, names);
-                lblRebootBannerText.ForeColor = Color.FromArgb(253, 186, 116);
+                lblRebootBannerText.Text = string.Format("Restart Bekliyor ({0} Ayar): {1} — Çekirdek seviyesinde devreye girmesi için yeniden başlatma gerekir.", rebootCount, names);
+                lblRebootBannerText.ForeColor = ArgonTheme.Alert;
                 btnRebootPcBanner.Visible = true;
-                btnRebootPcBanner.Text = string.Format("⚡ Bilgisayarı Yeniden Başlat ({0})", rebootCount);
+                btnRebootPcBanner.Text = string.Format("Bilgisayarı Yeniden Başlat ({0})", rebootCount);
                 btnSoftReloadNow.Visible = false;
             }
             else
             {
-                lblRebootBannerText.Text = string.Format("⚡ {0} ağ ayarı için Ağ Adaptörünün yenilenmesi gerekiyor (Bilgisayarı yeniden başlatmaya gerek yoktur).", reloadPendingCount);
-                lblRebootBannerText.ForeColor = Color.FromArgb(125, 211, 252);
+                lblRebootBannerText.Text = string.Format("{0} ağ ayarı için Ağ Adaptörünün yenilenmesi gerekiyor (yeniden başlatma gerekmez).", reloadPendingCount);
+                lblRebootBannerText.ForeColor = ArgonTheme.Accent;
                 btnSoftReloadNow.Visible = true;
-                btnSoftReloadNow.Text = "🔄 Ağ Kartını Şimdi Yenile";
+                btnSoftReloadNow.Text = "Ağ Kartını Şimdi Yenile";
                 btnRebootPcBanner.Visible = false;
             }
         }
@@ -12739,8 +19324,8 @@ namespace ArgonLatencyStudio
                 AutoScroll = true,
                 FlowDirection = FlowDirection.TopDown,
                 WrapContents = false,
-                Padding = new Padding(10, 8, 10, 8),
-                BackColor = Color.FromArgb(13, 16, 23),
+                Padding = new Padding(18, 12, 18, 10),
+                BackColor = ArgonTheme.BgCanvas,
                 Visible = false
             };
 
@@ -12753,14 +19338,14 @@ namespace ArgonLatencyStudio
             {
                 Panel pnlFpsAdvisorBanner = new Panel
                 {
-                    Width = 810,
-                    Height = 58,
-                    BackColor = Color.FromArgb(20, 26, 40),
-                    Margin = new Padding(0, 0, 0, 6)
+                    Width = 900,
+                    Height = 60,
+                    BackColor = ArgonTheme.BgSurface,
+                    Margin = new Padding(0, 0, 0, 8)
                 };
                 pnlFpsAdvisorBanner.Paint += (s, e) =>
                 {
-                    using (Pen p = new Pen(Color.FromArgb(88, 28, 135), 1))
+                    using (Pen p = new Pen(ArgonTheme.BorderSubtle, 1))
                     {
                         e.Graphics.DrawRectangle(p, 0, 0, pnlFpsAdvisorBanner.Width - 1, pnlFpsAdvisorBanner.Height - 1);
                     }
@@ -12768,38 +19353,117 @@ namespace ArgonLatencyStudio
 
                 Label lblAdvT = new Label
                 {
-                    Text = "🎮 DWM / FLIP MODEL, MPO & OYUN BAZLI DXGI SUNUM DANIŞMANI",
-                    Font = new Font("Segoe UI", 8.4f, FontStyle.Bold),
-                    ForeColor = Color.FromArgb(192, 132, 252),
+                    Text = "DWM / FLIP MODEL, MPO VE DXGI SUNUM DANIŞMANI",
+                    Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+                    ForeColor = ArgonTheme.Accent,
                     UseMnemonic = false,
                     AutoSize = true,
-                    Location = new Point(12, 8)
+                    Location = new Point(14, 9)
                 };
                 pnlFpsAdvisorBanner.Controls.Add(lblAdvT);
 
                 Label lblAdvD = new Label
                 {
                     Text = "Ekran kartı DXGI çıkışlarını (MPO SupportsOverlays, Pencereli Optimizasyon, HDR/VRR), çakışmaları ve oyun bazlı GPU tercihlerini inceleyin.",
-                    Font = new Font("Segoe UI", 7.6f, FontStyle.Regular),
-                    ForeColor = Color.FromArgb(203, 213, 225),
-                    Location = new Point(12, 30),
-                    Size = new Size(575, 20),
+                    Font = new Font("Segoe UI", 7.9f, FontStyle.Regular),
+                    ForeColor = ArgonTheme.TextSecondary,
+                    Location = new Point(14, 31),
+                    Size = new Size(640, 20),
                     AutoEllipsis = true
                 };
                 pnlFpsAdvisorBanner.Controls.Add(lblAdvD);
 
-                Button btnLaunchAdv = CreateActionButton(pnlFpsAdvisorBanner, 600, 12, 198, 34, "🎮 Sunum Danışmanını Aç", Color.FromArgb(147, 51, 234));
+                Button btnLaunchAdv = CreateActionButton(pnlFpsAdvisorBanner, 670, 13, 210, 34, "  Sunum Danışmanını Aç", ArgonTheme.Accent);
+                btnLaunchAdv.ForeColor = Color.White;
+                btnLaunchAdv.Font = new Font("Segoe UI", 8.2f, FontStyle.Bold);
+                btnLaunchAdv.Image = ArgonIconPack.GetIcon("display", Color.White, 15);
+                btnLaunchAdv.ImageAlign = ContentAlignment.MiddleLeft;
+                btnLaunchAdv.TextAlign = ContentAlignment.MiddleCenter;
                 btnLaunchAdv.Click += (s, e) => ShowPresentationAdvisorDialog();
                 mainToolTip.SetToolTip(btnLaunchAdv, "Canlı DXGI MPO/Donanım Kompozisyonu, DWM zamanlaması, Win11 Pencereli Oyun Optimizasyonları ve oyun bazlı GPU kurallarını yönetir.");
 
                 pnlFpsAdvisorBanner.Resize += (s, e) =>
                 {
                     int bw = Math.Max(500, pnlFpsAdvisorBanner.ClientSize.Width);
-                    btnLaunchAdv.Location = new Point(bw - btnLaunchAdv.Width - 12, 12);
+                    btnLaunchAdv.Location = new Point(bw - btnLaunchAdv.Width - 14, 13);
                     lblAdvD.Width = Math.Max(280, btnLaunchAdv.Left - 24);
                 };
 
                 flow.Controls.Add(pnlFpsAdvisorBanner);
+            }
+            else if (category == "LATENCY")
+            {
+                Panel pnlLatencyLabBanner = new Panel
+                {
+                    Width = 900,
+                    Height = 60,
+                    BackColor = ArgonTheme.BgSurface,
+                    Margin = new Padding(0, 0, 0, 8)
+                };
+                pnlLatencyLabBanner.Paint += (s, e) =>
+                {
+                    using (Pen p = new Pen(ArgonTheme.BorderSubtle, 1))
+                    {
+                        e.Graphics.DrawRectangle(p, 0, 0, pnlLatencyLabBanner.Width - 1, pnlLatencyLabBanner.Height - 1);
+                    }
+                };
+
+                Label lblLatT = new Label
+                {
+                    Text = "INPUTLAB RAW INPUT, USB TOPOLOJİSİ VE PCIe MSI KESME",
+                    Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+                    ForeColor = ArgonTheme.Accent,
+                    UseMnemonic = false,
+                    AutoSize = false,
+                    AutoEllipsis = true,
+                    Location = new Point(14, 9),
+                    Size = new Size(460, 18)
+                };
+                pnlLatencyLabBanner.Controls.Add(lblLatT);
+
+                Label lblLatD = new Label
+                {
+                    Text = "WM_INPUT OS teslimat jitter/batch analizi, USB denetleyici paylaşımı ve PCIe aygıt MSI / affinity kesme politikalarını yönetin.",
+                    Font = new Font("Segoe UI", 7.8f, FontStyle.Regular),
+                    ForeColor = ArgonTheme.TextSecondary,
+                    UseMnemonic = false,
+                    Location = new Point(14, 31),
+                    Size = new Size(460, 20),
+                    AutoEllipsis = true
+                };
+                pnlLatencyLabBanner.Controls.Add(lblLatD);
+
+                Button btnLaunchMsi = CreateActionButton(pnlLatencyLabBanner, 490, 13, 168, 34, "  MSI & Kesme", ArgonTheme.BgSurfaceHover);
+                btnLaunchMsi.ForeColor = ArgonTheme.TextPrimary;
+                btnLaunchMsi.FlatAppearance.BorderSize = 1;
+                btnLaunchMsi.FlatAppearance.BorderColor = ArgonTheme.BorderSubtle;
+                btnLaunchMsi.Image = ArgonIconPack.GetIcon("zap", ArgonTheme.Accent, 14);
+                btnLaunchMsi.ImageAlign = ContentAlignment.MiddleLeft;
+                btnLaunchMsi.TextAlign = ContentAlignment.MiddleCenter;
+                btnLaunchMsi.UseMnemonic = false;
+                btnLaunchMsi.Click += (s, e) => ShowInterruptMsiExplorerDialog();
+                mainToolTip.SetToolTip(btnLaunchMsi, "Salt okunur PCIe MSI/DevicePolicy/AssignmentSetOverride tarayıcısı ve tek-aygıt güvenli düzenleyici.");
+
+                Button btnLaunchInputLab = CreateActionButton(pnlLatencyLabBanner, 668, 13, 198, 34, "  InputLab & USB", ArgonTheme.Accent);
+                btnLaunchInputLab.ForeColor = Color.White;
+                btnLaunchInputLab.Font = new Font("Segoe UI", 8.2f, FontStyle.Bold);
+                btnLaunchInputLab.Image = ArgonIconPack.GetIcon("mouse", Color.White, 14);
+                btnLaunchInputLab.ImageAlign = ContentAlignment.MiddleLeft;
+                btnLaunchInputLab.TextAlign = ContentAlignment.MiddleCenter;
+                btnLaunchInputLab.UseMnemonic = false;
+                btnLaunchInputLab.Click += (s, e) => ShowInputLabDiagnosticsDialog();
+                mainToolTip.SetToolTip(btnLaunchInputLab, "WM_INPUT mikro-zamanlama, batching/gap analizi ve USB HID xHCI topoloji denetimi.");
+
+                pnlLatencyLabBanner.Resize += (s, e) =>
+                {
+                    int bw = Math.Max(520, pnlLatencyLabBanner.ClientSize.Width);
+                    btnLaunchInputLab.Location = new Point(bw - btnLaunchInputLab.Width - 14, 13);
+                    btnLaunchMsi.Location = new Point(btnLaunchInputLab.Left - btnLaunchMsi.Width - 8, 13);
+                    lblLatT.Width = Math.Max(180, btnLaunchMsi.Left - 22);
+                    lblLatD.Width = Math.Max(180, btnLaunchMsi.Left - 22);
+                };
+
+                flow.Controls.Add(pnlLatencyLabBanner);
             }
 
             Panel colHdr = CreateTweakTableColumnHeader(catTitle);
@@ -13000,25 +19664,36 @@ namespace ArgonLatencyStudio
             pnlWatchdogSection.Controls.Add(pnlWatchdogActions);
 
             int ax = 0;
-            Button btnWAddSel = CreateActionButton(pnlWatchdogActions, ax, 4, 180, 26, "⭐ Alttan Seçili Süreci Ekle", Color.FromArgb(16, 185, 129));
-            btnWAddSel.ForeColor = Color.Black;
+            Button btnWAddSel = CreateActionButton(pnlWatchdogActions, ax, 4, 185, 26, "Alttan Seçili Süreci Ekle", ArgonTheme.Accent);
+            btnWAddSel.ForeColor = Color.White;
             btnWAddSel.Click += (s, e) => AddSelectedExplorerProcessToWatchdog();
-            ax += 186;
+            ax += 191;
 
-            Button btnWAddCust = CreateActionButton(pnlWatchdogActions, ax, 4, 150, 26, "+ Manuel Oyun Ekle...", Color.FromArgb(14, 165, 233));
-            btnWAddCust.ForeColor = Color.Black;
+            Button btnWAddCust = CreateActionButton(pnlWatchdogActions, ax, 4, 155, 26, "+ Manuel Oyun Ekle...", ArgonTheme.BgSurfaceHover);
+            btnWAddCust.ForeColor = ArgonTheme.TextPrimary;
+            btnWAddCust.FlatAppearance.BorderSize = 1;
+            btnWAddCust.FlatAppearance.BorderColor = ArgonTheme.BorderSubtle;
             btnWAddCust.Click += (s, e) => ShowAddCustomWatchdogGameDialog();
-            ax += 156;
+            ax += 161;
 
-            Button btnWEdit = CreateActionButton(pnlWatchdogActions, ax, 4, 90, 26, "✏️ Düzenle", Color.FromArgb(51, 65, 85));
+            Button btnWEdit = CreateActionButton(pnlWatchdogActions, ax, 4, 92, 26, "Düzenle", ArgonTheme.BgSurfaceHover);
+            btnWEdit.ForeColor = ArgonTheme.TextSecondary;
+            btnWEdit.FlatAppearance.BorderSize = 1;
+            btnWEdit.FlatAppearance.BorderColor = ArgonTheme.BorderSubtle;
             btnWEdit.Click += (s, e) => ShowEditWatchdogGameDialog();
-            ax += 96;
+            ax += 98;
 
-            Button btnWDel = CreateActionButton(pnlWatchdogActions, ax, 4, 90, 26, "🗑️ Kaldır", Color.FromArgb(71, 85, 105));
+            Button btnWDel = CreateActionButton(pnlWatchdogActions, ax, 4, 92, 26, "Kaldır", ArgonTheme.AlertSoft);
+            btnWDel.ForeColor = ArgonTheme.Alert;
+            btnWDel.FlatAppearance.BorderSize = 1;
+            btnWDel.FlatAppearance.BorderColor = ArgonTheme.Alert;
             btnWDel.Click += (s, e) => DeleteSelectedWatchdogGame();
-            ax += 96;
+            ax += 98;
 
-            Button btnWToggle = CreateActionButton(pnlWatchdogActions, ax, 4, 95, 26, "⏯️ Aç/Kapat", Color.FromArgb(30, 41, 59));
+            Button btnWToggle = CreateActionButton(pnlWatchdogActions, ax, 4, 96, 26, "Aç / Kapat", ArgonTheme.BgSurfaceHover);
+            btnWToggle.ForeColor = ArgonTheme.TextPrimary;
+            btnWToggle.FlatAppearance.BorderSize = 1;
+            btnWToggle.FlatAppearance.BorderColor = ArgonTheme.BorderSubtle;
             btnWToggle.Click += (s, e) => ToggleSelectedWatchdogGameRule();
 
             lvWatchdogGames.BringToFront();
@@ -13030,32 +19705,36 @@ namespace ArgonLatencyStudio
             {
                 Dock = DockStyle.Top,
                 Height = 36,
-                BackColor = Color.FromArgb(18, 23, 34)
+                BackColor = ArgonTheme.BgSurface
             };
             viewProcesses.Controls.Add(pnlExplorerHeader);
 
             Label lblFilter = new Label
             {
-                Text = "⚡ Canlı Süreç (.exe) Ara:",
-                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(56, 189, 248),
+                Text = "Canlı Süreç (.exe) Ara:",
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                ForeColor = ArgonTheme.Accent,
                 AutoSize = true,
-                Location = new Point(10, 10)
+                UseMnemonic = false,
+                Location = new Point(12, 10)
             };
             pnlExplorerHeader.Controls.Add(lblFilter);
 
             txtProcFilter = new TextBox
             {
-                Location = new Point(155, 7),
-                Size = new Size(180, 22),
-                BackColor = Color.FromArgb(12, 15, 22),
-                ForeColor = Color.White,
+                Location = new Point(178, 7),
+                Size = new Size(190, 22),
+                BackColor = ArgonTheme.BgInput,
+                ForeColor = ArgonTheme.TextPrimary,
                 BorderStyle = BorderStyle.FixedSingle
             };
             txtProcFilter.TextChanged += (s, e) => RefreshProcessTable();
             pnlExplorerHeader.Controls.Add(txtProcFilter);
 
-            Button btnRefProc = CreateActionButton(pnlExplorerHeader, 345, 6, 96, 25, "Listeyi Yenile", Color.FromArgb(51, 65, 85));
+            Button btnRefProc = CreateActionButton(pnlExplorerHeader, 376, 6, 118, 25, "Listeyi Yenile", ArgonTheme.BgSurfaceHover);
+            btnRefProc.ForeColor = ArgonTheme.TextPrimary;
+            btnRefProc.FlatAppearance.BorderSize = 1;
+            btnRefProc.FlatAppearance.BorderColor = ArgonTheme.BorderSubtle;
             btnRefProc.Click += (s, e) =>
             {
                 RefreshProcessTable();
@@ -13064,11 +19743,11 @@ namespace ArgonLatencyStudio
 
             Label lblExplorerHeaderTitle = new Label
             {
-                Text = "İpucu: Alttaki listeden herhangi bir oyuna çift tıklayarak veya butona basarak doğrudan Nöbetçi Kalkanına ekleyebilirsiniz.",
-                Font = new Font("Segoe UI", 7.6f, FontStyle.Regular),
-                ForeColor = Color.FromArgb(148, 163, 184),
+                Text = "İpucu: Listeden bir oyuna çift tıklayarak veya butona basarak Nöbetçi Kalkanına ekleyebilirsiniz.",
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Regular),
+                ForeColor = ArgonTheme.TextMuted,
                 AutoSize = true,
-                Location = new Point(455, 11)
+                Location = new Point(506, 11)
             };
             pnlExplorerHeader.Controls.Add(lblExplorerHeaderTitle);
 
@@ -13076,23 +19755,27 @@ namespace ArgonLatencyStudio
             {
                 Dock = DockStyle.Bottom,
                 Height = 76,
-                BackColor = Color.FromArgb(18, 23, 34)
+                BackColor = ArgonTheme.BgSurface
             };
             viewProcesses.Controls.Add(pnlBottomProc);
 
             int bx = 10;
-            Button bAddSelectedWatch = CreateActionButton(pnlBottomProc, bx, 8, 165, 28, "⭐ Nöbetçiye Ekle", Color.FromArgb(5, 150, 105));
-            bAddSelectedWatch.ForeColor = Color.Black;
+            Button bAddSelectedWatch = CreateActionButton(pnlBottomProc, bx, 8, 165, 28, "Nöbetçiye Ekle", ArgonTheme.Accent);
+            bAddSelectedWatch.ForeColor = Color.White;
             bAddSelectedWatch.Click += (s, e) => AddSelectedExplorerProcessToWatchdog();
             bx += 171;
 
-            Button bHigh = CreateActionButton(pnlBottomProc, bx, 8, 150, 28, "High Priority (Ağaç)", Color.FromArgb(16, 185, 129));
-            bHigh.ForeColor = Color.Black;
+            Button bHigh = CreateActionButton(pnlBottomProc, bx, 8, 150, 28, "High Priority (Ağaç)", ArgonTheme.BgSurfaceHover);
+            bHigh.ForeColor = ArgonTheme.TextPrimary;
+            bHigh.FlatAppearance.BorderSize = 1;
+            bHigh.FlatAppearance.BorderColor = ArgonTheme.BorderSubtle;
             bHigh.Click += (s, e) => ApplySelectedProcessPriority(ProcessPriorityClass.High);
             bx += 156;
 
-            Button bNoCore0 = CreateActionButton(pnlBottomProc, bx, 8, 150, 28, "Core 0 İzole (DPC)", Color.FromArgb(14, 165, 233));
-            bNoCore0.ForeColor = Color.Black;
+            Button bNoCore0 = CreateActionButton(pnlBottomProc, bx, 8, 150, 28, "Core 0 İzole (DPC)", ArgonTheme.BgSurfaceHover);
+            bNoCore0.ForeColor = ArgonTheme.TextPrimary;
+            bNoCore0.FlatAppearance.BorderSize = 1;
+            bNoCore0.FlatAppearance.BorderColor = ArgonTheme.BorderSubtle;
             bNoCore0.Click += (s, e) => ApplySelectedProcessTopology(1);
             bx += 156;
 
@@ -13406,8 +20089,8 @@ namespace ArgonLatencyStudio
             {
                 Dock = DockStyle.Fill,
                 AutoScroll = true,
-                BackColor = Color.FromArgb(13, 16, 23),
-                Padding = new Padding(12, 10, 12, 10),
+                BackColor = ArgonTheme.BgCanvas,
+                Padding = new Padding(18, 12, 18, 12),
                 Visible = false
             };
             pnlContentHost.Controls.Add(viewAutomationQoL);
@@ -13415,8 +20098,8 @@ namespace ArgonLatencyStudio
             // Container panel for smooth layout
             Panel pnlScrollBody = new Panel
             {
-                Location = new Point(12, 10),
-                Width = Math.Max(780, viewAutomationQoL.ClientSize.Width - 36),
+                Location = new Point(18, 12),
+                Width = Math.Max(780, viewAutomationQoL.ClientSize.Width - 40),
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 BackColor = Color.Transparent
@@ -13432,11 +20115,11 @@ namespace ArgonLatencyStudio
             {
                 Location = new Point(0, cardY),
                 Size = new Size(pnlScrollBody.Width, 130),
-                BackColor = Color.FromArgb(18, 23, 34)
+                BackColor = ArgonTheme.BgSurface
             };
             pnlCardPower.Paint += (s, e) =>
             {
-                using (Pen p = new Pen(Color.FromArgb(36, 46, 66), 1))
+                using (Pen p = new Pen(ArgonTheme.BorderSubtle, 1))
                 {
                     e.Graphics.DrawRectangle(p, 0, 0, pnlCardPower.Width - 1, pnlCardPower.Height - 1);
                 }
@@ -13445,26 +20128,31 @@ namespace ArgonLatencyStudio
 
             Label lblPowerTitle = new Label
             {
-                Text = "⏱️ AKILLI GÜÇ & KAPATMA ZAMANLAYICISI",
-                Font = new Font("Segoe UI", 9.0f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(56, 189, 248),
-                Location = new Point(12, 10),
-                AutoSize = true
+                Text = "AKILLI GÜÇ VE KAPATMA ZAMANLAYICISI",
+                Font = new Font("Segoe UI", 8.8f, FontStyle.Bold),
+                ForeColor = ArgonTheme.Accent,
+                Location = new Point(14, 10),
+                AutoSize = true,
+                UseMnemonic = false
             };
             pnlCardPower.Controls.Add(lblPowerTitle);
 
             Button btnGearPower = new Button
             {
-                Text = "⚙️ İndirme & Boşta Koruması",
+                Text = "  İndirme & Boşta Koruması",
+                Image = ArgonIconPack.GetIcon("settings", ArgonTheme.TextSecondary, 14),
+                ImageAlign = ContentAlignment.MiddleLeft,
+                TextAlign = ContentAlignment.MiddleCenter,
                 Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
                 FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(28, 35, 50),
-                ForeColor = Color.FromArgb(203, 213, 225),
-                Size = new Size(185, 24),
-                Location = new Point(pnlCardPower.Width - 195, 8),
+                BackColor = ArgonTheme.BgSurfaceHover,
+                ForeColor = ArgonTheme.TextSecondary,
+                UseMnemonic = false,
+                Size = new Size(195, 24),
+                Location = new Point(pnlCardPower.Width - 207, 8),
                 Cursor = Cursors.Hand
             };
-            btnGearPower.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnGearPower.FlatAppearance.BorderColor = ArgonTheme.BorderSubtle;
             btnGearPower.Click += (s, e) => ShowPowerTimerSettingsDialog();
             pnlCardPower.Controls.Add(btnGearPower);
 
@@ -13556,11 +20244,12 @@ namespace ArgonLatencyStudio
 
             btnStartPowerTimer = new Button
             {
-                Text = "▶️ Zamanlayıcıyı Başlat",
+                Text = "Zamanlayıcıyı Başlat",
                 Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
                 FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(16, 185, 129),
-                ForeColor = Color.Black,
+                BackColor = ArgonTheme.Accent,
+                ForeColor = Color.White,
+                UseMnemonic = false,
                 Size = new Size(165, 28),
                 Location = new Point(14, 84),
                 Cursor = Cursors.Hand
@@ -13571,25 +20260,28 @@ namespace ArgonLatencyStudio
 
             btnCancelPowerTimer = new Button
             {
-                Text = "⏹️ İptal Et",
+                Text = "İptal Et",
                 Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
                 FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(220, 38, 38),
-                ForeColor = Color.White,
+                BackColor = ArgonTheme.AlertSoft,
+                ForeColor = ArgonTheme.Alert,
+                UseMnemonic = false,
                 Size = new Size(95, 28),
                 Location = new Point(185, 84),
                 Cursor = Cursors.Hand,
                 Enabled = qolConfig.PowerTimerActive
             };
-            btnCancelPowerTimer.FlatAppearance.BorderSize = 0;
+            btnCancelPowerTimer.FlatAppearance.BorderSize = 1;
+            btnCancelPowerTimer.FlatAppearance.BorderColor = ArgonTheme.Alert;
             btnCancelPowerTimer.Click += (s, e) => CancelPowerTimer(true);
             pnlCardPower.Controls.Add(btnCancelPowerTimer);
 
             lblPowerTimerStatus = new Label
             {
-                Text = qolConfig.PowerTimerActive ? "⏳ Zamanlayıcı Aktif..." : "Zamanlayıcı pasif. Süre ve işlem türü seçip 'Başlat' butonuna basabilirsiniz.",
+                Text = qolConfig.PowerTimerActive ? "Zamanlayıcı Aktif..." : "Zamanlayıcı pasif. Süre ve işlem türü seçip 'Başlat' butonuna basabilirsiniz.",
                 Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
-                ForeColor = qolConfig.PowerTimerActive ? Color.FromArgb(253, 224, 71) : Color.FromArgb(148, 163, 184),
+                ForeColor = qolConfig.PowerTimerActive ? ArgonTheme.Accent : ArgonTheme.TextMuted,
+                UseMnemonic = false,
                 Location = new Point(290, 89),
                 AutoSize = true
             };
@@ -13604,11 +20296,11 @@ namespace ArgonLatencyStudio
             {
                 Location = new Point(0, cardY),
                 Size = new Size(pnlScrollBody.Width, 240),
-                BackColor = Color.FromArgb(18, 23, 34)
+                BackColor = ArgonTheme.BgSurface
             };
             pnlCardAlarms.Paint += (s, e) =>
             {
-                using (Pen p = new Pen(Color.FromArgb(36, 46, 66), 1))
+                using (Pen p = new Pen(ArgonTheme.BorderSubtle, 1))
                 {
                     e.Graphics.DrawRectangle(p, 0, 0, pnlCardAlarms.Width - 1, pnlCardAlarms.Height - 1);
                 }
@@ -13617,87 +20309,96 @@ namespace ArgonLatencyStudio
 
             Label lblAlarmTitle = new Label
             {
-                Text = "⏰ PERİYODİK & ZAMANLI ALARMLAR (KRİPTO KAPANIŞLARI & RUTİNLER)",
-                Font = new Font("Segoe UI", 9.0f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(168, 85, 247),
-                Location = new Point(12, 10),
+                Text = "PERİYODİK & ZAMANLI ALARMLAR (KRİPTO KAPANIŞLARI & RUTİNLER)",
+                Font = new Font("Segoe UI", 8.8f, FontStyle.Bold),
+                ForeColor = ArgonTheme.Accent,
+                UseMnemonic = false,
+                Location = new Point(14, 10),
                 AutoSize = true
             };
             pnlCardAlarms.Controls.Add(lblAlarmTitle);
 
             Button btnGearAlarms = new Button
             {
-                Text = "⚙️ Ses & Bildirim Ayarları",
+                Text = "  Ses & Bildirim Ayarları",
+                Image = ArgonIconPack.GetIcon("settings", ArgonTheme.TextSecondary, 14),
+                ImageAlign = ContentAlignment.MiddleLeft,
+                TextAlign = ContentAlignment.MiddleCenter,
                 Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
                 FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(28, 35, 50),
-                ForeColor = Color.FromArgb(203, 213, 225),
-                Size = new Size(185, 24),
-                Location = new Point(pnlCardAlarms.Width - 195, 8),
+                BackColor = ArgonTheme.BgSurfaceHover,
+                ForeColor = ArgonTheme.TextSecondary,
+                UseMnemonic = false,
+                Size = new Size(195, 24),
+                Location = new Point(pnlCardAlarms.Width - 207, 8),
                 Cursor = Cursors.Hand
             };
-            btnGearAlarms.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnGearAlarms.FlatAppearance.BorderColor = ArgonTheme.BorderSubtle;
             btnGearAlarms.Click += (s, e) => ShowAlarmAudioSettingsDialog();
             pnlCardAlarms.Controls.Add(btnGearAlarms);
 
             // Preset Buttons Bar
-            int preX = 12;
+            int preX = 14;
             Button btnPre4H = new Button
             {
-                Text = "⚡ 4H Kripto Mumu (03, 07, 11, 15, 19, 23)",
+                Text = "4H Kripto Mumu (03, 07, 11, 15, 19, 23)",
                 Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
                 FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(30, 41, 59),
-                ForeColor = Color.FromArgb(56, 189, 248),
+                BackColor = ArgonTheme.BgSurfaceHover,
+                ForeColor = ArgonTheme.TextPrimary,
+                UseMnemonic = false,
                 Size = new Size(250, 24),
                 Location = new Point(preX, 38),
                 Cursor = Cursors.Hand
             };
-            btnPre4H.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnPre4H.FlatAppearance.BorderColor = ArgonTheme.BorderSubtle;
             btnPre4H.Click += (s, e) => AddCryptoPresetAlarm("CRYPTO_4H");
             pnlCardAlarms.Controls.Add(btnPre4H);
             preX += 256;
 
             Button btnPreDaily = new Button
             {
-                Text = "📅 Günlük Kapanış (03:00 UTC+3)",
+                Text = "Günlük Kapanış (03:00 UTC+3)",
                 Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
                 FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(30, 41, 59),
-                ForeColor = Color.FromArgb(52, 211, 153),
+                BackColor = ArgonTheme.BgSurfaceHover,
+                ForeColor = ArgonTheme.TextPrimary,
+                UseMnemonic = false,
                 Size = new Size(205, 24),
                 Location = new Point(preX, 38),
                 Cursor = Cursors.Hand
             };
-            btnPreDaily.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnPreDaily.FlatAppearance.BorderColor = ArgonTheme.BorderSubtle;
             btnPreDaily.Click += (s, e) => AddCryptoPresetAlarm("CRYPTO_DAILY");
             pnlCardAlarms.Controls.Add(btnPreDaily);
             preX += 211;
 
             Button btnPreWeekly = new Button
             {
-                Text = "📅 Haftalık Kapanış (Pzt 03:00)",
+                Text = "Haftalık Kapanış (Pzt 03:00)",
                 Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
                 FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(30, 41, 59),
-                ForeColor = Color.FromArgb(251, 191, 36),
+                BackColor = ArgonTheme.BgSurfaceHover,
+                ForeColor = ArgonTheme.TextPrimary,
+                UseMnemonic = false,
                 Size = new Size(195, 24),
                 Location = new Point(preX, 38),
                 Cursor = Cursors.Hand
             };
-            btnPreWeekly.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnPreWeekly.FlatAppearance.BorderColor = ArgonTheme.BorderSubtle;
             btnPreWeekly.Click += (s, e) => AddCryptoPresetAlarm("CRYPTO_WEEKLY");
             pnlCardAlarms.Controls.Add(btnPreWeekly);
             preX += 201;
 
             Button btnAddAlarm = new Button
             {
-                Text = "➕ Özel Alarm Ekle...",
+                Text = "+ Özel Alarm Ekle...",
                 Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
                 FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(124, 58, 237),
+                BackColor = ArgonTheme.Accent,
                 ForeColor = Color.White,
-                Size = new Size(135, 24),
+                UseMnemonic = false,
+                Size = new Size(145, 24),
                 Location = new Point(preX, 38),
                 Cursor = Cursors.Hand
             };
@@ -13810,11 +20511,11 @@ namespace ArgonLatencyStudio
             {
                 Location = new Point(0, cardY),
                 Size = new Size(pnlScrollBody.Width, 205),
-                BackColor = Color.FromArgb(18, 23, 34)
+                BackColor = ArgonTheme.BgSurface
             };
             pnlCardGameNotes.Paint += (s, e) =>
             {
-                using (Pen p = new Pen(Color.FromArgb(36, 46, 66), 1))
+                using (Pen p = new Pen(ArgonTheme.BorderSubtle, 1))
                 {
                     e.Graphics.DrawRectangle(p, 0, 0, pnlCardGameNotes.Width - 1, pnlCardGameNotes.Height - 1);
                 }
@@ -13823,10 +20524,11 @@ namespace ArgonLatencyStudio
 
             Label lblGameTitle = new Label
             {
-                Text = "🎮 OYUN HATIRLATICI & NOT KALKANI (OYUN İÇİ SESSİZ NOTLAR)",
-                Font = new Font("Segoe UI", 9.0f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(251, 191, 36),
-                Location = new Point(12, 10),
+                Text = "OYUN HATIRLATICI & NOT KALKANI (OYUN İÇİ SESSİZ NOTLAR)",
+                Font = new Font("Segoe UI", 8.8f, FontStyle.Bold),
+                ForeColor = ArgonTheme.Accent,
+                UseMnemonic = false,
+                Location = new Point(14, 10),
                 AutoSize = true
             };
             pnlCardGameNotes.Controls.Add(lblGameTitle);
@@ -13835,21 +20537,23 @@ namespace ArgonLatencyStudio
             {
                 Text = "Seçilen oyun (.exe) açıldığında masaüstünde sessizce notlarınızı hatırlatır (Ses çalmaz; sadece görsel bildirim).",
                 Font = new Font("Segoe UI", 7.8f, FontStyle.Regular),
-                ForeColor = Color.FromArgb(148, 163, 184),
-                Location = new Point(12, 30),
+                ForeColor = ArgonTheme.TextMuted,
+                UseMnemonic = false,
+                Location = new Point(14, 30),
                 AutoSize = true
             };
             pnlCardGameNotes.Controls.Add(lblGameSub);
 
             Button btnAddGame = new Button
             {
-                Text = "➕ Oyuna Not Ekle...",
+                Text = "+ Oyuna Not Ekle...",
                 Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
                 FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(217, 119, 6),
+                BackColor = ArgonTheme.Accent,
                 ForeColor = Color.White,
+                UseMnemonic = false,
                 Size = new Size(160, 24),
-                Location = new Point(pnlCardGameNotes.Width - 170, 8),
+                Location = new Point(pnlCardGameNotes.Width - 172, 8),
                 Cursor = Cursors.Hand
             };
             btnAddGame.FlatAppearance.BorderSize = 0;
@@ -13931,12 +20635,12 @@ namespace ArgonLatencyStudio
             Panel pnlCardRam = new Panel
             {
                 Location = new Point(0, cardY),
-                Size = new Size(pnlScrollBody.Width, 115),
-                BackColor = Color.FromArgb(18, 23, 34)
+                Size = new Size(pnlScrollBody.Width, 142),
+                BackColor = ArgonTheme.BgSurface
             };
             pnlCardRam.Paint += (s, e) =>
             {
-                using (Pen p = new Pen(Color.FromArgb(36, 46, 66), 1))
+                using (Pen p = new Pen(ArgonTheme.BorderSubtle, 1))
                 {
                     e.Graphics.DrawRectangle(p, 0, 0, pnlCardRam.Width - 1, pnlCardRam.Height - 1);
                 }
@@ -13945,26 +20649,31 @@ namespace ArgonLatencyStudio
 
             Label lblRamTitle = new Label
             {
-                Text = "🧠 AKILLI RAM & STANDBY LIST OTOMASYONU",
-                Font = new Font("Segoe UI", 9.0f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(52, 211, 153),
-                Location = new Point(12, 10),
+                Text = "AKILLI RAM & STANDBY LIST OTOMASYONU",
+                Font = new Font("Segoe UI", 8.8f, FontStyle.Bold),
+                ForeColor = ArgonTheme.Accent,
+                UseMnemonic = false,
+                Location = new Point(14, 10),
                 AutoSize = true
             };
             pnlCardRam.Controls.Add(lblRamTitle);
 
             Button btnGearRam = new Button
             {
-                Text = "⚙️ RAM Ayarları",
+                Text = "  RAM Ayarları",
+                Image = ArgonIconPack.GetIcon("settings", ArgonTheme.TextSecondary, 14),
+                ImageAlign = ContentAlignment.MiddleLeft,
+                TextAlign = ContentAlignment.MiddleCenter,
                 Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
                 FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(28, 35, 50),
-                ForeColor = Color.FromArgb(203, 213, 225),
-                Size = new Size(130, 24),
-                Location = new Point(pnlCardRam.Width - 140, 8),
+                BackColor = ArgonTheme.BgSurfaceHover,
+                ForeColor = ArgonTheme.TextSecondary,
+                UseMnemonic = false,
+                Size = new Size(138, 24),
+                Location = new Point(pnlCardRam.Width - 150, 8),
                 Cursor = Cursors.Hand
             };
-            btnGearRam.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnGearRam.FlatAppearance.BorderColor = ArgonTheme.BorderSubtle;
             btnGearRam.Click += (s, e) => ShowRamCleanSettingsDialog();
             pnlCardRam.Controls.Add(btnGearRam);
 
@@ -13972,7 +20681,8 @@ namespace ArgonLatencyStudio
             {
                 Text = "Otomatik RAM Eşik Temizleyicisini Etkinleştir",
                 Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(226, 232, 240),
+                ForeColor = ArgonTheme.TextPrimary,
+                UseMnemonic = false,
                 Location = new Point(14, 38),
                 AutoSize = true,
                 Checked = qolConfig.AutoRamCleanActive
@@ -13986,21 +20696,21 @@ namespace ArgonLatencyStudio
             pnlCardRam.Controls.Add(chkAutoRamEnable);
 
             // Thresholds
-            rbRam10 = new RadioButton { Text = "%10 Kala", Location = new Point(14, 68), AutoSize = true, ForeColor = Color.FromArgb(203, 213, 225), Font = new Font("Segoe UI", 8.0f), Checked = (qolConfig.RamFreeThresholdPercent == 10) };
-            rbRam15 = new RadioButton { Text = "%15 Kala (Önerilen)", Location = new Point(95, 68), AutoSize = true, ForeColor = Color.FromArgb(203, 213, 225), Font = new Font("Segoe UI", 8.0f), Checked = (qolConfig.RamFreeThresholdPercent == 15) };
-            rbRam20 = new RadioButton { Text = "%20 Kala", Location = new Point(230, 68), AutoSize = true, ForeColor = Color.FromArgb(203, 213, 225), Font = new Font("Segoe UI", 8.0f), Checked = (qolConfig.RamFreeThresholdPercent == 20) };
-            rbRam30 = new RadioButton { Text = "%30 Kala", Location = new Point(310, 68), AutoSize = true, ForeColor = Color.FromArgb(203, 213, 225), Font = new Font("Segoe UI", 8.0f), Checked = (qolConfig.RamFreeThresholdPercent == 30) };
-            rbRamCustom = new RadioButton { Text = "Serbest Eşik (%):", Location = new Point(390, 68), AutoSize = true, ForeColor = Color.FromArgb(203, 213, 225), Font = new Font("Segoe UI", 8.0f), Checked = (qolConfig.RamFreeThresholdPercent != 10 && qolConfig.RamFreeThresholdPercent != 15 && qolConfig.RamFreeThresholdPercent != 20 && qolConfig.RamFreeThresholdPercent != 30) };
+            rbRam10 = new RadioButton { Text = "%10 Kala", Location = new Point(14, 66), AutoSize = true, ForeColor = ArgonTheme.TextSecondary, Font = new Font("Segoe UI", 8.0f), Checked = (qolConfig.RamFreeThresholdPercent == 10) };
+            rbRam15 = new RadioButton { Text = "%15 Kala (Önerilen)", Location = new Point(98, 66), AutoSize = true, ForeColor = ArgonTheme.TextSecondary, Font = new Font("Segoe UI", 8.0f), Checked = (qolConfig.RamFreeThresholdPercent == 15) };
+            rbRam20 = new RadioButton { Text = "%20 Kala", Location = new Point(238, 66), AutoSize = true, ForeColor = ArgonTheme.TextSecondary, Font = new Font("Segoe UI", 8.0f), Checked = (qolConfig.RamFreeThresholdPercent == 20) };
+            rbRam30 = new RadioButton { Text = "%30 Kala", Location = new Point(322, 66), AutoSize = true, ForeColor = ArgonTheme.TextSecondary, Font = new Font("Segoe UI", 8.0f), Checked = (qolConfig.RamFreeThresholdPercent == 30) };
+            rbRamCustom = new RadioButton { Text = "Serbest Eşik (%):", Location = new Point(406, 66), AutoSize = true, ForeColor = ArgonTheme.TextSecondary, Font = new Font("Segoe UI", 8.0f), Checked = (qolConfig.RamFreeThresholdPercent != 10 && qolConfig.RamFreeThresholdPercent != 15 && qolConfig.RamFreeThresholdPercent != 20 && qolConfig.RamFreeThresholdPercent != 30) };
 
             numRamCustom = new NumericUpDown
             {
                 Minimum = 1,
                 Maximum = 50,
                 Value = Math.Max(1, Math.Min(50, qolConfig.RamFreeThresholdPercent)),
-                Location = new Point(510, 67),
-                Width = 45,
-                BackColor = Color.FromArgb(12, 15, 22),
-                ForeColor = Color.FromArgb(52, 211, 153),
+                Location = new Point(530, 65),
+                Width = 48,
+                BackColor = ArgonTheme.BgInput,
+                ForeColor = ArgonTheme.TextPrimary,
                 Font = new Font("Segoe UI", 8.0f, FontStyle.Bold)
             };
 
@@ -14028,21 +20738,38 @@ namespace ArgonLatencyStudio
             pnlCardRam.Controls.Add(rbRamCustom);
             pnlCardRam.Controls.Add(numRamCustom);
 
-            Button btnPurgeRam = new Button
+            Button btnOpenVmCard = new Button
             {
-                Text = "🧹 Şimdi Standby & RAM Boşalt",
+                Text = "Sanal Bellek & Pagefile...",
                 Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
                 FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(16, 185, 129),
-                ForeColor = Color.Black,
-                Size = new Size(195, 26),
-                Location = new Point(570, 64),
+                BackColor = ArgonTheme.BgSurfaceHover,
+                ForeColor = ArgonTheme.TextPrimary,
+                UseMnemonic = false,
+                Size = new Size(190, 28),
+                Location = new Point(14, 100),
+                Cursor = Cursors.Hand
+            };
+            btnOpenVmCard.FlatAppearance.BorderColor = ArgonTheme.BorderSubtle;
+            btnOpenVmCard.Click += (s, e) => ShowVirtualMemoryAdvisorDialog();
+            pnlCardRam.Controls.Add(btnOpenVmCard);
+
+            Button btnPurgeRam = new Button
+            {
+                Text = "Şimdi Standby Boşalt",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = ArgonTheme.Accent,
+                ForeColor = Color.White,
+                UseMnemonic = false,
+                Size = new Size(185, 28),
+                Location = new Point(214, 100),
                 Cursor = Cursors.Hand
             };
             btnPurgeRam.FlatAppearance.BorderSize = 0;
             btnPurgeRam.Click += (s, e) =>
             {
-                ExecuteSmartRamAndStandbyPurge(qolConfig.RamCleanProtectForegroundGame);
+                ExecuteSmartRamAndStandbyPurge(qolConfig.RamCleanProtectForegroundGame, false);
                 UpdateQoLRamStatusLabel();
             };
             pnlCardRam.Controls.Add(btnPurgeRam);
@@ -14051,13 +20778,14 @@ namespace ArgonLatencyStudio
             {
                 Text = "Canlı RAM: Taranıyor...",
                 Font = new Font("Segoe UI", 8.0f, FontStyle.Regular),
-                ForeColor = Color.FromArgb(148, 163, 184),
-                Location = new Point(310, 40),
+                ForeColor = ArgonTheme.TextMuted,
+                UseMnemonic = false,
+                Location = new Point(320, 40),
                 AutoSize = true
             };
             pnlCardRam.Controls.Add(lblQoLRamStatus);
 
-            cardY += 125;
+            cardY += 152;
 
             // -------------------------------------------------------------
             // CARD 5: BAĞIMSIZ SİSTEM & GPU SHADER ÖNBELLEK TEMİZLEYİCİ
@@ -14066,11 +20794,11 @@ namespace ArgonLatencyStudio
             {
                 Location = new Point(0, cardY),
                 Size = new Size(pnlScrollBody.Width, 140),
-                BackColor = Color.FromArgb(18, 23, 34)
+                BackColor = ArgonTheme.BgSurface
             };
             pnlCardCleaners.Paint += (s, e) =>
             {
-                using (Pen p = new Pen(Color.FromArgb(36, 46, 66), 1))
+                using (Pen p = new Pen(ArgonTheme.BorderSubtle, 1))
                 {
                     e.Graphics.DrawRectangle(p, 0, 0, pnlCardCleaners.Width - 1, pnlCardCleaners.Height - 1);
                 }
@@ -14079,10 +20807,11 @@ namespace ArgonLatencyStudio
 
             Label lblCleanTitle = new Label
             {
-                Text = "🧹 BAĞIMSIZ SİSTEM & GPU SHADER ÖNBELLEK TEMİZLEYİCİ",
-                Font = new Font("Segoe UI", 9.0f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(248, 113, 113),
-                Location = new Point(12, 10),
+                Text = "BAĞIMSIZ SİSTEM & GPU SHADER ÖNBELLEK TEMİZLEYİCİ",
+                Font = new Font("Segoe UI", 8.8f, FontStyle.Bold),
+                ForeColor = ArgonTheme.Accent,
+                UseMnemonic = false,
+                Location = new Point(14, 10),
                 AutoSize = true
             };
             pnlCardCleaners.Controls.Add(lblCleanTitle);
@@ -14091,8 +20820,9 @@ namespace ArgonLatencyStudio
             {
                 Text = "İki temizleme işlemi birbirinden tamamen bağımsızdır; dilediğinizi ayrı ayrı tek tıkla çalıştırabilirsiniz.",
                 Font = new Font("Segoe UI", 7.8f, FontStyle.Regular),
-                ForeColor = Color.FromArgb(148, 163, 184),
-                Location = new Point(12, 30),
+                ForeColor = ArgonTheme.TextMuted,
+                UseMnemonic = false,
+                Location = new Point(14, 30),
                 AutoSize = true
             };
             pnlCardCleaners.Controls.Add(lblCleanSub);
@@ -14102,13 +20832,13 @@ namespace ArgonLatencyStudio
             // Box 1: Windows Temp & Prefetch
             Panel pnlBoxTemp = new Panel
             {
-                Location = new Point(12, 52),
+                Location = new Point(14, 52),
                 Size = new Size(subBoxW, 76),
-                BackColor = Color.FromArgb(12, 15, 22)
+                BackColor = ArgonTheme.BgInput
             };
             pnlBoxTemp.Paint += (s, e) =>
             {
-                using (Pen p = new Pen(Color.FromArgb(40, 50, 72), 1))
+                using (Pen p = new Pen(ArgonTheme.BorderSubtle, 1))
                 {
                     e.Graphics.DrawRectangle(p, 0, 0, pnlBoxTemp.Width - 1, pnlBoxTemp.Height - 1);
                 }
@@ -14117,9 +20847,10 @@ namespace ArgonLatencyStudio
 
             Label lblBox1Title = new Label
             {
-                Text = "🗑️ Windows Temp & Prefetch Dosyaları",
+                Text = "Windows Temp & Prefetch Dosyaları",
                 Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(203, 213, 225),
+                ForeColor = ArgonTheme.TextPrimary,
+                UseMnemonic = false,
                 Location = new Point(10, 8),
                 AutoSize = true
             };
@@ -14129,7 +20860,8 @@ namespace ArgonLatencyStudio
             {
                 Text = "%TEMP% ve kilitli olmayan Windows geçici dosyaları temizlenmeye hazır.",
                 Font = new Font("Segoe UI", 7.6f, FontStyle.Regular),
-                ForeColor = Color.FromArgb(148, 163, 184),
+                ForeColor = ArgonTheme.TextMuted,
+                UseMnemonic = false,
                 Location = new Point(10, 28),
                 Size = new Size(subBoxW - 20, 18),
                 AutoEllipsis = true
@@ -14138,16 +20870,17 @@ namespace ArgonLatencyStudio
 
             btnCleanTempNow = new Button
             {
-                Text = "🧹 Windows Temp Temizle",
+                Text = "Windows Temp Temizle",
                 Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
                 FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(30, 41, 59),
-                ForeColor = Color.FromArgb(56, 189, 248),
+                BackColor = ArgonTheme.BgSurfaceHover,
+                ForeColor = ArgonTheme.Accent,
+                UseMnemonic = false,
                 Size = new Size(180, 22),
                 Location = new Point(10, 48),
                 Cursor = Cursors.Hand
             };
-            btnCleanTempNow.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnCleanTempNow.FlatAppearance.BorderColor = ArgonTheme.BorderSubtle;
             btnCleanTempNow.Click += (s, e) => RunSystemTempCleanAsync();
             pnlBoxTemp.Controls.Add(btnCleanTempNow);
 
@@ -14156,11 +20889,11 @@ namespace ArgonLatencyStudio
             {
                 Location = new Point(subBoxW + 24, 52),
                 Size = new Size(subBoxW, 76),
-                BackColor = Color.FromArgb(12, 15, 22)
+                BackColor = ArgonTheme.BgInput
             };
             pnlBoxShader.Paint += (s, e) =>
             {
-                using (Pen p = new Pen(Color.FromArgb(40, 50, 72), 1))
+                using (Pen p = new Pen(ArgonTheme.BorderSubtle, 1))
                 {
                     e.Graphics.DrawRectangle(p, 0, 0, pnlBoxShader.Width - 1, pnlBoxShader.Height - 1);
                 }
@@ -14169,9 +20902,10 @@ namespace ArgonLatencyStudio
 
             Label lblBox2Title = new Label
             {
-                Text = "🎮 Ekran Kartı Shader Önbelleği (DirectX / NVIDIA / AMD)",
+                Text = "Ekran Kartı Shader Önbelleği (DirectX / NVIDIA / AMD)",
                 Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(203, 213, 225),
+                ForeColor = ArgonTheme.TextPrimary,
+                UseMnemonic = false,
                 Location = new Point(10, 8),
                 AutoSize = true
             };
@@ -14181,7 +20915,8 @@ namespace ArgonLatencyStudio
             {
                 Text = "DirectX D3D, NVIDIA DXCache ve AMD Shader havuzları temizlenmeye hazır.",
                 Font = new Font("Segoe UI", 7.6f, FontStyle.Regular),
-                ForeColor = Color.FromArgb(148, 163, 184),
+                ForeColor = ArgonTheme.TextMuted,
+                UseMnemonic = false,
                 Location = new Point(10, 28),
                 Size = new Size(subBoxW - 20, 18),
                 AutoEllipsis = true
@@ -14190,11 +20925,12 @@ namespace ArgonLatencyStudio
 
             btnCleanShaderNow = new Button
             {
-                Text = "🎮 GPU Shader Önbelleğini Temizle",
+                Text = "GPU Shader Önbelleğini Temizle",
                 Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
                 FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(30, 41, 59),
-                ForeColor = Color.FromArgb(248, 113, 113),
+                BackColor = ArgonTheme.BgSurfaceHover,
+                ForeColor = ArgonTheme.Alert,
+                UseMnemonic = false,
                 Size = new Size(220, 22),
                 Location = new Point(10, 48),
                 Cursor = Cursors.Hand
@@ -14202,6 +20938,523 @@ namespace ArgonLatencyStudio
             btnCleanShaderNow.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
             btnCleanShaderNow.Click += (s, e) => RunGpuShaderCleanAsync();
             pnlBoxShader.Controls.Add(btnCleanShaderNow);
+
+            cardY += 152;
+
+            // -------------------------------------------------------------
+            // CARD 6: 🐧 LINUX-LIKE HASSAS TEKERLEKSİZ KAYDIRMA (MARBLE & TRACKBALL SCROLL)
+            // -------------------------------------------------------------
+            pnlCardLinuxScroll = new Panel
+            {
+                Location = new Point(0, cardY),
+                Size = new Size(pnlScrollBody.Width, 278),
+                BackColor = Color.FromArgb(18, 23, 34)
+            };
+            pnlCardLinuxScroll.Paint += (s, e) =>
+            {
+                using (Pen p = new Pen(Color.FromArgb(36, 46, 66), 1))
+                {
+                    e.Graphics.DrawRectangle(p, 0, 0, pnlCardLinuxScroll.Width - 1, pnlCardLinuxScroll.Height - 1);
+                }
+            };
+            pnlScrollBody.Controls.Add(pnlCardLinuxScroll);
+
+            Label lblScrollTitle = new Label
+            {
+                Text = "🐧 LINUX-LIKE KAYDIRMA (MARBLE & TRACKBALL)",
+                Font = new Font("Segoe UI", 9.0f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(45, 212, 191),
+                Location = new Point(12, 10),
+                AutoSize = true,
+                UseMnemonic = false
+            };
+            pnlCardLinuxScroll.Controls.Add(lblScrollTitle);
+
+            Label lblScrollSubtitle = new Label
+            {
+                Text = "Orta tuşa basılı tutarak fare/trackball ile kaydırın (eksen kilidi & yumuşak geçiş). Hızlı tık standart orta tık gönderir.",
+                Font = new Font("Segoe UI", 7.6f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(148, 163, 184),
+                Location = new Point(14, 30),
+                AutoSize = true,
+                UseMnemonic = false
+            };
+            pnlCardLinuxScroll.Controls.Add(lblScrollSubtitle);
+
+            lblScrollStatusBadge = new Label
+            {
+                Text = (linuxScrollEngine != null && linuxScrollEngine.IsRunning) ? "● AKTİF (ÇALIŞIYOR)" : "○ DURDURULDU",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                ForeColor = (linuxScrollEngine != null && linuxScrollEngine.IsRunning) ? Color.FromArgb(52, 211, 153) : Color.FromArgb(148, 163, 184),
+                Location = new Point(pnlCardLinuxScroll.Width - 282, 11),
+                AutoSize = true
+            };
+            pnlCardLinuxScroll.Controls.Add(lblScrollStatusBadge);
+
+            btnTakeoverMarble = new Button
+            {
+                Text = "⚠️ Harici MarbleScroll Kapat & Devret",
+                Font = new Font("Segoe UI", 7.4f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(45, 32, 16),
+                ForeColor = Color.FromArgb(251, 191, 36),
+                Size = new Size(218, 24),
+                Location = new Point(pnlCardLinuxScroll.Width - 510, 8),
+                Cursor = Cursors.Hand,
+                UseMnemonic = false,
+                Visible = LinuxlikeScrollEngine.DetectExternalProcess()
+            };
+            btnTakeoverMarble.FlatAppearance.BorderColor = Color.FromArgb(217, 119, 6);
+            btnTakeoverMarble.Click += (s, e) =>
+            {
+                string msg;
+                if (LinuxlikeScrollEngine.StopExternalProcessAndTask(out msg))
+                {
+                    btnTakeoverMarble.Visible = false;
+                    if (linuxScrollEngine != null && !linuxScrollEngine.IsRunning)
+                    {
+                        linuxScrollEngine.Start();
+                        linuxScrollConfig.Enabled = true;
+                        linuxScrollConfig.SaveToFile(linuxScrollConfigPath);
+                    }
+                    UpdateLinuxScrollCardUi();
+                    ShowQoLToast("🛡️ MarbleScrollPlus Devralındı", "Harici süreç kapatıldı. Kaydırma motoru artık Argon içinde çalışıyor.", "Tamam", null, Color.FromArgb(52, 211, 153), 5, false);
+                }
+                else
+                {
+                    MessageBox.Show(msg, "Bilgi", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+            };
+            pnlCardLinuxScroll.Controls.Add(btnTakeoverMarble);
+
+            btnToggleScroll = new Button
+            {
+                Text = (linuxScrollEngine != null && linuxScrollEngine.IsRunning) ? "⏸️ Durdur" : "▶️ Başlat",
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(28, 35, 50),
+                ForeColor = (linuxScrollEngine != null && linuxScrollEngine.IsRunning) ? Color.FromArgb(248, 113, 113) : Color.FromArgb(52, 211, 153),
+                Size = new Size(110, 24),
+                Location = new Point(pnlCardLinuxScroll.Width - 122, 8),
+                Cursor = Cursors.Hand
+            };
+            btnToggleScroll.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnToggleScroll.Click += (s, e) => ToggleLinuxlikeScroll();
+            pnlCardLinuxScroll.Controls.Add(btnToggleScroll);
+
+            chkScrollAutoStart = new CheckBox
+            {
+                Text = "Argon açılışında otomatik başlat",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(226, 232, 240),
+                Location = new Point(14, 52),
+                AutoSize = true,
+                Checked = linuxScrollConfig.AutoStartWithArgon
+            };
+            chkScrollAutoStart.CheckedChanged += (s, e) =>
+            {
+                linuxScrollConfig.AutoStartWithArgon = chkScrollAutoStart.Checked;
+            };
+            pnlCardLinuxScroll.Controls.Add(chkScrollAutoStart);
+
+            chkScrollAxisLock = new CheckBox
+            {
+                Text = "Keskin Eksen Kilidi",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(226, 232, 240),
+                Location = new Point(226, 52),
+                AutoSize = true,
+                Checked = linuxScrollConfig.AxisLock
+            };
+            chkScrollAxisLock.CheckedChanged += (s, e) =>
+            {
+                linuxScrollConfig.AxisLock = chkScrollAxisLock.Checked;
+            };
+            pnlCardLinuxScroll.Controls.Add(chkScrollAxisLock);
+
+            Label lblAxisDetect = new Label
+            {
+                Text = "Yön Eşiği (px):",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(148, 163, 184),
+                Location = new Point(365, 53),
+                AutoSize = true
+            };
+            pnlCardLinuxScroll.Controls.Add(lblAxisDetect);
+
+            numScrollAxisDetect = new NumericUpDown
+            {
+                Minimum = 2,
+                Maximum = 16,
+                Value = Math.Max(2, Math.Min(16, linuxScrollConfig.AxisDetectPx)),
+                Location = new Point(458, 50),
+                Width = 44,
+                BackColor = Color.FromArgb(12, 15, 22),
+                ForeColor = Color.FromArgb(134, 239, 172),
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold)
+            };
+            pnlCardLinuxScroll.Controls.Add(numScrollAxisDetect);
+
+            Label lblTrig = new Label
+            {
+                Text = "Tetikleyici:",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(148, 163, 184),
+                Location = new Point(514, 53),
+                AutoSize = true
+            };
+            pnlCardLinuxScroll.Controls.Add(lblTrig);
+
+            cmbScrollTrigger = new ComboBox
+            {
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(12, 15, 22),
+                ForeColor = Color.FromArgb(230, 237, 243),
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                Location = new Point(580, 50),
+                Width = 195
+            };
+            cmbScrollTrigger.Items.Add("Orta Tuş (Middle Click - Linux)");
+            cmbScrollTrigger.Items.Add("Geri Tuşu (XButton1)");
+            cmbScrollTrigger.Items.Add("İleri Tuşu (XButton2)");
+            cmbScrollTrigger.SelectedIndex = Math.Max(0, Math.Min(2, (int)linuxScrollConfig.Trigger));
+            cmbScrollTrigger.SelectedIndexChanged += (s, e) =>
+            {
+                linuxScrollConfig.Trigger = (ScrollTriggerButton)cmbScrollTrigger.SelectedIndex;
+            };
+            pnlCardLinuxScroll.Controls.Add(cmbScrollTrigger);
+
+            int scrollSubW = (pnlScrollBody.Width - 36) / 2;
+
+            pnlBoxVert = new Panel
+            {
+                Location = new Point(12, 80),
+                Size = new Size(scrollSubW, 142),
+                BackColor = Color.FromArgb(24, 30, 44)
+            };
+            pnlBoxVert.Paint += (s, e) =>
+            {
+                using (Pen p = new Pen(Color.FromArgb(45, 55, 78), 1))
+                {
+                    e.Graphics.DrawRectangle(p, 0, 0, pnlBoxVert.Width - 1, pnlBoxVert.Height - 1);
+                }
+            };
+            pnlCardLinuxScroll.Controls.Add(pnlBoxVert);
+
+            Label lblVertTitle = new Label
+            {
+                Text = "↕️ DİKEY EKSEN (VERTICAL SCROLL)",
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(56, 189, 248),
+                Location = new Point(10, 8),
+                AutoSize = true
+            };
+            pnlBoxVert.Controls.Add(lblVertTitle);
+
+            chkVertEnabled = new CheckBox
+            {
+                Text = "Etkin",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(226, 232, 240),
+                Location = new Point(10, 30),
+                AutoSize = true,
+                Checked = linuxScrollConfig.Vertical.Enabled
+            };
+            pnlBoxVert.Controls.Add(chkVertEnabled);
+
+            chkVertInvert = new CheckBox
+            {
+                Text = "Ters Çevir (Doğal)",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(203, 213, 225),
+                Location = new Point(70, 30),
+                AutoSize = true,
+                Checked = linuxScrollConfig.Vertical.Invert
+            };
+            pnlBoxVert.Controls.Add(chkVertInvert);
+
+            chkVertSmooth = new CheckBox
+            {
+                Text = "1:1 Doğrudan Piksel Modu",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(203, 213, 225),
+                Location = new Point(195, 30),
+                AutoSize = true,
+                Checked = linuxScrollConfig.Vertical.Smoothing
+            };
+            pnlBoxVert.Controls.Add(chkVertSmooth);
+
+            Label lblVSens = new Label { Text = "Hassasiyet (1-20):", Font = new Font("Segoe UI", 7.8f, FontStyle.Regular), ForeColor = Color.FromArgb(148, 163, 184), Location = new Point(10, 60), AutoSize = true };
+            pnlBoxVert.Controls.Add(lblVSens);
+
+            numVertSens = new NumericUpDown
+            {
+                Minimum = 1,
+                Maximum = 20,
+                Value = Math.Max(1, Math.Min(20, linuxScrollConfig.Vertical.Sensitivity)),
+                Location = new Point(115, 58),
+                Width = 45,
+                BackColor = Color.FromArgb(12, 15, 22),
+                ForeColor = Color.FromArgb(56, 189, 248),
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold)
+            };
+            pnlBoxVert.Controls.Add(numVertSens);
+
+            Label lblVSpd = new Label { Text = "Hız (1-30):", Font = new Font("Segoe UI", 7.8f, FontStyle.Regular), ForeColor = Color.FromArgb(148, 163, 184), Location = new Point(175, 60), AutoSize = true };
+            pnlBoxVert.Controls.Add(lblVSpd);
+
+            numVertSpeed = new NumericUpDown
+            {
+                Minimum = 1,
+                Maximum = 30,
+                Value = Math.Max(1, Math.Min(30, linuxScrollConfig.Vertical.Speed)),
+                Location = new Point(238, 58),
+                Width = 45,
+                BackColor = Color.FromArgb(12, 15, 22),
+                ForeColor = Color.FromArgb(56, 189, 248),
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold)
+            };
+            pnlBoxVert.Controls.Add(numVertSpeed);
+
+            lblVertCalc = new Label
+            {
+                Font = new Font("Consolas", 7.5f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(52, 211, 153),
+                Location = new Point(10, 92),
+                Size = new Size(scrollSubW - 20, 38)
+            };
+            pnlBoxVert.Controls.Add(lblVertCalc);
+
+            pnlBoxHoriz = new Panel
+            {
+                Location = new Point(scrollSubW + 24, 80),
+                Size = new Size(scrollSubW, 142),
+                BackColor = Color.FromArgb(24, 30, 44)
+            };
+            pnlBoxHoriz.Paint += (s, e) =>
+            {
+                using (Pen p = new Pen(Color.FromArgb(45, 55, 78), 1))
+                {
+                    e.Graphics.DrawRectangle(p, 0, 0, pnlBoxHoriz.Width - 1, pnlBoxHoriz.Height - 1);
+                }
+            };
+            pnlCardLinuxScroll.Controls.Add(pnlBoxHoriz);
+
+            Label lblHorizTitle = new Label
+            {
+                Text = "↔️ YATAY EKSEN (HORIZONTAL SCROLL)",
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(56, 189, 248),
+                Location = new Point(10, 8),
+                AutoSize = true
+            };
+            pnlBoxHoriz.Controls.Add(lblHorizTitle);
+
+            chkHorizEnabled = new CheckBox
+            {
+                Text = "Etkin",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(226, 232, 240),
+                Location = new Point(10, 30),
+                AutoSize = true,
+                Checked = linuxScrollConfig.Horizontal.Enabled
+            };
+            pnlBoxHoriz.Controls.Add(chkHorizEnabled);
+
+            chkHorizInvert = new CheckBox
+            {
+                Text = "Ters Çevir",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(203, 213, 225),
+                Location = new Point(70, 30),
+                AutoSize = true,
+                Checked = linuxScrollConfig.Horizontal.Invert
+            };
+            pnlBoxHoriz.Controls.Add(chkHorizInvert);
+
+            chkHorizSmooth = new CheckBox
+            {
+                Text = "1:1 Doğrudan Piksel Modu",
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(203, 213, 225),
+                Location = new Point(165, 30),
+                AutoSize = true,
+                Checked = linuxScrollConfig.Horizontal.Smoothing
+            };
+            pnlBoxHoriz.Controls.Add(chkHorizSmooth);
+
+            Label lblHSens = new Label { Text = "Hassasiyet (1-20):", Font = new Font("Segoe UI", 7.8f, FontStyle.Regular), ForeColor = Color.FromArgb(148, 163, 184), Location = new Point(10, 60), AutoSize = true };
+            pnlBoxHoriz.Controls.Add(lblHSens);
+
+            numHorizSens = new NumericUpDown
+            {
+                Minimum = 1,
+                Maximum = 20,
+                Value = Math.Max(1, Math.Min(20, linuxScrollConfig.Horizontal.Sensitivity)),
+                Location = new Point(115, 58),
+                Width = 45,
+                BackColor = Color.FromArgb(12, 15, 22),
+                ForeColor = Color.FromArgb(56, 189, 248),
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold)
+            };
+            pnlBoxHoriz.Controls.Add(numHorizSens);
+
+            Label lblHSpd = new Label { Text = "Hız (1-30):", Font = new Font("Segoe UI", 7.8f, FontStyle.Regular), ForeColor = Color.FromArgb(148, 163, 184), Location = new Point(175, 60), AutoSize = true };
+            pnlBoxHoriz.Controls.Add(lblHSpd);
+
+            numHorizSpeed = new NumericUpDown
+            {
+                Minimum = 1,
+                Maximum = 30,
+                Value = Math.Max(1, Math.Min(30, linuxScrollConfig.Horizontal.Speed)),
+                Location = new Point(238, 58),
+                Width = 45,
+                BackColor = Color.FromArgb(12, 15, 22),
+                ForeColor = Color.FromArgb(56, 189, 248),
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold)
+            };
+            pnlBoxHoriz.Controls.Add(numHorizSpeed);
+
+            lblHorizCalc = new Label
+            {
+                Font = new Font("Consolas", 7.5f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(52, 211, 153),
+                Location = new Point(10, 92),
+                Size = new Size(scrollSubW - 20, 38)
+            };
+            pnlBoxHoriz.Controls.Add(lblHorizCalc);
+
+            Action syncAndUpdateCalc = () =>
+            {
+                linuxScrollConfig.AxisDetectPx = (numScrollAxisDetect != null) ? (int)numScrollAxisDetect.Value : 4;
+                linuxScrollConfig.Vertical.Enabled = chkVertEnabled.Checked;
+                linuxScrollConfig.Vertical.Invert = chkVertInvert.Checked;
+                linuxScrollConfig.Vertical.Sensitivity = (int)numVertSens.Value;
+                linuxScrollConfig.Vertical.Speed = (int)numVertSpeed.Value;
+                linuxScrollConfig.Vertical.Smoothing = chkVertSmooth.Checked;
+
+                linuxScrollConfig.Horizontal.Enabled = chkHorizEnabled.Checked;
+                linuxScrollConfig.Horizontal.Invert = chkHorizInvert.Checked;
+                linuxScrollConfig.Horizontal.Sensitivity = (int)numHorizSens.Value;
+                linuxScrollConfig.Horizontal.Speed = (int)numHorizSpeed.Value;
+                linuxScrollConfig.Horizontal.Smoothing = chkHorizSmooth.Checked;
+
+                int vSens = Math.Max(1, linuxScrollConfig.Vertical.Sensitivity);
+                int vSpd = linuxScrollConfig.Vertical.Speed;
+                double vRate = (double)vSpd / vSens;
+                lblVertCalc.Text = string.Format("1:1 Oran: {0:0.0} birim/px ({1}x / {2}) | Eşik: {3}px\r\nMod: {4}",
+                    vRate, vSpd, vSens, linuxScrollConfig.AxisDetectPx,
+                    linuxScrollConfig.Vertical.Smoothing ? "1:1 Anlık Piksel (Gecikmesiz)" : "Quantized 120 (Klasik Çentik)");
+
+                int hSens = Math.Max(1, linuxScrollConfig.Horizontal.Sensitivity);
+                int hSpd = linuxScrollConfig.Horizontal.Speed;
+                double hRate = (double)hSpd / hSens;
+                lblHorizCalc.Text = string.Format("1:1 Oran: {0:0.0} birim/px ({1}x / {2}) | Eşik: {3}px\r\nMod: {4}",
+                    hRate, hSpd, hSens, linuxScrollConfig.AxisDetectPx,
+                    linuxScrollConfig.Horizontal.Smoothing ? "1:1 Anlık Piksel (Gecikmesiz)" : "Quantized 120 (Klasik Çentik)");
+            };
+
+            if (numScrollAxisDetect != null) numScrollAxisDetect.ValueChanged += (s, e) => syncAndUpdateCalc();
+            chkVertEnabled.CheckedChanged += (s, e) => syncAndUpdateCalc();
+            chkVertInvert.CheckedChanged += (s, e) => syncAndUpdateCalc();
+            chkVertSmooth.CheckedChanged += (s, e) => syncAndUpdateCalc();
+            numVertSens.ValueChanged += (s, e) => syncAndUpdateCalc();
+            numVertSpeed.ValueChanged += (s, e) => syncAndUpdateCalc();
+
+            chkHorizEnabled.CheckedChanged += (s, e) => syncAndUpdateCalc();
+            chkHorizInvert.CheckedChanged += (s, e) => syncAndUpdateCalc();
+            chkHorizSmooth.CheckedChanged += (s, e) => syncAndUpdateCalc();
+            numHorizSens.ValueChanged += (s, e) => syncAndUpdateCalc();
+            numHorizSpeed.ValueChanged += (s, e) => syncAndUpdateCalc();
+            syncAndUpdateCalc();
+
+            Button btnSaveScroll = new Button
+            {
+                Text = "💾 Ayarları Kaydet",
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(30, 41, 59),
+                ForeColor = Color.FromArgb(52, 211, 153),
+                Size = new Size(130, 24),
+                Location = new Point(12, 236),
+                Cursor = Cursors.Hand
+            };
+            btnSaveScroll.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnSaveScroll.Click += (s, e) =>
+            {
+                syncAndUpdateCalc();
+                linuxScrollConfig.AxisLock = chkScrollAxisLock.Checked;
+                if (numScrollAxisDetect != null) linuxScrollConfig.AxisDetectPx = (int)numScrollAxisDetect.Value;
+                linuxScrollConfig.AutoStartWithArgon = chkScrollAutoStart.Checked;
+                linuxScrollConfig.Trigger = (ScrollTriggerButton)cmbScrollTrigger.SelectedIndex;
+                linuxScrollConfig.SaveToFile(linuxScrollConfigPath);
+                ShowQoLToast("💾 Linux Scroll Kaydedildi", "1:1 kaydırma hızı, yön algılama eşiği ve eksen kilidi kaydedildi.", "Tamam", null, Color.FromArgb(52, 211, 153), 3, false);
+            };
+            pnlCardLinuxScroll.Controls.Add(btnSaveScroll);
+
+            Button btnResetScroll = new Button
+            {
+                Text = "⚡ 1:1 Keskin Varsayılanlar",
+                Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(30, 41, 59),
+                ForeColor = Color.FromArgb(203, 213, 225),
+                Size = new Size(215, 24),
+                Location = new Point(150, 236),
+                Cursor = Cursors.Hand
+            };
+            btnResetScroll.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnResetScroll.Click += (s, e) =>
+            {
+                linuxScrollConfig.ResetToDefaults();
+                if (numScrollAxisDetect != null) numScrollAxisDetect.Value = linuxScrollConfig.AxisDetectPx;
+                chkVertEnabled.Checked = linuxScrollConfig.Vertical.Enabled;
+                chkVertInvert.Checked = linuxScrollConfig.Vertical.Invert;
+                numVertSens.Value = linuxScrollConfig.Vertical.Sensitivity;
+                numVertSpeed.Value = linuxScrollConfig.Vertical.Speed;
+                chkVertSmooth.Checked = linuxScrollConfig.Vertical.Smoothing;
+
+                chkHorizEnabled.Checked = linuxScrollConfig.Horizontal.Enabled;
+                chkHorizInvert.Checked = linuxScrollConfig.Horizontal.Invert;
+                numHorizSens.Value = linuxScrollConfig.Horizontal.Sensitivity;
+                numHorizSpeed.Value = linuxScrollConfig.Horizontal.Speed;
+                chkHorizSmooth.Checked = linuxScrollConfig.Horizontal.Smoothing;
+
+                chkScrollAxisLock.Checked = linuxScrollConfig.AxisLock;
+                chkScrollAutoStart.Checked = linuxScrollConfig.AutoStartWithArgon;
+                cmbScrollTrigger.SelectedIndex = (int)linuxScrollConfig.Trigger;
+
+                linuxScrollConfig.SaveToFile(linuxScrollConfigPath);
+                syncAndUpdateCalc();
+                ShowQoLToast("⚡ 1:1 Keskin Mod Yüklendi", "Anında 1:1 piksel moduna geçildi (Dikey: 1/8 1:1 Ters, Yatay: 1/12 Düz, Yön Eşiği: 4px).", "Tamam", null, Color.FromArgb(134, 239, 172), 4, false);
+            };
+            pnlCardLinuxScroll.Controls.Add(btnResetScroll);
+
+            pnlScrollTest = new Panel
+            {
+                Location = new Point(374, 234),
+                Size = new Size(Math.Max(200, pnlCardLinuxScroll.Width - 386), 28),
+                BackColor = Color.FromArgb(12, 15, 22)
+            };
+            pnlScrollTest.Paint += (s, e) =>
+            {
+                using (Pen p = new Pen(Color.FromArgb(51, 65, 85), 1))
+                {
+                    e.Graphics.DrawRectangle(p, 0, 0, pnlScrollTest.Width - 1, pnlScrollTest.Height - 1);
+                }
+            };
+            pnlCardLinuxScroll.Controls.Add(pnlScrollTest);
+
+            lblScrollTestHint = new Label
+            {
+                Text = "🧪 Test Alanı: Motoru başlatıp orta tuşa basılı tutarak kaydırmayı deneyin.",
+                Font = new Font("Segoe UI", 7.6f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(148, 163, 184),
+                Location = new Point(6, 6),
+                AutoSize = true
+            };
+            pnlScrollTest.Controls.Add(lblScrollTestHint);
 
             // Responsive Layout Handling for QoL Cards
             Action layoutQoLCards = () =>
@@ -14231,6 +21484,46 @@ namespace ArgonLatencyStudio
                 pnlBoxShader.Location = new Point(innerSubW + 24, 52);
                 pnlBoxShader.Width = innerSubW;
                 lblShaderCacheStatus.Width = innerSubW - 20;
+
+                pnlCardLinuxScroll.Width = availW;
+                btnToggleScroll.Location = new Point(availW - 122, 8);
+                int badgeW = lblScrollStatusBadge.PreferredWidth;
+                lblScrollStatusBadge.Location = new Point(btnToggleScroll.Left - badgeW - 12, 11);
+                btnTakeoverMarble.Location = new Point(lblScrollStatusBadge.Left - btnTakeoverMarble.Width - 10, 8);
+
+                int r2x = 14;
+                chkScrollAutoStart.Location = new Point(r2x, 52);
+                r2x += chkScrollAutoStart.PreferredSize.Width + 14;
+                chkScrollAxisLock.Location = new Point(r2x, 52);
+                r2x += chkScrollAxisLock.PreferredSize.Width + 16;
+                lblTrig.Location = new Point(r2x, 54);
+                r2x += lblTrig.PreferredWidth + 8;
+                cmbScrollTrigger.Location = new Point(r2x, 50);
+
+                pnlBoxVert.Width = innerSubW;
+                chkVertEnabled.Location = new Point(10, 30);
+                chkVertInvert.Location = new Point(chkVertEnabled.Left + chkVertEnabled.PreferredSize.Width + 10, 30);
+                chkVertSmooth.Location = new Point(chkVertInvert.Left + chkVertInvert.PreferredSize.Width + 10, 30);
+                lblVSens.Location = new Point(10, 60);
+                numVertSens.Location = new Point(lblVSens.Left + lblVSens.PreferredWidth + 6, 58);
+                lblVSpd.Location = new Point(numVertSens.Right + 12, 60);
+                numVertSpeed.Location = new Point(lblVSpd.Left + lblVSpd.PreferredWidth + 6, 58);
+                lblVertCalc.Width = innerSubW - 20;
+
+                pnlBoxHoriz.Location = new Point(innerSubW + 24, 80);
+                pnlBoxHoriz.Width = innerSubW;
+                chkHorizEnabled.Location = new Point(10, 30);
+                chkHorizInvert.Location = new Point(chkHorizEnabled.Left + chkHorizEnabled.PreferredSize.Width + 10, 30);
+                chkHorizSmooth.Location = new Point(chkHorizInvert.Left + chkHorizInvert.PreferredSize.Width + 10, 30);
+                lblHSens.Location = new Point(10, 60);
+                numHorizSens.Location = new Point(lblHSens.Left + lblHSens.PreferredWidth + 6, 58);
+                lblHSpd.Location = new Point(numHorizSens.Right + 12, 60);
+                numHorizSpeed.Location = new Point(lblHSpd.Left + lblHSpd.PreferredWidth + 6, 58);
+                lblHorizCalc.Width = innerSubW - 20;
+
+                int r4x = btnResetScroll.Right + 10;
+                pnlScrollTest.Location = new Point(r4x, 234);
+                pnlScrollTest.Width = Math.Max(200, availW - r4x - 12);
             };
 
             viewAutomationQoL.Resize += (s, e) => layoutQoLCards();
@@ -14239,6 +21532,7 @@ namespace ArgonLatencyStudio
             RefreshAlarmsListView();
             RefreshGameNotesListView();
             UpdateQoLRamStatusLabel();
+            UpdateLinuxScrollCardUi();
         }
 
         private void RefreshAutomationQoLView()
@@ -14246,6 +21540,82 @@ namespace ArgonLatencyStudio
             RefreshAlarmsListView();
             RefreshGameNotesListView();
             UpdateQoLRamStatusLabel();
+            UpdateLinuxScrollCardUi();
+        }
+
+        private void UpdateLinuxScrollCardUi()
+        {
+            if (this.IsDisposed) return;
+            if (this.InvokeRequired)
+            {
+                try { this.BeginInvoke(new Action(UpdateLinuxScrollCardUi)); } catch { }
+                return;
+            }
+            bool running = (linuxScrollEngine != null && linuxScrollEngine.IsRunning);
+            if (lblScrollStatusBadge != null)
+            {
+                lblScrollStatusBadge.Text = running ? "● AKTİF (ÇALIŞIYOR)" : "○ DURDURULDU";
+                lblScrollStatusBadge.ForeColor = running ? Color.FromArgb(52, 211, 153) : Color.FromArgb(148, 163, 184);
+            }
+            if (btnToggleScroll != null)
+            {
+                btnToggleScroll.Text = running ? "⏸️ Durdur" : "▶️ Başlat";
+                btnToggleScroll.ForeColor = running ? Color.FromArgb(248, 113, 113) : Color.FromArgb(52, 211, 153);
+            }
+            if (mnuTrayLinuxScroll != null)
+            {
+                mnuTrayLinuxScroll.Text = "🐧 Linux-like Scroll: " + (running ? "Aktif" : "Kapalı");
+                mnuTrayLinuxScroll.Checked = running;
+            }
+            if (btnTakeoverMarble != null)
+            {
+                btnTakeoverMarble.Visible = LinuxlikeScrollEngine.DetectExternalProcess();
+            }
+        }
+
+        private void ToggleLinuxlikeScroll()
+        {
+            if (linuxScrollEngine == null) return;
+            if (linuxScrollEngine.IsRunning)
+            {
+                linuxScrollEngine.Stop();
+                linuxScrollConfig.Enabled = false;
+                linuxScrollConfig.SaveToFile(linuxScrollConfigPath);
+                UpdateLinuxScrollCardUi();
+                ShowQoLToast("🐧 Linux-like Scrolling", "Tekerleksiz hassas kaydırma durduruldu.", "Tamam", null, Color.FromArgb(148, 163, 184), 4, false);
+            }
+            else
+            {
+                if (LinuxlikeScrollEngine.DetectExternalProcess())
+                {
+                    DialogResult res = MessageBox.Show(
+                        "Sistemde harici 'MarbleScrollPlus' çalışıyor!\n\nİki aracın aynı anda fare olaylarını yakalaması çakışmaya yol açabilir.\n\nHarici MarbleScrollPlus sürecini ve zamanlanmış görevini kapatıp kontrolü Argon'a devretmek ister misiniz?",
+                        "Harici Süreç Çakışması",
+                        MessageBoxButtons.YesNoCancel,
+                        MessageBoxIcon.Question);
+                    if (res == DialogResult.Yes)
+                    {
+                        string msg;
+                        LinuxlikeScrollEngine.StopExternalProcessAndTask(out msg);
+                    }
+                    else if (res == DialogResult.Cancel)
+                    {
+                        return;
+                    }
+                }
+
+                if (linuxScrollEngine.Start())
+                {
+                    linuxScrollConfig.Enabled = true;
+                    linuxScrollConfig.SaveToFile(linuxScrollConfigPath);
+                    UpdateLinuxScrollCardUi();
+                    ShowQoLToast("🐧 Linux-like Scrolling", "Başlatıldı! Orta tuşa basılı tutup sürükleyerek kaydırabilirsiniz.", "Tamam", null, Color.FromArgb(45, 212, 191), 4, false);
+                }
+                else
+                {
+                    MessageBox.Show("Düşük seviyeli fare kancası (WH_MOUSE_LL) başlatılamadı.", "Hata", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+            }
         }
 
         private void RefreshAlarmsListView()
@@ -15769,13 +23139,32 @@ namespace ArgonLatencyStudio
 
             Label lblMTitle = new Label
             {
-                Text = "CANLI FARE SORGU HIZI (POLLING RATE HZ) & KUYRUK UYUMLULUK ÖLÇER",
+                Text = "RAW INPUT (WM_INPUT) HOST TESLİMAT & JITTER ÖLÇER",
                 Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
                 ForeColor = Color.FromArgb(251, 191, 36),
+                UseMnemonic = false,
                 AutoSize = true,
-                Location = new Point(12, 12)
+                Location = new Point(12, 10)
             };
             pnlMouseBench.Controls.Add(lblMTitle);
+
+            btnResetRawCard3 = CreateActionButton(pnlMouseBench, 466, 6, 32, 24, "↺", Color.FromArgb(30, 41, 59));
+            btnResetRawCard3.Font = new Font("Segoe UI", 8.2f, FontStyle.Bold);
+            btnResetRawCard3.UseMnemonic = false;
+            btnResetRawCard3.Click += (s, e) => ResetCard3RawTracker();
+            mainToolTip.SetToolTip(btnResetRawCard3, "Raw Input ölçüm tamponunu sıfırlar (Siyah alana çift tıklayarak da sıfırlanır).");
+
+            btnOpenMsiCard3 = CreateActionButton(pnlMouseBench, 504, 6, 126, 24, "⚡ MSI & Kesme", Color.FromArgb(30, 41, 59));
+            btnOpenMsiCard3.Font = new Font("Segoe UI", 7.6f, FontStyle.Bold);
+            btnOpenMsiCard3.UseMnemonic = false;
+            btnOpenMsiCard3.Click += (s, e) => ShowInterruptMsiExplorerDialog();
+            mainToolTip.SetToolTip(btnOpenMsiCard3, "PCIe aygıtlarının (GPU, NIC, USB, NVMe) MSI ve kesme çekirdeği yönlendirmelerini inceler.");
+
+            btnOpenInputLabCard3 = CreateActionButton(pnlMouseBench, 636, 6, 172, 24, "🔌 InputLab & USB Topoloji", Color.FromArgb(14, 116, 144));
+            btnOpenInputLabCard3.Font = new Font("Segoe UI", 7.6f, FontStyle.Bold);
+            btnOpenInputLabCard3.UseMnemonic = false;
+            btnOpenInputLabCard3.Click += (s, e) => ShowInputLabDiagnosticsDialog();
+            mainToolTip.SetToolTip(btnOpenInputLabCard3, "Detaylı WM_INPUT zamanlama grafiği, batch/gap analizi, CSV dışa aktarım ve USB xHCI topoloji denetimi.");
 
             pnlMouseTestArea = new Panel
             {
@@ -15783,36 +23172,60 @@ namespace ArgonLatencyStudio
                 Size = new Size(796, 156),
                 BackColor = Color.FromArgb(10, 13, 19),
                 BorderStyle = BorderStyle.FixedSingle,
-                Cursor = Cursors.Cross
+                Cursor = Cursors.Cross,
+                Tag = "KEEP_DARK"
             };
-            pnlMouseTestArea.MouseMove += OnMouseTestAreaMove;
             pnlMouseBench.Controls.Add(pnlMouseTestArea);
 
             lblMouseHzLive = new Label
             {
-                Text = "Fareyi bu siyah alan içinde hızlıca dairesel hareket ettirin...",
-                Font = new Font("Segoe UI", 12.0f, FontStyle.Bold),
+                Text = "Fareyi bu siyah alan içinde dairesel hareket ettirin (WM_INPUT Hazır)...",
+                Font = new Font("Segoe UI", 11.4f, FontStyle.Bold),
                 ForeColor = Color.FromArgb(52, 211, 153),
+                UseMnemonic = false,
                 AutoSize = false,
                 TextAlign = ContentAlignment.MiddleCenter,
                 Size = new Size(772, 36),
-                Location = new Point(12, 32)
+                Location = new Point(12, 20)
             };
-            lblMouseHzLive.MouseMove += OnMouseTestAreaMove;
             pnlMouseTestArea.Controls.Add(lblMouseHzLive);
 
             lblMouseDeltaLive = new Label
             {
-                Text = "Anlık Raporlama Aralığı: -- ms | 1000Hz = 1.00ms, 2000Hz = 0.50ms, 4000Hz = 0.25ms",
-                Font = new Font("Consolas", 8.5f, FontStyle.Regular),
+                Text = "WM_INPUT Host Teslimat Aralığı: -- ms | Batch(<0.12ms): -- | Kopma(>2.5x): -- | P95: --\r\nNot: OS Raw Input teslimat zamanlamasıdır (sensör taraması veya click-to-photon gecikmesi değildir).",
+                Font = new Font("Consolas", 8.2f, FontStyle.Regular),
                 ForeColor = Color.FromArgb(148, 163, 184),
+                UseMnemonic = false,
                 AutoSize = false,
                 TextAlign = ContentAlignment.MiddleCenter,
-                Size = new Size(772, 28),
-                Location = new Point(12, 82)
+                Size = new Size(772, 46),
+                Location = new Point(12, 66)
             };
-            lblMouseDeltaLive.MouseMove += OnMouseTestAreaMove;
             pnlMouseTestArea.Controls.Add(lblMouseDeltaLive);
+
+            lblMouseDeviceHint = new Label
+            {
+                Text = "Aygıt: Bekleniyor | Siyah alana çift tıklayın = Ölçümü sıfırla | USB ağaç & grafik için -> InputLab",
+                Font = new Font("Consolas", 7.6f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(100, 116, 139),
+                UseMnemonic = false,
+                AutoSize = false,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Size = new Size(772, 24),
+                Location = new Point(12, 118)
+            };
+            pnlMouseTestArea.Controls.Add(lblMouseDeviceHint);
+
+            EventHandler resetHandler = (s, e) => ResetCard3RawTracker();
+            pnlMouseTestArea.DoubleClick += resetHandler;
+            lblMouseHzLive.DoubleClick += resetHandler;
+            lblMouseDeltaLive.DoubleClick += resetHandler;
+            lblMouseDeviceHint.DoubleClick += resetHandler;
+
+            card3RawTracker = new RawInputSampleTracker(512);
+            card3RawHook = new RawInputHookNativeWindow(OnCard3RawMouse);
+            card3RawUiTimer = new System.Windows.Forms.Timer { Interval = 100 };
+            card3RawUiTimer.Tick += (s, e) => RefreshCard3RawInputUi();
 
             // Card 4: DWM / FLIP MODEL, MPO & DXGI PRESENTATION MODE DIAGNOSTICS (PresentMon & DXGI Probe)
             pnlPresentationModeBench = new Panel
@@ -15903,43 +23316,45 @@ namespace ArgonLatencyStudio
             pnlFrametimeLab.Controls.Add(lblBenchEngineBadge);
 
             // Controls Bar (Y: 38)
-            Label lblTgtHdr = new Label { Text = "Hedef Oyun (.exe):", Font = new Font("Segoe UI", 8.0f, FontStyle.Bold), ForeColor = Color.FromArgb(148, 163, 184), Location = new Point(12, 42), AutoSize = true };
+            Label lblTgtHdr = new Label { Text = "Hedef Oyun (.exe):", Font = new Font("Segoe UI", 8.0f, FontStyle.Bold), ForeColor = ArgonTheme.TextMuted, UseMnemonic = false, Location = new Point(12, 42), AutoSize = true };
             pnlFrametimeLab.Controls.Add(lblTgtHdr);
 
             cmbBenchTarget = new ComboBox
             {
-                Location = new Point(125, 39),
+                Location = new Point(146, 39),
                 Size = new Size(160, 22),
                 DropDownStyle = ComboBoxStyle.DropDownList,
-                BackColor = Color.FromArgb(12, 15, 22),
-                ForeColor = Color.White
+                BackColor = ArgonTheme.BgInput,
+                ForeColor = ArgonTheme.TextPrimary
             };
             pnlFrametimeLab.Controls.Add(cmbBenchTarget);
 
             btnBenchRefreshTargets = new Button
             {
-                Text = "🔄",
-                Location = new Point(288, 38),
+                Text = "",
+                Image = ArgonIconPack.GetIcon("refresh", ArgonTheme.TextSecondary, 14),
+                ImageAlign = ContentAlignment.MiddleCenter,
+                Location = new Point(312, 38),
                 Size = new Size(28, 24),
                 FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(28, 35, 50),
-                ForeColor = Color.White,
+                BackColor = ArgonTheme.BgSurfaceHover,
+                ForeColor = ArgonTheme.TextPrimary,
                 Cursor = Cursors.Hand
             };
-            btnBenchRefreshTargets.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            btnBenchRefreshTargets.FlatAppearance.BorderColor = ArgonTheme.BorderSubtle;
             btnBenchRefreshTargets.Click += (s, e) => PopulateBenchmarkTargets();
             pnlFrametimeLab.Controls.Add(btnBenchRefreshTargets);
 
-            Label lblDurHdr = new Label { Text = "Süre:", Font = new Font("Segoe UI", 8.0f, FontStyle.Bold), ForeColor = Color.FromArgb(148, 163, 184), Location = new Point(325, 42), AutoSize = true };
+            Label lblDurHdr = new Label { Text = "Süre:", Font = new Font("Segoe UI", 8.0f, FontStyle.Bold), ForeColor = ArgonTheme.TextMuted, UseMnemonic = false, Location = new Point(350, 42), AutoSize = true };
             pnlFrametimeLab.Controls.Add(lblDurHdr);
 
             cmbBenchDuration = new ComboBox
             {
-                Location = new Point(362, 39),
+                Location = new Point(390, 39),
                 Size = new Size(78, 22),
                 DropDownStyle = ComboBoxStyle.DropDownList,
-                BackColor = Color.FromArgb(12, 15, 22),
-                ForeColor = Color.White
+                BackColor = ArgonTheme.BgInput,
+                ForeColor = ArgonTheme.TextPrimary
             };
             cmbBenchDuration.Items.Add("15 sn");
             cmbBenchDuration.Items.Add("30 sn");
@@ -15947,16 +23362,16 @@ namespace ArgonLatencyStudio
             cmbBenchDuration.SelectedIndex = 1;
             pnlFrametimeLab.Controls.Add(cmbBenchDuration);
 
-            Label lblWarmHdr = new Label { Text = "Isınma:", Font = new Font("Segoe UI", 8.0f, FontStyle.Bold), ForeColor = Color.FromArgb(148, 163, 184), Location = new Point(450, 42), AutoSize = true };
+            Label lblWarmHdr = new Label { Text = "Isınma:", Font = new Font("Segoe UI", 8.0f, FontStyle.Bold), ForeColor = ArgonTheme.TextMuted, UseMnemonic = false, Location = new Point(478, 42), AutoSize = true };
             pnlFrametimeLab.Controls.Add(lblWarmHdr);
 
             cmbBenchWarmup = new ComboBox
             {
-                Location = new Point(498, 39),
-                Size = new Size(115, 22),
+                Location = new Point(532, 39),
+                Size = new Size(156, 22),
                 DropDownStyle = ComboBoxStyle.DropDownList,
-                BackColor = Color.FromArgb(12, 15, 22),
-                ForeColor = Color.White
+                BackColor = ArgonTheme.BgInput,
+                ForeColor = ArgonTheme.TextPrimary
             };
             cmbBenchWarmup.Items.Add("3 sn (Alt+Tab Filtresi)");
             cmbBenchWarmup.Items.Add("0 sn (Hemen Başla)");
@@ -15965,10 +23380,11 @@ namespace ArgonLatencyStudio
 
             lblBenchLiveStatus = new Label
             {
-                Text = "⚪ Hazır: Test A veya Test B'yi başlatabilirsiniz.",
+                Text = "Hazır: Test A veya Test B başlatılabilir.",
                 Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(56, 189, 248),
-                Location = new Point(622, 42),
+                ForeColor = ArgonTheme.Accent,
+                UseMnemonic = false,
+                Location = new Point(698, 42),
                 AutoSize = true
             };
             pnlFrametimeLab.Controls.Add(lblBenchLiveStatus);
@@ -16113,9 +23529,13 @@ namespace ArgonLatencyStudio
 
                 pnlMouseBench.Location = new Point(10, 275);
                 pnlMouseBench.Width = availW;
+                btnOpenInputLabCard3.Location = new Point(availW - btnOpenInputLabCard3.Width - 12, 6);
+                btnOpenMsiCard3.Location = new Point(btnOpenInputLabCard3.Left - btnOpenMsiCard3.Width - 6, 6);
+                btnResetRawCard3.Location = new Point(btnOpenMsiCard3.Left - btnResetRawCard3.Width - 6, 6);
                 pnlMouseTestArea.Width = availW - 24;
                 lblMouseHzLive.Width = pnlMouseTestArea.Width - 24;
                 lblMouseDeltaLive.Width = pnlMouseTestArea.Width - 24;
+                lblMouseDeviceHint.Width = pnlMouseTestArea.Width - 24;
 
                 pnlPresentationModeBench.Location = new Point(10, 495);
                 pnlPresentationModeBench.Width = availW;
@@ -16812,6 +24232,7 @@ namespace ArgonLatencyStudio
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.FromArgb(16, 185, 129),
                 ForeColor = Color.Black,
+                UseMnemonic = false,
                 Location = new Point(qx, 9),
                 Size = new Size(165, 26),
                 Cursor = Cursors.Hand
@@ -16819,7 +24240,112 @@ namespace ArgonLatencyStudio
             btnPowerGov.FlatAppearance.BorderSize = 0;
             btnPowerGov.Click += (s, e) => ShowAdvancedPowerPolicyDialog();
             pnlQuickTools.Controls.Add(btnPowerGov);
-            qx += btnPowerGov.PreferredSize.Width + 6;
+            qx += btnPowerGov.Width + 6;
+
+            Button btnMsiExplorerQuick = new Button
+            {
+                Text = "⚡ MSI & Kesme",
+                Font = new Font("Segoe UI", 7.6f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(30, 41, 59),
+                ForeColor = Color.FromArgb(248, 250, 252),
+                UseMnemonic = false,
+                Location = new Point(qx, 9),
+                Size = new Size(116, 26),
+                Cursor = Cursors.Hand
+            };
+            btnMsiExplorerQuick.FlatAppearance.BorderColor = Color.FromArgb(71, 85, 105);
+            btnMsiExplorerQuick.Click += (s, e) => ShowInterruptMsiExplorerDialog();
+            pnlQuickTools.Controls.Add(btnMsiExplorerQuick);
+            mainToolTip.SetToolTip(btnMsiExplorerQuick, "PCIe aygıtlarının (GPU, Ağ, USB, NVMe) MSI ve kesme yönlendirme ayarlarını güvenli inceler.");
+            qx += btnMsiExplorerQuick.Width + 6;
+
+            Button btnInputLabQuick = new Button
+            {
+                Text = "🔌 InputLab & USB",
+                Font = new Font("Segoe UI", 7.6f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(14, 116, 144),
+                ForeColor = Color.White,
+                UseMnemonic = false,
+                Location = new Point(qx, 9),
+                Size = new Size(134, 26),
+                Cursor = Cursors.Hand
+            };
+            btnInputLabQuick.FlatAppearance.BorderSize = 0;
+            btnInputLabQuick.Click += (s, e) => ShowInputLabDiagnosticsDialog();
+            pnlQuickTools.Controls.Add(btnInputLabQuick);
+            mainToolTip.SetToolTip(btnInputLabQuick, "Raw Input (WM_INPUT) teslimat zamanlaması ve USB xHCI topoloji laboratuvarını açar.");
+            qx += btnInputLabQuick.Width + 6;
+
+            Button btnVirtualMemoryQuick = new Button
+            {
+                Text = "🧠 Sanal Bellek",
+                Font = new Font("Segoe UI", 7.6f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(16, 185, 129),
+                ForeColor = Color.Black,
+                UseMnemonic = false,
+                Location = new Point(qx, 9),
+                Size = new Size(116, 26),
+                Cursor = Cursors.Hand
+            };
+            btnVirtualMemoryQuick.FlatAppearance.BorderSize = 0;
+            btnVirtualMemoryQuick.Click += (s, e) => ShowVirtualMemoryAdvisorDialog();
+            pnlQuickTools.Controls.Add(btnVirtualMemoryQuick);
+            mainToolTip.SetToolTip(btnVirtualMemoryQuick, "Windows Sanal Bellek (Pagefile) ve DisablePagingExecutive kararlılık danışmanını açar.");
+            qx += btnVirtualMemoryQuick.Width + 6;
+
+            Button btnLinuxScrollQuick = new Button
+            {
+                Text = "🐧 Linux Scroll",
+                Font = new Font("Segoe UI", 7.6f, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(20, 184, 166),
+                ForeColor = Color.Black,
+                UseMnemonic = false,
+                Location = new Point(qx, 9),
+                Size = new Size(112, 26),
+                Cursor = Cursors.Hand
+            };
+            btnLinuxScrollQuick.FlatAppearance.BorderSize = 0;
+            btnLinuxScrollQuick.Click += (s, e) =>
+            {
+                SwitchActiveTab(7);
+                if (viewAutomationQoL != null && pnlCardLinuxScroll != null)
+                {
+                    viewAutomationQoL.ScrollControlIntoView(pnlCardLinuxScroll);
+                }
+            };
+            pnlQuickTools.Controls.Add(btnLinuxScrollQuick);
+            mainToolTip.SetToolTip(btnLinuxScrollQuick, "Orta tuşla Linux-like akıcı kaydırma (MarbleScrollPlus) motoru ve ayarlarını açar.");
+            qx += btnLinuxScrollQuick.Width + 6;
+
+            Action layoutQuickTools = () =>
+            {
+                int availQuickW = Math.Max(480, pnlQuickTools.ClientSize.Width - 10);
+                int startX = Math.Max(124, lblQuickHdr.Left + lblQuickHdr.PreferredWidth + 10);
+                int curX = startX;
+                int curY = 8;
+                foreach (Control ctrl in pnlQuickTools.Controls)
+                {
+                    Button qb = ctrl as Button;
+                    if (qb == null) continue;
+                    int bw = Math.Max(qb.Width, qb.PreferredSize.Width);
+                    if (curX > startX && curX + bw > availQuickW)
+                    {
+                        curX = startX;
+                        curY += 32;
+                    }
+                    qb.Location = new Point(curX, curY);
+                    curX += bw + 6;
+                }
+                int targetQuickH = (curY > 8) ? (curY + 34) : 44;
+                if (pnlQuickTools.Height != targetQuickH)
+                    pnlQuickTools.Height = targetQuickH;
+            };
+            pnlQuickTools.Resize += (s, e) => layoutQuickTools();
+            layoutQuickTools();
 
             Panel pnlWuColHdr = CreateTweakTableColumnHeader("WinUtil Mimari & Sistem Politikaları");
             pnlWuColHdr.Dock = DockStyle.Top;
@@ -16902,27 +24428,28 @@ namespace ArgonLatencyStudio
             {
                 Dock = DockStyle.Fill,
                 AutoScroll = true,
-                BackColor = Color.FromArgb(13, 16, 23),
-                Padding = new Padding(10, 8, 10, 8),
+                BackColor = ArgonTheme.BgCanvas,
+                Padding = new Padding(12, 10, 12, 10),
                 Visible = false
             };
             pnlContentHost.Controls.Add(viewSettings);
 
-            // TOP PANEL: Custom Profile Management (Full Width inside Left Workspace)
+            // TOP PANEL: Custom Profile Management (Full Width inside Workspace)
             Panel pnlRightCol = new Panel
             {
-                Location = new Point(10, 8),
-                Size = new Size(815, 255),
-                BackColor = Color.FromArgb(18, 23, 34)
+                Location = new Point(12, 10),
+                Size = new Size(1020, 260),
+                BackColor = ArgonTheme.BgSurface
             };
             viewSettings.Controls.Add(pnlRightCol);
 
             Label lblProfTitle = new Label
             {
                 Text = "ÖZEL PROFİL YÖNETİMİ (.ARGON KULLANICI PROFİLLERİ & HAZIR REÇETELER)",
-                Font = new Font("Segoe UI", 8.8f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(251, 191, 36),
+                Font = new Font("Segoe UI", 9.0f, FontStyle.Bold),
+                ForeColor = ArgonTheme.Accent,
                 AutoSize = true,
+                UseMnemonic = false,
                 Location = new Point(14, 10)
             };
             pnlRightCol.Controls.Add(lblProfTitle);
@@ -16930,27 +24457,28 @@ namespace ArgonLatencyStudio
             Label lblNewName = new Label
             {
                 Text = "Yeni Özel Profil Adı:",
-                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(56, 189, 248),
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                ForeColor = ArgonTheme.TextSecondary,
                 AutoSize = true,
-                Location = new Point(14, 36)
+                UseMnemonic = false,
+                Location = new Point(14, 38)
             };
             pnlRightCol.Controls.Add(lblNewName);
 
             txtNewProfileNameInput = new TextBox
             {
-                Location = new Point(135, 33),
-                Size = new Size(210, 22),
-                BackColor = Color.FromArgb(12, 15, 22),
-                ForeColor = Color.White,
+                Location = new Point(164, 34),
+                Size = new Size(340, 24),
+                BackColor = ArgonTheme.BgInput,
+                ForeColor = ArgonTheme.TextPrimary,
                 BorderStyle = BorderStyle.FixedSingle,
-                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                Font = new Font("Segoe UI", 8.4f, FontStyle.Bold),
                 Text = "Benim Espor Profilim"
             };
             pnlRightCol.Controls.Add(txtNewProfileNameInput);
 
-            Button btnSaveNamedProf = CreateActionButton(pnlRightCol, 352, 31, 145, 26, "Profili Kaydet", Color.FromArgb(16, 185, 129));
-            btnSaveNamedProf.ForeColor = Color.Black;
+            Button btnSaveNamedProf = CreateActionButton(pnlRightCol, 514, 32, 160, 28, "Profili Kaydet", ArgonTheme.Accent);
+            btnSaveNamedProf.ForeColor = Color.White;
             btnSaveNamedProf.Click += (s, e) =>
             {
                 string name = (txtNewProfileNameInput.Text ?? "").Trim();
@@ -16962,33 +24490,36 @@ namespace ArgonLatencyStudio
                 SaveCurrentStateAsCustomProfile(name);
             };
 
-            Button btnExportProf = CreateActionButton(pnlRightCol, 504, 31, 145, 26, "Dışa Aktar (.argon)", Color.FromArgb(14, 165, 233));
-            btnExportProf.ForeColor = Color.Black;
+            Button btnExportProf = CreateActionButton(pnlRightCol, 682, 32, 160, 28, "Dışa Aktar (.argon)", ArgonTheme.BgElevated);
+            btnExportProf.ForeColor = ArgonTheme.TextPrimary;
             btnExportProf.Click += (s, e) => ExportCurrentProfileDialog();
 
-            Button btnImportProf = CreateActionButton(pnlRightCol, 656, 31, 145, 26, "İçe Aktar (.argon)", Color.FromArgb(168, 85, 247));
+            Button btnImportProf = CreateActionButton(pnlRightCol, 850, 32, 156, 28, "İçe Aktar (.argon)", ArgonTheme.BgElevated);
+            btnImportProf.ForeColor = ArgonTheme.TextPrimary;
             btnImportProf.Click += (s, e) => ImportCustomProfileDialog();
 
             lstCustomProfilesManager = new ListBox
             {
-                Location = new Point(14, 64),
-                Size = new Size(787, 142),
-                BackColor = Color.FromArgb(12, 15, 22),
-                ForeColor = Color.FromArgb(226, 232, 240),
+                Location = new Point(14, 68),
+                Size = new Size(992, 140),
+                BackColor = ArgonTheme.BgInput,
+                ForeColor = ArgonTheme.TextPrimary,
                 BorderStyle = BorderStyle.FixedSingle,
-                Font = new Font("Consolas", 8.4f, FontStyle.Regular)
+                Font = new Font("Consolas", 8.5f, FontStyle.Regular)
             };
             pnlRightCol.Controls.Add(lstCustomProfilesManager);
 
-            Button btnApplySelProf = CreateActionButton(pnlRightCol, 14, 214, 250, 30, "Seçili Profili Sisteme Uygula", Color.FromArgb(16, 185, 129));
-            btnApplySelProf.ForeColor = Color.Black;
+            Button btnApplySelProf = CreateActionButton(pnlRightCol, 14, 216, 320, 32, "Seçili Profili Sisteme Uygula", ArgonTheme.Accent);
+            btnApplySelProf.ForeColor = Color.White;
             btnApplySelProf.Click += (s, e) => ApplyProfileFromSettingsListSelection();
 
-            Button btnDeleteSelProf = CreateActionButton(pnlRightCol, 272, 214, 240, 30, "Seçili Kullanıcı Profilini Sil", Color.FromArgb(153, 27, 27));
+            Button btnDeleteSelProf = CreateActionButton(pnlRightCol, 344, 216, 320, 32, "Seçili Kullanıcı Profilini Sil", ArgonTheme.Alert);
+            btnDeleteSelProf.ForeColor = Color.White;
             btnDeleteSelProf.Click += (s, e) => DeleteProfileFromSettingsListSelection();
 
-            Button btnOpenVaultFolder = CreateActionButton(pnlRightCol, 520, 214, 281, 30,
-                "Yedek & Profil Klasörünü Aç (AppData)", Color.FromArgb(30, 58, 138));
+            Button btnOpenVaultFolder = CreateActionButton(pnlRightCol, 674, 216, 332, 32,
+                "Yedek & Profil Klasörünü Aç (AppData)", ArgonTheme.BgElevated);
+            btnOpenVaultFolder.ForeColor = ArgonTheme.TextPrimary;
             btnOpenVaultFolder.Click += (s, e) =>
             {
                 try
@@ -17002,56 +24533,58 @@ namespace ArgonLatencyStudio
             // BOTTOM PANEL: Telemetry Sensors + Behavioral Settings
             Panel pnlLeftCol = new Panel
             {
-                Location = new Point(10, 272),
-                Size = new Size(815, 425),
-                BackColor = Color.FromArgb(18, 23, 34)
+                Location = new Point(12, 280),
+                Size = new Size(1020, 496),
+                BackColor = ArgonTheme.BgSurface
             };
             viewSettings.Controls.Add(pnlLeftCol);
 
             Label lblSec1 = new Label
             {
                 Text = "LİBRE HARDWAREMONITOR SENSÖR & CANLI ALGILAMA AYARLARI",
-                Font = new Font("Segoe UI", 8.8f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(52, 211, 153),
+                Font = new Font("Segoe UI", 9.0f, FontStyle.Bold),
+                ForeColor = ArgonTheme.Accent,
                 AutoSize = true,
+                UseMnemonic = false,
                 Location = new Point(14, 10)
             };
             pnlLeftCol.Controls.Add(lblSec1);
 
-            chkSetEnableSensors = CreateSettingsCheckBox(pnlLeftCol, 14, 34,
-                "LibreHardwareMonitor Donanım Sensörlerini Etkinleştir (Canlı CPU & GPU Okuma)",
+            chkSetEnableSensors = CreateSettingsCheckBox(pnlLeftCol, 14, 36,
+                "LibreHardwareMonitor Donanım Sensörlerini Etkinleştir (Canlı CPU & GPU)",
                 appSettings.EnableTelemetrySensors);
 
-            chkSetShowCpu = CreateSettingsCheckBox(pnlLeftCol, 14, 58,
-                "İşlemci (CPU) Sıcaklığı (Core Tctl/Tdie) ve Yük Yüzdesini Sağ Panelde Göster",
+            chkSetShowCpu = CreateSettingsCheckBox(pnlLeftCol, 14, 60,
+                "İşlemci (CPU) Sıcaklığı (Core Tctl/Tdie) ve Yük Yüzdesini Göster",
                 appSettings.ShowCpuSensor);
 
-            chkSetShowGpuCore = CreateSettingsCheckBox(pnlLeftCol, 14, 82,
+            chkSetShowGpuCore = CreateSettingsCheckBox(pnlLeftCol, 14, 84,
                 "Ekran Kartı (GPU) Çekirdek (Core) Sıcaklığı ve Yük Yüzdesini Göster",
                 appSettings.ShowGpuCoreSensor);
 
-            chkSetShowGpuMemHot = CreateSettingsCheckBox(pnlLeftCol, 14, 106,
+            chkSetShowGpuMemHot = CreateSettingsCheckBox(pnlLeftCol, 14, 108,
                 "Ekran Kartı (GPU) Bellek (Memory) ve Hotspot Sıcaklığını Göster",
                 appSettings.ShowGpuMemHotspotSensor);
 
             Label lblPoll = new Label
             {
                 Text = "Sensör Yenileme Hızı:",
-                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(203, 213, 225),
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                ForeColor = ArgonTheme.TextSecondary,
                 AutoSize = true,
-                Location = new Point(450, 36)
+                UseMnemonic = false,
+                Location = new Point(582, 38)
             };
             pnlLeftCol.Controls.Add(lblPoll);
 
             cmbSetPollInterval = new ComboBox
             {
                 DropDownStyle = ComboBoxStyle.DropDownList,
-                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
-                BackColor = Color.FromArgb(12, 15, 22),
-                ForeColor = Color.FromArgb(56, 189, 248),
-                Location = new Point(580, 32),
-                Size = new Size(145, 22)
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                BackColor = ArgonTheme.BgInput,
+                ForeColor = ArgonTheme.Accent,
+                Location = new Point(726, 34),
+                Size = new Size(172, 24)
             };
             cmbSetPollInterval.Items.AddRange(new object[]
             {
@@ -17062,20 +24595,21 @@ namespace ArgonLatencyStudio
             cmbSetPollInterval.SelectedIndex = appSettings.TelemetryPollIntervalMs <= 500 ? 0 : (appSettings.TelemetryPollIntervalMs >= 2000 ? 2 : 1);
             pnlLeftCol.Controls.Add(cmbSetPollInterval);
 
-            Button btnRescanSensors = CreateActionButton(pnlLeftCol, 730, 31, 72, 24, "Şimdi Oku", Color.FromArgb(14, 165, 233));
-            btnRescanSensors.ForeColor = Color.Black;
+            Button btnRescanSensors = CreateActionButton(pnlLeftCol, 906, 33, 100, 26, "Şimdi Oku", ArgonTheme.Accent);
+            btnRescanSensors.ForeColor = Color.White;
             btnRescanSensors.Click += (s, e) => TriggerAsyncHardwareSensorPoll();
 
             lblSettingsSensorDiag = new Label
             {
                 Text = "Sensör durumu hazırlanıyor...",
-                Font = new Font("Consolas", 7.8f, FontStyle.Regular),
-                ForeColor = Color.FromArgb(148, 163, 184),
-                BackColor = Color.FromArgb(12, 15, 22),
+                Font = new Font("Consolas", 8.0f, FontStyle.Regular),
+                ForeColor = ArgonTheme.TextSecondary,
+                BackColor = ArgonTheme.BgInput,
                 BorderStyle = BorderStyle.FixedSingle,
                 Padding = new Padding(6),
-                Location = new Point(14, 134),
-                Size = new Size(787, 62)
+                UseMnemonic = false,
+                Location = new Point(14, 136),
+                Size = new Size(992, 62)
             };
             pnlLeftCol.Controls.Add(lblSettingsSensorDiag);
 
@@ -17083,8 +24617,9 @@ namespace ArgonLatencyStudio
             {
                 Text = Loc.T("Arayüz Dili / Interface Language:", "Interface Language / Arayüz Dili:"),
                 Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(203, 213, 225),
-                Location = new Point(14, 206),
+                ForeColor = ArgonTheme.TextSecondary,
+                UseMnemonic = false,
+                Location = new Point(14, 210),
                 AutoSize = true
             };
             pnlLeftCol.Controls.Add(lblLangHdr);
@@ -17093,10 +24628,10 @@ namespace ArgonLatencyStudio
             {
                 DropDownStyle = ComboBoxStyle.DropDownList,
                 Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
-                BackColor = Color.FromArgb(12, 15, 22),
-                ForeColor = Color.FromArgb(56, 189, 248),
-                Location = new Point(255, 203),
-                Size = new Size(180, 24)
+                BackColor = ArgonTheme.BgInput,
+                ForeColor = ArgonTheme.Accent,
+                Location = new Point(265, 206),
+                Size = new Size(200, 24)
             };
             cmbSetLanguage.Items.AddRange(new object[]
             {
@@ -17119,8 +24654,9 @@ namespace ArgonLatencyStudio
             {
                 Text = Loc.T("Pencere Boyutu / Sabit Çözünürlük:", "Window Size / Fixed Resolution Preset:"),
                 Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(203, 213, 225),
-                Location = new Point(14, 236),
+                ForeColor = ArgonTheme.TextSecondary,
+                UseMnemonic = false,
+                Location = new Point(14, 240),
                 AutoSize = true
             };
             pnlLeftCol.Controls.Add(lblResHdr);
@@ -17129,10 +24665,10 @@ namespace ArgonLatencyStudio
             {
                 DropDownStyle = ComboBoxStyle.DropDownList,
                 Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
-                BackColor = Color.FromArgb(12, 15, 22),
-                ForeColor = Color.FromArgb(56, 189, 248),
-                Location = new Point(255, 233),
-                Size = new Size(340, 24)
+                BackColor = ArgonTheme.BgInput,
+                ForeColor = ArgonTheme.Accent,
+                Location = new Point(265, 236),
+                Size = new Size(360, 24)
             };
             cmbResolutionPreset.Items.AddRange(new object[]
             {
@@ -17156,7 +24692,7 @@ namespace ArgonLatencyStudio
             };
             pnlLeftCol.Controls.Add(cmbResolutionPreset);
 
-            chkSetLockResolution = CreateSettingsCheckBox(pnlLeftCol, 14, 264,
+            chkSetLockResolution = CreateSettingsCheckBox(pnlLeftCol, 14, 268,
                 "Sabit Çözünürlük Kilidi (Pencere kenarlarından çekip arayüzü bozmayı engelle)",
                 appSettings.LockFixedResolution);
             chkSetLockResolution.CheckedChanged += (s, e) =>
@@ -17167,35 +24703,80 @@ namespace ArgonLatencyStudio
                 ApplyWindowLayoutPolicy();
             };
 
-            chkSetAutoTruthSync = CreateSettingsCheckBox(pnlLeftCol, 14, 288,
+            chkSetAutoTruthSync = CreateSettingsCheckBox(pnlLeftCol, 14, 292,
                 "Gerçek Durum Algılama (Live OS Truth): Açılışta Aktif Ayarları Otomatik Eşitle",
                 appSettings.AutoLiveTruthSync);
 
-            chkSetConfirmCritical = CreateSettingsCheckBox(pnlLeftCol, 14, 312,
+            chkSetConfirmCritical = CreateSettingsCheckBox(pnlLeftCol, 14, 316,
                 "Kritik ve WinUtil Ayarlarını Açarken Onay Penceresi Göster",
                 appSettings.ConfirmCriticalTweaks);
 
-            chkSetRichTooltips = CreateSettingsCheckBox(pnlLeftCol, 14, 336,
+            chkSetRichTooltips = CreateSettingsCheckBox(pnlLeftCol, 14, 340,
                 "Zenginleştirilmiş Teknik İpuçları (Canlı OS Değeri + Kayıt Yolu)",
                 appSettings.RichTooltipsEnabled);
 
-            Button btnSyncLiveOsNow = CreateActionButton(pnlLeftCol, 14, 368, 515, 34,
-                "ŞİMDİ GERÇEK WINDOWS DURUMUNDAN (LIVE OS TRUTH) TÜM ANAHTARLARI EŞİTLE",
-                Color.FromArgb(16, 185, 129));
-            btnSyncLiveOsNow.ForeColor = Color.Black;
+            chkSetStartTray = CreateSettingsCheckBox(pnlLeftCol, 14, 364,
+                "Windows açılışında sistem tepsisinde gizli başlat (Pencereyi açılışta gizle)",
+                appSettings.StartMinimizedToTray);
+            chkSetStartTray.CheckedChanged += (s, e) =>
+            {
+                if (syncingSettingsTabUi) return;
+                appSettings.StartMinimizedToTray = chkSetStartTray.Checked;
+                appSettings.Save(appSettingsPath);
+            };
+
+            Label lblThemeHdr = new Label
+            {
+                Text = Loc.T("Görünüm Teması:", "UI Theme Mode:"),
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                ForeColor = ArgonTheme.TextSecondary,
+                UseMnemonic = false,
+                Location = new Point(14, 396),
+                AutoSize = true
+            };
+            pnlLeftCol.Controls.Add(lblThemeHdr);
+
+            cmbSetThemeMode = new ComboBox
+            {
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                BackColor = ArgonTheme.BgInput,
+                ForeColor = ArgonTheme.Accent,
+                Location = new Point(265, 392),
+                Size = new Size(360, 24)
+            };
+            cmbSetThemeMode.Items.AddRange(new object[]
+            {
+                "Winaero Açık Tema (Windows Native)",
+                "Argon Koyu Tema (Dark Slate) [Varsayılan]"
+            });
+            cmbSetThemeMode.SelectedIndex = string.Equals(appSettings.UiThemeMode, "DARK", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+            cmbSetThemeMode.SelectedIndexChanged += (s, e) =>
+            {
+                if (syncingSettingsTabUi) return;
+                string mode = cmbSetThemeMode.SelectedIndex == 1 ? "DARK" : "LIGHT";
+                SwitchUiThemeMode(mode);
+            };
+            pnlLeftCol.Controls.Add(cmbSetThemeMode);
+
+            Button btnSyncLiveOsNow = CreateActionButton(pnlLeftCol, 14, 434, 440, 34,
+                "Canlı OS Durumunu Tüm Anahtarlardan Eşitle",
+                ArgonTheme.Accent);
+            btnSyncLiveOsNow.ForeColor = Color.White;
             btnSyncLiveOsNow.Click += (s, e) =>
             {
                 ProbeAllTweaksLiveOsTruthAndOptionallySync(true);
                 MessageBox.Show(
-                    "Tüm 45 ayar için Windows Kayıt Defteri, Aktif Güç Planı, Win32 SPI ve Kernel durumu canlı olarak tarandı.\n\n" +
+                    "Tüm ayarlar için Windows Kayıt Defteri, Aktif Güç Planı, Win32 SPI ve Kernel durumu canlı olarak tarandı.\n\n" +
                     "Sistemde gerçekten aktif olan ayarlar 'AÇIK', varsayılanda olanlar 'KAPALI' olarak arayüzle birebir eşitlendi.",
                     "Gerçek Durumdan Türetilen Algılama (Live OS Sync)",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
             };
 
-            Button btnResetAppSettings = CreateActionButton(pnlLeftCol, 538, 342, 263, 34,
-                "Program Ayarlarını Varsayılana Döndür", Color.FromArgb(51, 65, 85));
+            Button btnResetAppSettings = CreateActionButton(pnlLeftCol, 466, 434, 280, 34,
+                "Program Ayarlarını Varsayılana Döndür", ArgonTheme.BgElevated);
+            btnResetAppSettings.ForeColor = ArgonTheme.TextPrimary;
             btnResetAppSettings.Click += (s, e) =>
             {
                 appSettings = new ArgonAppSettings();
@@ -17253,8 +24834,9 @@ namespace ArgonLatencyStudio
             {
                 Text = text,
                 Font = new Font("Segoe UI", 8.3f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(226, 232, 240),
+                ForeColor = ArgonTheme.TextPrimary,
                 AutoSize = true,
+                UseMnemonic = false,
                 Checked = initialChecked,
                 Location = new Point(x, y),
                 Cursor = Cursors.Hand
@@ -17291,6 +24873,10 @@ namespace ArgonLatencyStudio
                 chkSetAutoTruthSync.Checked = appSettings.AutoLiveTruthSync;
                 chkSetConfirmCritical.Checked = appSettings.ConfirmCriticalTweaks;
                 chkSetRichTooltips.Checked = appSettings.RichTooltipsEnabled;
+                if (chkSetStartTray != null)
+                    chkSetStartTray.Checked = appSettings.StartMinimizedToTray;
+                if (cmbSetThemeMode != null)
+                    cmbSetThemeMode.SelectedIndex = string.Equals(appSettings.UiThemeMode, "DARK", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
                 if (cmbSetLanguage != null)
                 {
                     cmbSetLanguage.SelectedIndex = Loc.IsEnglish ? 1 : 0;
@@ -17307,8 +24893,8 @@ namespace ArgonLatencyStudio
             viewGlobalSearch = new Panel
             {
                 Dock = DockStyle.Fill,
-                BackColor = Color.FromArgb(13, 16, 23),
-                Padding = new Padding(10, 8, 10, 8),
+                BackColor = ArgonTheme.BgCanvas,
+                Padding = new Padding(18, 12, 18, 10),
                 Visible = false
             };
             pnlContentHost.Controls.Add(viewGlobalSearch);
@@ -17316,26 +24902,35 @@ namespace ArgonLatencyStudio
             Panel pnlSearchTop = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 36,
-                BackColor = Color.FromArgb(18, 23, 34)
+                Height = 42,
+                BackColor = ArgonTheme.BgSurface
+            };
+            pnlSearchTop.Paint += (s, e) =>
+            {
+                using (Pen p = new Pen(ArgonTheme.BorderSubtle, 1))
+                    e.Graphics.DrawRectangle(p, 0, 0, pnlSearchTop.Width - 1, pnlSearchTop.Height - 1);
             };
             viewGlobalSearch.Controls.Add(pnlSearchTop);
 
             lblGlobalSearchHeader = new Label
             {
                 Text = "TÜM SEKMELERDE GENEL ARAMA SONUÇLARI:",
-                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(56, 189, 248),
+                Font = new Font("Segoe UI", 8.8f, FontStyle.Bold),
+                ForeColor = ArgonTheme.Accent,
                 AutoSize = true,
-                Location = new Point(12, 9)
+                Location = new Point(14, 12),
+                UseMnemonic = false
             };
             pnlSearchTop.Controls.Add(lblGlobalSearchHeader);
 
-            Button btnClearSearch = CreateActionButton(pnlSearchTop, 640, 5, 165, 25, "Aramayı Temizle & Dön", Color.FromArgb(51, 65, 85));
+            Button btnClearSearch = CreateActionButton(pnlSearchTop, 640, 8, 175, 26, Loc.T("Aramayı Temizle", "Clear Search"), ArgonTheme.BgSurfaceHover);
+            btnClearSearch.ForeColor = ArgonTheme.TextPrimary;
+            btnClearSearch.FlatAppearance.BorderSize = 1;
+            btnClearSearch.FlatAppearance.BorderColor = ArgonTheme.BorderSubtle;
             btnClearSearch.Click += (s, e) => { txtGlobalSearch.Text = ""; };
             pnlSearchTop.Resize += (s, e) =>
             {
-                btnClearSearch.Location = new Point(Math.Max(520, pnlSearchTop.ClientSize.Width - btnClearSearch.Width - 10), 5);
+                btnClearSearch.Location = new Point(Math.Max(420, pnlSearchTop.ClientSize.Width - btnClearSearch.Width - 12), 8);
             };
 
             flowGlobalSearchCards = new FlowLayoutPanel
@@ -17344,8 +24939,8 @@ namespace ArgonLatencyStudio
                 AutoScroll = true,
                 FlowDirection = FlowDirection.TopDown,
                 WrapContents = false,
-                Padding = new Padding(0, 6, 0, 8),
-                BackColor = Color.FromArgb(13, 16, 23)
+                Padding = new Padding(0, 8, 0, 8),
+                BackColor = ArgonTheme.BgCanvas
             };
             viewGlobalSearch.Controls.Add(flowGlobalSearchCards);
             pnlSearchTop.SendToBack();
@@ -17370,8 +24965,8 @@ namespace ArgonLatencyStudio
             viewSnapshotAudit = new Panel
             {
                 Dock = DockStyle.Fill,
-                BackColor = Color.FromArgb(13, 16, 23),
-                Padding = new Padding(10, 8, 10, 8),
+                BackColor = ArgonTheme.BgCanvas,
+                Padding = new Padding(18, 12, 18, 10),
                 Visible = false
             };
             pnlContentHost.Controls.Add(viewSnapshotAudit);
@@ -17379,36 +24974,47 @@ namespace ArgonLatencyStudio
             Panel pnlTopAudit = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 52,
-                BackColor = Color.FromArgb(18, 23, 34)
+                Height = 56,
+                BackColor = ArgonTheme.BgSurface
+            };
+            pnlTopAudit.Paint += (s, e) =>
+            {
+                using (Pen p = new Pen(ArgonTheme.BorderSubtle, 1))
+                    e.Graphics.DrawRectangle(p, 0, 0, pnlTopAudit.Width - 1, pnlTopAudit.Height - 1);
             };
             viewSnapshotAudit.Controls.Add(pnlTopAudit);
 
             Label lblAuditSummary = new Label
             {
-                Text = "CANLI OS ALGILAMA (LIVE TRUTH) & STATEVAULT YEDEK GÜNLÜĞÜ",
-                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(52, 211, 153),
+                Text = Loc.T("CANLI OS ALGILAMA (LIVE TRUTH) & STATEVAULT YEDEK GÜNLÜĞÜ", "LIVE OS DETECTION & STATEVAULT AUDIT JOURNAL"),
+                Font = new Font("Segoe UI", 8.8f, FontStyle.Bold),
+                ForeColor = ArgonTheme.Accent,
                 AutoSize = true,
-                Location = new Point(12, 8)
+                Location = new Point(14, 9),
+                UseMnemonic = false
             };
             pnlTopAudit.Controls.Add(lblAuditSummary);
 
             Label lblAuditSub = new Label
             {
-                Text = "Her ayarın açılış öncesi orijinal fabrika değeri, canlı Windows Kayıt Defteri/Kernel değeri ve doğrulama durumu.",
-                Font = new Font("Segoe UI", 7.8f, FontStyle.Regular),
-                ForeColor = Color.FromArgb(148, 163, 184),
+                Text = Loc.T("Her ayarın açılış öncesi orijinal fabrika değeri, canlı Windows Kayıt Defteri/Kernel değeri ve doğrulama durumu.",
+                    "Baseline pre-Argon value, live Windows Registry/Kernel state, and verification status for every tweak."),
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Regular),
+                ForeColor = ArgonTheme.TextMuted,
                 AutoSize = true,
-                Location = new Point(12, 28)
+                Location = new Point(14, 30),
+                UseMnemonic = false
             };
             pnlTopAudit.Controls.Add(lblAuditSub);
 
-            Button btnSyncFromAudit = CreateActionButton(pnlTopAudit, 490, 11, 185, 28, "Canlı OS Durumunu Eşitle", Color.FromArgb(16, 185, 129));
-            btnSyncFromAudit.ForeColor = Color.Black;
+            Button btnSyncFromAudit = CreateActionButton(pnlTopAudit, 490, 14, 195, 28, Loc.T("Canlı OS Durumunu Eşitle", "Sync Live OS Truth"), ArgonTheme.Accent);
+            btnSyncFromAudit.ForeColor = Color.White;
             btnSyncFromAudit.Click += (s, e) => ProbeAllTweaksLiveOsTruthAndOptionallySync(true);
 
-            Button btnRefreshAudit = CreateActionButton(pnlTopAudit, 682, 11, 125, 28, "Tabloyu Yenile", Color.FromArgb(51, 65, 85));
+            Button btnRefreshAudit = CreateActionButton(pnlTopAudit, 692, 14, 128, 28, Loc.T("Tabloyu Yenile", "Refresh Table"), ArgonTheme.BgSurfaceHover);
+            btnRefreshAudit.ForeColor = ArgonTheme.TextPrimary;
+            btnRefreshAudit.FlatAppearance.BorderSize = 1;
+            btnRefreshAudit.FlatAppearance.BorderColor = ArgonTheme.BorderSubtle;
             btnRefreshAudit.Click += (s, e) =>
             {
                 ProbeAllTweaksLiveOsTruthAndOptionallySync(false);
@@ -17418,9 +25024,70 @@ namespace ArgonLatencyStudio
             pnlTopAudit.Resize += (s, e) =>
             {
                 int w = Math.Max(660, pnlTopAudit.ClientSize.Width);
-                btnRefreshAudit.Location = new Point(w - btnRefreshAudit.Width - 10, 11);
-                btnSyncFromAudit.Location = new Point(btnRefreshAudit.Left - btnSyncFromAudit.Width - 6, 11);
+                btnRefreshAudit.Location = new Point(w - btnRefreshAudit.Width - 14, 14);
+                btnSyncFromAudit.Location = new Point(btnRefreshAudit.Left - btnSyncFromAudit.Width - 8, 14);
             };
+
+            // Bottom Console Event Log Panel (replaces old crammed sidebar log window cleanly)
+            Panel pnlAuditConsoleWrap = new Panel
+            {
+                Dock = DockStyle.Bottom,
+                Height = 195,
+                BackColor = ArgonTheme.BgSurface,
+                Padding = new Padding(1, 0, 1, 1)
+            };
+            pnlAuditConsoleWrap.Paint += (s, e) =>
+            {
+                using (Pen p = new Pen(ArgonTheme.BorderSubtle, 1))
+                    e.Graphics.DrawRectangle(p, 0, 0, pnlAuditConsoleWrap.Width - 1, pnlAuditConsoleWrap.Height - 1);
+            };
+            viewSnapshotAudit.Controls.Add(pnlAuditConsoleWrap);
+
+            Panel pnlConsoleHdr = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 28,
+                BackColor = ArgonTheme.BgSurfaceHover
+            };
+            pnlAuditConsoleWrap.Controls.Add(pnlConsoleHdr);
+
+            lblSideEventLogHeader = new Label
+            {
+                Text = Loc.T("SİSTEM OLAY GÜNLÜĞÜ", "SYSTEM EVENT LOG"),
+                Font = new Font("Segoe UI", 8.0f, FontStyle.Bold),
+                ForeColor = ArgonTheme.TextSecondary,
+                AutoSize = true,
+                Location = new Point(10, 6),
+                UseMnemonic = false
+            };
+            pnlConsoleHdr.Controls.Add(lblSideEventLogHeader);
+
+            Button btnClearConsoleLog = CreateActionButton(pnlConsoleHdr, 740, 2, 84, 24, Loc.T("Temizle", "Clear"), ArgonTheme.BgSurface);
+            btnClearConsoleLog.Font = new Font("Segoe UI", 7.8f, FontStyle.Regular);
+            btnClearConsoleLog.ForeColor = ArgonTheme.TextSecondary;
+            btnClearConsoleLog.FlatAppearance.BorderSize = 1;
+            btnClearConsoleLog.FlatAppearance.BorderColor = ArgonTheme.BorderSubtle;
+            btnClearConsoleLog.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            btnClearConsoleLog.Click += (s, e) => { if (txtLiveConsoleLog != null) txtLiveConsoleLog.Clear(); };
+            pnlConsoleHdr.Resize += (s, e) =>
+            {
+                btnClearConsoleLog.Location = new Point(Math.Max(220, pnlConsoleHdr.ClientSize.Width - btnClearConsoleLog.Width - 8), 2);
+            };
+
+            txtLiveConsoleLog = new TextBox
+            {
+                Dock = DockStyle.Fill,
+                Multiline = true,
+                ReadOnly = true,
+                ScrollBars = ScrollBars.Vertical,
+                BackColor = ArgonTheme.BgCanvas,
+                ForeColor = ArgonTheme.TextPrimary,
+                BorderStyle = BorderStyle.None,
+                Font = new Font("Consolas", 8.8f, FontStyle.Regular)
+            };
+            pnlAuditConsoleWrap.Controls.Add(txtLiveConsoleLog);
+            pnlConsoleHdr.SendToBack();
+            txtLiveConsoleLog.BringToFront();
 
             lvAuditLog = new ListView
             {
@@ -17428,18 +25095,36 @@ namespace ArgonLatencyStudio
                 View = View.Details,
                 FullRowSelect = true,
                 GridLines = true,
-                BackColor = Color.FromArgb(14, 18, 26),
-                ForeColor = Color.White,
+                BackColor = ArgonTheme.BgSurface,
+                ForeColor = ArgonTheme.TextPrimary,
                 BorderStyle = BorderStyle.FixedSingle,
-                Font = new Font("Consolas", 8.2f, FontStyle.Regular)
+                Font = new Font("Consolas", 8.3f, FontStyle.Regular)
             };
-            lvAuditLog.Columns.Add("İlgili Ayar / Modül", 210);
-            lvAuditLog.Columns.Add("Kayıt Defteri / API Konumu", 245);
-            lvAuditLog.Columns.Add("Orijinal Fabrika Değeri", 155);
-            lvAuditLog.Columns.Add("Canlı Windows (OS) Durumu", 195);
+            lvAuditLog.Columns.Add(Loc.T("İlgili Ayar / Modül", "Tweak / Module"), 240);
+            lvAuditLog.Columns.Add(Loc.T("Kayıt Defteri / API Konumu", "Registry / API Target"), 290);
+            lvAuditLog.Columns.Add(Loc.T("Orijinal Fabrika Değeri", "Baseline Original Value"), 185);
+            lvAuditLog.Columns.Add(Loc.T("Canlı Windows (OS) Durumu", "Live Windows OS State"), 255);
             viewSnapshotAudit.Controls.Add(lvAuditLog);
+
             pnlTopAudit.SendToBack();
+            pnlAuditConsoleWrap.SendToBack();
             lvAuditLog.BringToFront();
+        }
+
+        private string GetTabTitleByIndex(int index, bool isEn)
+        {
+            if (index == 11) return isEn ? "Hardware Specifications & System Monitor" : "Bilgisayar Özellikleri ve Sistem Monitörü";
+            if (index == 0) return isEn ? "Hardware Profile & Core Architecture" : "Donanım Profili ve Mimari";
+            if (index == 1) return isEn ? "Network Adapter, NDIS & TCP/IP Stack" : "Ağ Adaptörü ve TCP/IP Yığını";
+            if (index == 2) return isEn ? "Kernel Timer, Power & Input Latency" : "Zamanlama, Güç ve Giriş Gecikmesi";
+            if (index == 3) return isEn ? "Graphics Pipeline, DWM & Frame Pacing" : "Grafik Yığını ve Kare Hızı";
+            if (index == 4) return isEn ? "Windows System, Storage & Services" : "Windows Sistemi ve Servisler";
+            if (index == 5) return isEn ? "Kernel & Advanced Parameters" : "Çekirdek ve İleri Seviye Ayarlar";
+            if (index == 6) return isEn ? "Process Priority & Game Watchdog" : "İşlem Önceliği ve Oyun Nöbetçisi";
+            if (index == 7) return isEn ? "Automation, Power Timer & Linux Scroll" : "Otomasyon ve Linux Kaydırma";
+            if (index == 8) return isEn ? "Hardware Diagnostics & Measurement" : "Tanı ve Ölçüm Araçları";
+            if (index == 9) return isEn ? "StateVault Audit & Event Log" : "Günlük ve Değişiklik Denetimi";
+            return isEn ? "Application Settings & Backups" : "Uygulama Ayarları ve Yedekler";
         }
 
         public void ApplyLanguage(string newLanguage)
@@ -17454,46 +25139,30 @@ namespace ArgonLatencyStudio
 
             bool isEn = Loc.IsEnglish;
 
-            // 1. Top Header
+            // 1. Top Header & Rail Controls
             if (btnLangToggle != null)
-                btnLangToggle.Text = isEn ? "🌐 EN" : "🌐 TR";
+                btnLangToggle.Text = isEn ? "EN" : "TR";
             if (lblProfCaption != null)
-                lblProfCaption.Text = isEn ? "PROFILE:" : "PROFİL:";
+                lblProfCaption.Text = isEn ? "Profile:" : "Profil:";
             if (btnQuickSaveProf != null)
                 btnQuickSaveProf.Text = isEn ? "+ Save" : "+ Kaydet";
             if (chkRevertOnExit != null)
-                chkRevertOnExit.Text = isEn ? "Revert on exit" : "Çıkışta sıfırla";
+                chkRevertOnExit.Text = isEn ? "Revert on exit" : "Çıkışta geri al";
             if (chkAutoStart != null)
                 chkAutoStart.Text = isEn ? "Start with Windows" : "Windows ile başlat";
             if (btnSmartTuneTop != null)
-                btnSmartTuneTop.Text = isEn ? "⚡ Smart Tune" : "⚡ Akıllı Profil";
+                btnSmartTuneTop.Text = isEn ? "  Smart Profile" : "  Akıllı Profil";
             if (btnResetAllTop != null)
-                btnResetAllTop.Text = isEn ? "↺ Reset All" : "↺ Fabrika Sıfırla";
+                btnResetAllTop.Text = isEn ? "  Reset All" : "  Fabrika Sıfırla";
             if (btnMinimizeTray != null)
-                btnMinimizeTray.Text = isEn ? "– Tray" : "– Tepsiye Küçült";
-            if (lblSearchIcon != null)
-                lblSearchIcon.Text = isEn ? "Search:" : "Ara:";
+                btnMinimizeTray.Text = isEn ? "  Tray" : "  Tepsi";
             if (btnElevate != null)
-                btnElevate.Text = isEn ? "🛡️ Admin" : "🛡️ Yönetici Aç";
+                btnElevate.Text = isEn ? "  Run as Admin" : "  Yönetici Aç";
+            if (lblCurrentPageTitle != null)
+                lblCurrentPageTitle.Text = GetTabTitleByIndex(currentActiveTabIndex, isEn);
 
-            // 2. Navigation Tabs
-            string[] trTabNames = new string[]
-            {
-                "Donanım", "Ağ", "Timer", "Grafik", "Sistem", "Kernel",
-                "İşlemler", "Otomasyon", "Tanı Test", "Günlük", "Ayarlar"
-            };
-            string[] enTabNames = new string[]
-            {
-                "Hardware", "Network", "Timer", "Graphics", "System", "Kernel",
-                "Processes", "Automation", "Diagnostics", "Event Log", "Settings"
-            };
-            string[] activeTabNames = isEn ? enTabNames : trTabNames;
-            for (int i = 0; i < navButtons.Count && i < activeTabNames.Length; i++)
-            {
-                navButtons[i].Text = activeTabNames[i];
-            }
+            // 2. Navigation Rail Labels
             UpdateActiveCountsAndNavBadges();
-            LayoutNavBarButtons();
 
             // 3. Hardware Profile Top Controls
             if (lblMatTitle != null)
@@ -17508,44 +25177,42 @@ namespace ArgonLatencyStudio
             if (btnTier2 != null) btnTier2.Text = isEn ? "2: Esports" : "2: Espor";
             if (btnTier3 != null) btnTier3.Text = isEn ? "3: Extreme" : "3: Ekstrem";
             if (btnSmartApply != null)
-                btnSmartApply.Text = isEn ? "⚡ APPLY SELECTED PROFILE (ONE-CLICK)" : "⚡ SEÇİLİ PROFİLİ TEK TIKLA UYGULA";
+                btnSmartApply.Text = isEn ? "  Apply Selected Hardware Profile" : "  Seçili Donanım Profilini Uygula";
             if (btnAutoDetectReset != null)
-                btnAutoDetectReset.Text = isEn ? "Auto-Detect Hardware" : "Donanımımı Otomatik Algıla";
+                btnAutoDetectReset.Text = isEn ? "  Auto-Detect Hardware" : "  Donanımı Otomatik Algıla";
             if (btnQuickRam != null)
-                btnQuickRam.Text = isEn ? "Instant RAM & DNS Purge" : "Anlık RAM & DNS Temizle";
+                btnQuickRam.Text = isEn ? "  Purge RAM & DNS Cache" : "  RAM & DNS Önbelleği Temizle";
 
-            // 4. Sidebar Network & Telemetry Labels
-            if (grpNetAdapter != null) grpNetAdapter.Text = isEn ? "NETWORK & ADAPTER" : "AĞ ADAPTÖRÜ VE BAĞLANTI";
-            if (btnSideFlush != null) btnSideFlush.Text = isEn ? "Clear" : "Temizle";
-            if (lblHwHdr != null) lblHwHdr.Text = isEn ? "HARDWARE MONITOR" : "DONANIM İZLEME";
-            if (lblSideEventLogHeader != null) lblSideEventLogHeader.Text = isEn ? "SYSTEM EVENT LOG" : "SİSTEM OLAY GÜNLÜĞÜ";
+            // 4. System Monitor & Audit Headers
+            if (lblMonitorTitle != null)
+                lblMonitorTitle.Text = isEn ? "Hardware Specifications & System Monitor" : "Bilgisayar Özellikleri ve Sistem Monitörü";
+            if (lblMonitorSub != null)
+                lblMonitorSub.Text = isEn
+                    ? "Detected hardware inventory, memory configuration, display outputs, and live sensor telemetry."
+                    : "Algılanan tüm sistem bileşenleri, bellek profilleri, görüntü çıkışları ve anlık sensör telemetrisi.";
+            if (lblMonCpuHdr != null) lblMonCpuHdr.Text = isEn ? "PROCESSOR (CPU)" : "İŞLEMCİ (CPU)";
+            if (lblMonGpuHdr != null) lblMonGpuHdr.Text = isEn ? "GRAPHICS ADAPTER (GPU)" : "EKRAN KARTI (GPU)";
+            if (lblMonRamHdr != null) lblMonRamHdr.Text = isEn ? "MEMORY, MOTHERBOARD & STORAGE" : "BELLEK, ANAKART VE DEPOLAMA";
+            if (lblMonBoardHdr != null) lblMonBoardHdr.Text = isEn ? "PLATFORM & DRIVES" : "PLATFORM & DİSKLER";
+            if (lblMonNetHdr != null) lblMonNetHdr.Text = isEn ? "NETWORK ADAPTER & DISPLAYS" : "AĞ ADAPTÖRÜ & GÖRÜNTÜ ÇIKIŞLARI";
+            if (btnSideFlush != null) btnSideFlush.Text = isEn ? "Flush DNS/ARP" : "DNS/ARP Temizle";
+            if (btnSideRefreshNet != null) btnSideRefreshNet.Text = isEn ? "Refresh" : "Yenile";
+            if (lblSideEventLogHeader != null) lblSideEventLogHeader.Text = isEn ? "SYSTEM EVENT LOG" : "SİSTEM OLAY GÜNLÜĞÜ (CONSOL)";
 
             if (txtNetHostAdmin != null && sidebarRowLabels.ContainsKey(txtNetHostAdmin))
-                sidebarRowLabels[txtNetHostAdmin].Text = isEn ? "System / Auth" : "Sistem / Yetki";
+                sidebarRowLabels[txtNetHostAdmin].Text = isEn ? "Host / Privilege" : "Makine / Yetki";
             if (txtNetAdapter != null && sidebarRowLabels.ContainsKey(txtNetAdapter))
-                sidebarRowLabels[txtNetAdapter].Text = isEn ? "Net Adapter" : "Ağ Adaptörü";
+                sidebarRowLabels[txtNetAdapter].Text = isEn ? "Network Adapter" : "Ağ Adaptörü";
             if (txtNetLocalIp != null && sidebarRowLabels.ContainsKey(txtNetLocalIp))
-                sidebarRowLabels[txtNetLocalIp].Text = isEn ? "Local IPv4 / Mask" : "Yerel IPv4 / Maske";
+                sidebarRowLabels[txtNetLocalIp].Text = isEn ? "IPv4 / Mask" : "IPv4 / Maske";
             if (txtNetGateway != null && sidebarRowLabels.ContainsKey(txtNetGateway))
                 sidebarRowLabels[txtNetGateway].Text = isEn ? "Default Gateway" : "Varsayılan Geçit";
             if (txtNetDns != null && sidebarRowLabels.ContainsKey(txtNetDns))
                 sidebarRowLabels[txtNetDns].Text = isEn ? "DNS Servers" : "DNS Sunucuları";
             if (txtNetMac != null && sidebarRowLabels.ContainsKey(txtNetMac))
-                sidebarRowLabels[txtNetMac].Text = isEn ? "MAC Address" : "MAC (Fiziksel)";
+                sidebarRowLabels[txtNetMac].Text = isEn ? "Physical MAC" : "MAC Adresi";
             if (txtNetPingLive != null && sidebarRowLabels.ContainsKey(txtNetPingLive))
                 sidebarRowLabels[txtNetPingLive].Text = isEn ? "Live Ping / RTT" : "Canlı Ping / RTT";
-            if (txtHwCpuName != null && sidebarRowLabels.ContainsKey(txtHwCpuName))
-                sidebarRowLabels[txtHwCpuName].Text = isEn ? "Processor (CPU)" : "İşlemci (CPU)";
-            if (txtHwCpuTelemetry != null && sidebarRowLabels.ContainsKey(txtHwCpuTelemetry))
-                sidebarRowLabels[txtHwCpuTelemetry].Text = isEn ? "CPU Temp / Load" : "CPU Sıcaklık / Yük";
-            if (txtHwGpuName != null && sidebarRowLabels.ContainsKey(txtHwGpuName))
-                sidebarRowLabels[txtHwGpuName].Text = isEn ? "Graphics (GPU)" : "Ekran Kartı (GPU)";
-            if (txtHwGpuTelemetry != null && sidebarRowLabels.ContainsKey(txtHwGpuTelemetry))
-                sidebarRowLabels[txtHwGpuTelemetry].Text = isEn ? "GPU Core / Hotspot" : "GPU Core / Hotspot";
-            if (txtHwRamUsage != null && sidebarRowLabels.ContainsKey(txtHwRamUsage))
-                sidebarRowLabels[txtHwRamUsage].Text = isEn ? "System Memory" : "Sistem Belleği";
-            if (txtHwTimerActive != null && sidebarRowLabels.ContainsKey(txtHwTimerActive))
-                sidebarRowLabels[txtHwTimerActive].Text = isEn ? "Active Timer Mode" : "Timer & Aktif Ayar";
 
             // 5. Table Headers
             foreach (var l in tweakColHeadersCol1)
@@ -17574,13 +25241,18 @@ namespace ArgonLatencyStudio
             {
                 card.RefreshVisualState();
             }
+            PopulateSystemMonitorStaticSpecs();
             UpdateTelemetryBar();
         }
 
         public void SwitchActiveTab(int index)
         {
             currentActiveTabIndex = index;
+            currentPageKey = "tab:" + index;
+            currentCustomizePageKey = "";
             if (viewGlobalSearch != null) viewGlobalSearch.Visible = false;
+            if (viewCustomizePage != null) viewCustomizePage.Visible = false;
+            if (viewSystemMonitor != null) viewSystemMonitor.Visible = (index == 11);
             viewDashboard.Visible = (index == 0);
             viewNetwork.Visible = (index == 1);
             viewLatency.Visible = (index == 2);
@@ -17593,6 +25265,34 @@ namespace ArgonLatencyStudio
             viewSnapshotAudit.Visible = (index == 9);
             if (viewSettings != null) viewSettings.Visible = (index == 10);
 
+            if (lblCurrentPageTitle != null)
+            {
+                lblCurrentPageTitle.Text = GetTabTitleByIndex(index, Loc.IsEnglish);
+            }
+            if (lblDetailPageSub != null)
+            {
+                lblDetailPageSub.Text = Loc.T(
+                    "Argon Sistem & Performans Bölümü · Değişiklikler StateVault tarafından canlı doğrulanır",
+                    "Argon System & Performance Section · Changes are live-verified via StateVault");
+            }
+            if (pbDetailPageIcon != null)
+            {
+                pbDetailPageIcon.Image = WindowsShellIcons.GetIcon(GetIconKeyForTab(index), 32);
+            }
+            if (btnOpenInRegedit != null)
+            {
+                btnOpenInRegedit.Visible = (index >= 0 && index <= 5);
+            }
+            if (btnResetPageDefaults != null)
+            {
+                btnResetPageDefaults.Visible = (index >= 0 && index <= 5);
+            }
+
+            if (index == 11)
+            {
+                PopulateSystemMonitorStaticSpecs();
+                UpdateSystemMonitorLiveTelemetry();
+            }
             if (index == 6)
             {
                 RefreshProcessTable();
@@ -17604,6 +25304,14 @@ namespace ArgonLatencyStudio
                 PopulateBenchmarkTargets();
                 if (presCountdownTimer == null || !presCountdownTimer.Enabled)
                     RunPresentationModeDiagnostics();
+                if (card3RawHook != null && !this.IsDisposed && this.IsHandleCreated)
+                    card3RawHook.AttachAndRegister(this.Handle);
+                if (card3RawUiTimer != null) card3RawUiTimer.Start();
+            }
+            else
+            {
+                if (card3RawUiTimer != null) card3RawUiTimer.Stop();
+                if (card3RawHook != null) card3RawHook.UnregisterAndDetach();
             }
             if (index == 9) RefreshSnapshotAuditView();
             if (index == 10)
@@ -17612,18 +25320,895 @@ namespace ArgonLatencyStudio
                 RefreshProfileSelectorCombo();
             }
 
-            for (int i = 0; i < navButtons.Count; i++)
+            SelectTreeNodeForKey(currentPageKey);
+        }
+
+        private string GetIconKeyForTab(int index)
+        {
+            if (index == 11) return "info";
+            if (index == 0) return "pc";
+            if (index == 1) return "network";
+            if (index == 2) return "mouse";
+            if (index == 3) return "display";
+            if (index == 4) return "win11";
+            if (index == 5) return "kernel";
+            if (index == 6) return "processes";
+            if (index == 7) return "automation";
+            if (index == 8) return "diag";
+            if (index == 9) return "recent";
+            return "settings";
+        }
+
+        private void SelectTreeNodeForKey(string pageKey)
+        {
+            if (tvMainNav == null || string.IsNullOrEmpty(pageKey)) return;
+            TreeNode target;
+            if (treeNodeByPageKey.TryGetValue(pageKey, out target) && target != null)
             {
-                if (i == index)
+                isPopulatingNavTree = true;
+                try
                 {
-                    navButtons[i].BackColor = Color.FromArgb(16, 185, 129);
-                    navButtons[i].ForeColor = Color.Black;
+                    if (target.Parent != null && !target.Parent.IsExpanded)
+                        target.Parent.Expand();
+                    if (tvMainNav.SelectedNode != target)
+                        tvMainNav.SelectedNode = target;
+                    target.EnsureVisible();
                 }
-                else
+                finally
                 {
-                    navButtons[i].BackColor = Color.FromArgb(28, 35, 50);
-                    navButtons[i].ForeColor = Color.FromArgb(203, 213, 225);
+                    isPopulatingNavTree = false;
                 }
+            }
+        }
+
+        private void BuildNavigationTree()
+        {
+            if (tvMainNav == null) return;
+            isPopulatingNavTree = true;
+            tvMainNav.BeginUpdate();
+            try
+            {
+                tvMainNav.Nodes.Clear();
+                treeNodeByPageKey.Clear();
+
+                Func<TreeNode, string, string, string, TreeNode> addNode = (parent, text, iconKey, tagKey) =>
+                {
+                    string safeIcon = (tvIconList != null && tvIconList.Images.ContainsKey(iconKey)) ? iconKey : "info";
+                    TreeNode n = new TreeNode(text)
+                    {
+                        ImageKey = safeIcon,
+                        SelectedImageKey = safeIcon,
+                        Tag = tagKey
+                    };
+                    if (parent == null) tvMainNav.Nodes.Add(n);
+                    else parent.Nodes.Add(n);
+                    if (!string.IsNullOrEmpty(tagKey) && !treeNodeByPageKey.ContainsKey(tagKey))
+                        treeNodeByPageKey[tagKey] = n;
+                    return n;
+                };
+
+                TreeNode nHome = addNode(null, Loc.T("Başlangıç", "Home"), "pc", "tab:11");
+                addNode(nHome, Loc.T("Sistem Bilgileri ve Monitör", "System Information"), "info", "tab:11");
+                addNode(nHome, Loc.T("Son Değişiklikler ve Günlük", "Recent Changes"), "recent", "tab:9");
+                addNode(nHome, Loc.T("Ayarlar ve Profiller", "Settings & Profiles"), "settings", "tab:10");
+                nHome.Expand();
+
+                bookmarksParentNode = addNode(null, Loc.T("Yer İmleri", "Bookmarks"), "bookmarks", null);
+
+                // First priority right below Bookmarks: Argon Performance & Core Tools
+                TreeNode nPerf = addNode(null, Loc.T("Performans ve Gecikme (Argon)", "Performance & Latency (Argon)"), "kernel", "tab:0");
+                addNode(nPerf, Loc.T("Donanım Profili ve Mimari", "Hardware Profile"), "pc", "tab:0");
+                addNode(nPerf, Loc.T("Ağ Adaptörü ve TCP/IP", "Network & TCP/IP"), "network", "tab:1");
+                addNode(nPerf, Loc.T("Zamanlama ve Giriş Gecikmesi", "Timer & Input"), "mouse", "tab:2");
+                addNode(nPerf, Loc.T("Grafik Yığını ve Kare Hızı", "Graphics & FPS"), "display", "tab:3");
+                addNode(nPerf, Loc.T("Windows Sistemi ve Servisler", "Windows System"), "win11", "tab:4");
+                addNode(nPerf, Loc.T("Çekirdek ve İleri Seviye", "Kernel & Advanced"), "kernel", "tab:5");
+                nPerf.Expand();
+
+                TreeNode nUtil = addNode(null, Loc.T("Araçlar ve Bakım", "Tools & Maintenance"), "tools", "tab:6");
+                addNode(nUtil, Loc.T("İşlemler ve Oyun Nöbetçisi", "Processes & Watchdog"), "processes", "tab:6");
+                addNode(nUtil, Loc.T("Otomasyon ve Linux Kaydırma", "Automation & Scroll"), "automation", "tab:7");
+                addNode(nUtil, Loc.T("Tanı, Raw Input ve Ölçüm", "Diagnostics & Benchmark"), "diag", "tab:8");
+                nUtil.Expand();
+
+                // Second tier: Winaero-style Windows Customization Categories
+                Dictionary<string, TreeNode> groupNodes = new Dictionary<string, TreeNode>(StringComparer.OrdinalIgnoreCase);
+                Dictionary<string, string> groupIcons = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                groupIcons["Özelleştir: Windows 11"] = "win11";
+                groupIcons["Özelleştir: Görünüm"] = "appearance";
+                groupIcons["Özelleştir: Davranış"] = "behavior";
+                groupIcons["Özelleştir: Dosya Gezgini"] = "explorer";
+                groupIcons["Özelleştir: Kısayollar ve Sağ Tık"] = "shortcuts";
+                groupIcons["Özelleştir: Gizlilik ve Ağ"] = "privacy";
+
+                foreach (CustomizePageDef p in allCustomizePages)
+                {
+                    TreeNode gNode;
+                    if (!groupNodes.TryGetValue(p.CategoryGroup, out gNode))
+                    {
+                        string gIcon = groupIcons.ContainsKey(p.CategoryGroup) ? groupIcons[p.CategoryGroup] : "tools";
+                        gNode = addNode(null, p.CategoryGroup, gIcon, null);
+                        groupNodes[p.CategoryGroup] = gNode;
+                    }
+                    addNode(gNode, p.Title, p.IconKey, "page:" + p.PageKey);
+                }
+            }
+            finally
+            {
+                tvMainNav.EndUpdate();
+                isPopulatingNavTree = false;
+            }
+        }
+
+        public void NavigateToPageKey(string key, bool recordHistory)
+        {
+            if (string.IsNullOrEmpty(key)) return;
+            if (!key.StartsWith("tab:", StringComparison.OrdinalIgnoreCase) && !key.StartsWith("page:", StringComparison.OrdinalIgnoreCase))
+            {
+                key = "page:" + key;
+            }
+            if (recordHistory && !suppressNavHistoryRecord)
+            {
+                if (navHistoryPos < navHistory.Count - 1)
+                    navHistory.RemoveRange(navHistoryPos + 1, navHistory.Count - (navHistoryPos + 1));
+                if (navHistory.Count == 0 || !string.Equals(navHistory[navHistory.Count - 1], key, StringComparison.OrdinalIgnoreCase))
+                {
+                    navHistory.Add(key);
+                    navHistoryPos = navHistory.Count - 1;
+                }
+            }
+
+            if (key.StartsWith("tab:", StringComparison.OrdinalIgnoreCase))
+            {
+                int tabIdx;
+                if (int.TryParse(key.Substring(4), out tabIdx))
+                {
+                    SwitchActiveTab(tabIdx);
+                }
+            }
+            else if (key.StartsWith("page:", StringComparison.OrdinalIgnoreCase))
+            {
+                string pageId = key.Substring(5);
+                CustomizePageDef found = null;
+                foreach (var p in allCustomizePages)
+                {
+                    if (string.Equals(p.PageKey, pageId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        found = p;
+                        break;
+                    }
+                }
+                if (found != null)
+                {
+                    ShowCustomizePage(found);
+                }
+            }
+            UpdateNavBackForwardButtons();
+        }
+
+        private void NavigateHistoryBack()
+        {
+            if (navHistoryPos <= 0 || navHistory.Count == 0) return;
+            navHistoryPos--;
+            suppressNavHistoryRecord = true;
+            try { NavigateToPageKey(navHistory[navHistoryPos], false); }
+            finally { suppressNavHistoryRecord = false; }
+        }
+
+        private void NavigateHistoryForward()
+        {
+            if (navHistoryPos < 0 || navHistoryPos >= navHistory.Count - 1) return;
+            navHistoryPos++;
+            suppressNavHistoryRecord = true;
+            try { NavigateToPageKey(navHistory[navHistoryPos], false); }
+            finally { suppressNavHistoryRecord = false; }
+        }
+
+        private void UpdateNavBackForwardButtons()
+        {
+            if (btnNavBack != null) btnNavBack.Enabled = (navHistoryPos > 0);
+            if (btnNavForward != null) btnNavForward.Enabled = (navHistoryPos >= 0 && navHistoryPos < navHistory.Count - 1);
+        }
+
+        private void ShowCustomizePage(CustomizePageDef page)
+        {
+            if (page == null) return;
+            currentPageKey = "page:" + page.PageKey;
+            currentCustomizePageKey = page.PageKey;
+
+            if (viewGlobalSearch != null) viewGlobalSearch.Visible = false;
+            if (viewSystemMonitor != null) viewSystemMonitor.Visible = false;
+            if (viewDashboard != null) viewDashboard.Visible = false;
+            if (viewNetwork != null) viewNetwork.Visible = false;
+            if (viewLatency != null) viewLatency.Visible = false;
+            if (viewFps != null) viewFps.Visible = false;
+            if (viewWinUtil != null) viewWinUtil.Visible = false;
+            if (viewExperimental != null) viewExperimental.Visible = false;
+            if (viewProcesses != null) viewProcesses.Visible = false;
+            if (viewAutomationQoL != null) viewAutomationQoL.Visible = false;
+            if (viewBenchmark != null) viewBenchmark.Visible = false;
+            if (viewSnapshotAudit != null) viewSnapshotAudit.Visible = false;
+            if (viewSettings != null) viewSettings.Visible = false;
+
+            if (lblCurrentPageTitle != null) lblCurrentPageTitle.Text = page.Title;
+            if (lblDetailPageSub != null)
+            {
+                lblDetailPageSub.Text = page.CategoryGroup +
+                    (!string.IsNullOrEmpty(page.TargetRegistryPath) ? "  ·  " + page.TargetRegistryPath : "");
+            }
+            if (pbDetailPageIcon != null) pbDetailPageIcon.Image = WindowsShellIcons.GetIcon(page.IconKey, 32);
+            if (btnOpenInRegedit != null) btnOpenInRegedit.Visible = !string.IsNullOrEmpty(page.TargetRegistryPath);
+            if (btnResetPageDefaults != null) btnResetPageDefaults.Visible = true;
+
+            BuildCustomizePageContent(page);
+            if (viewCustomizePage != null) viewCustomizePage.Visible = true;
+            SelectTreeNodeForKey(currentPageKey);
+        }
+
+        private void BuildCustomizePageContent(CustomizePageDef page)
+        {
+            if (viewCustomizePage == null || page == null) return;
+            viewCustomizePage.SuspendLayout();
+            try
+            {
+                while (viewCustomizePage.Controls.Count > 0)
+                {
+                    Control old = viewCustomizePage.Controls[0];
+                    viewCustomizePage.Controls.RemoveAt(0);
+                    old.Dispose();
+                }
+
+                // Bottom Winaero-style Description GroupBox
+                GroupBox grpDesc = new GroupBox
+                {
+                    Text = Loc.T("Açıklama", "Description"),
+                    Dock = DockStyle.Bottom,
+                    Height = 108,
+                    BackColor = ArgonTheme.BgCanvas,
+                    ForeColor = ArgonTheme.TextPrimary,
+                    Font = new Font("Segoe UI", 9.0f, FontStyle.Regular),
+                    Padding = new Padding(12, 8, 12, 8)
+                };
+
+                Label lblDescBody = new Label
+                {
+                    Text = page.Description + (string.IsNullOrEmpty(page.TargetRegistryPath)
+                        ? ""
+                        : "\r\nHedef Kayıt Yolu: " + page.TargetRegistryPath),
+                    Dock = DockStyle.Fill,
+                    Font = new Font("Segoe UI", 8.8f, FontStyle.Regular),
+                    ForeColor = ArgonTheme.TextSecondary,
+                    UseMnemonic = false
+                };
+                grpDesc.Controls.Add(lblDescBody);
+
+                Panel pnlOptionsScroll = new Panel
+                {
+                    Dock = DockStyle.Fill,
+                    AutoScroll = true,
+                    BackColor = ArgonTheme.BgCanvas,
+                    Padding = new Padding(22, 16, 22, 16)
+                };
+
+                viewCustomizePage.Controls.Add(pnlOptionsScroll);
+                viewCustomizePage.Controls.Add(grpDesc);
+
+                int y = 14;
+
+                if (page.RequiresAdmin && !isAdmin)
+                {
+                    Panel pnlAdminNote = new Panel
+                    {
+                        Location = new Point(20, y),
+                        Size = new Size(760, 34),
+                        BackColor = ArgonTheme.AlertSoft,
+                        Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+                    };
+                    Label lblAdm = new Label
+                    {
+                        Text = "Bu sayfadaki bazı ayarlar (HKLM) Yönetici yetkisi gerektirir. Soldaki 'Yönetici Olarak Aç' ile tam erişim sağlayabilirsiniz.",
+                        ForeColor = ArgonTheme.Alert,
+                        Font = new Font("Segoe UI", 8.4f, FontStyle.Bold),
+                        AutoSize = false,
+                        Dock = DockStyle.Fill,
+                        TextAlign = ContentAlignment.MiddleLeft,
+                        Padding = new Padding(10, 0, 10, 0),
+                        UseMnemonic = false
+                    };
+                    pnlAdminNote.Controls.Add(lblAdm);
+                    pnlOptionsScroll.Controls.Add(pnlAdminNote);
+                    y += 44;
+                }
+
+                if (page.SuggestsExplorerRestart || page.SuggestsLogoffOrReboot)
+                {
+                    Panel pnlHintStrip = new Panel
+                    {
+                        Location = new Point(20, y),
+                        Size = new Size(760, 36),
+                        BackColor = ArgonTheme.BgSurface,
+                        BorderStyle = BorderStyle.FixedSingle,
+                        Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+                    };
+                    Label lblHint = new Label
+                    {
+                        Text = page.SuggestsExplorerRestart
+                            ? "Değişikliklerin hemen görünmesi için Windows Gezgini'ni (Explorer) yeniden başlatmanız gerekebilir."
+                            : "Bu sayfadaki değişikliklerin tam uygulanması için oturumu kapatıp açmanız veya bilgisayarı yeniden başlatmanız gerekebilir.",
+                        Font = new Font("Segoe UI", 8.3f, FontStyle.Regular),
+                        ForeColor = ArgonTheme.TextSecondary,
+                        Dock = DockStyle.Fill,
+                        TextAlign = ContentAlignment.MiddleLeft,
+                        Padding = new Padding(10, 0, 10, 0),
+                        UseMnemonic = false
+                    };
+                    pnlHintStrip.Controls.Add(lblHint);
+
+                    if (page.SuggestsExplorerRestart)
+                    {
+                        Button btnRestartExpInline = new Button
+                        {
+                            Text = "Explorer'ı Yeniden Başlat",
+                            Font = new Font("Segoe UI", 8.2f, FontStyle.Bold),
+                            FlatStyle = FlatStyle.Flat,
+                            BackColor = ArgonTheme.Accent,
+                            ForeColor = Color.White,
+                            Dock = DockStyle.Right,
+                            Width = 178,
+                            UseMnemonic = false,
+                            Cursor = Cursors.Hand
+                        };
+                        btnRestartExpInline.FlatAppearance.BorderSize = 0;
+                        btnRestartExpInline.Click += (s, e) =>
+                        {
+                            WinaeroCustomizeCatalog.RestartExplorerProcess();
+                            AppendConsoleLog("Explorer yeniden başlatıldı (" + page.Title + ")");
+                        };
+                        pnlHintStrip.Controls.Add(btnRestartExpInline);
+                    }
+                    pnlOptionsScroll.Controls.Add(pnlHintStrip);
+                    y += 46;
+                }
+
+                foreach (CustomizeOptionDef opt in page.Options)
+                {
+                    CustomizeOptionDef cur = opt;
+                    Action attachHover = () =>
+                    {
+                        if (lblInspectorTitle != null)
+                            lblInspectorTitle.Text = cur.Label;
+                        if (lblInspectorPath != null)
+                            lblInspectorPath.Text = string.IsNullOrEmpty(cur.RegistryPathHint) ? page.TargetRegistryPath : cur.RegistryPathHint;
+                    };
+
+                    if (cur.Kind == CustomizeControlKind.CheckBox)
+                    {
+                        bool val = false;
+                        try { if (cur.GetBool != null) val = cur.GetBool(vault); } catch { }
+
+                        CheckBox chk = new CheckBox
+                        {
+                            Text = cur.Label,
+                            Checked = val,
+                            Font = new Font("Segoe UI", 9.5f, FontStyle.Regular),
+                            ForeColor = ArgonTheme.TextPrimary,
+                            BackColor = ArgonTheme.BgCanvas,
+                            AutoSize = true,
+                            MaximumSize = new Size(760, 0),
+                            Location = new Point(22, y),
+                            UseMnemonic = false,
+                            Cursor = Cursors.Hand
+                        };
+                        chk.MouseEnter += (s, e) => attachHover();
+                        chk.CheckedChanged += (s, e) =>
+                        {
+                            if (cur.RequiresAdmin && !isAdmin)
+                            {
+                                MessageBox.Show("Bu seçenek yönetici izni gerektirir.", "Yönetici Gerekli", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                                return;
+                            }
+                            try
+                            {
+                                if (cur.SetBool != null) cur.SetBool(vault, chk.Checked);
+                                AppendConsoleLog(string.Format("[Özelleştir] {0} -> {1}", cur.OptionId, chk.Checked ? "AÇIK" : "KAPALI"));
+                                if (lblInspectorTitle != null)
+                                    lblInspectorTitle.Text = "Uygulandı: " + cur.Label + (chk.Checked ? " [Açık]" : " [Kapalı]");
+                                if (lblInspectorPath != null)
+                                    lblInspectorPath.Text = cur.RegistryPathHint ?? page.TargetRegistryPath;
+                            }
+                            catch (Exception ex)
+                            {
+                                MessageBox.Show("Ayar uygulanamadı: " + ex.Message, "Hata", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                            }
+                        };
+                        pnlOptionsScroll.Controls.Add(chk);
+                        y += Math.Max(30, chk.PreferredSize.Height + 10);
+                    }
+                    else if (cur.Kind == CustomizeControlKind.ComboChoice)
+                    {
+                        Label lblOpt = new Label
+                        {
+                            Text = cur.Label,
+                            Font = new Font("Segoe UI", 9.3f, FontStyle.Regular),
+                            ForeColor = ArgonTheme.TextPrimary,
+                            AutoSize = true,
+                            Location = new Point(22, y + 3),
+                            UseMnemonic = false
+                        };
+                        pnlOptionsScroll.Controls.Add(lblOpt);
+
+                        ComboBox cmb = new ComboBox
+                        {
+                            DropDownStyle = ComboBoxStyle.DropDownList,
+                            Font = new Font("Segoe UI", 9.0f, FontStyle.Regular),
+                            BackColor = ArgonTheme.BgInput,
+                            ForeColor = ArgonTheme.TextPrimary,
+                            Location = new Point(22, y + 26),
+                            Size = new Size(340, 26)
+                        };
+                        if (cur.Choices != null) cmb.Items.AddRange(cur.Choices);
+                        int curIdx = 0;
+                        try { if (cur.GetInt != null) curIdx = cur.GetInt(vault); } catch { }
+                        if (cmb.Items.Count > 0)
+                            cmb.SelectedIndex = Math.Max(0, Math.Min(cmb.Items.Count - 1, curIdx));
+
+                        bool syncing = false;
+                        cmb.MouseEnter += (s, e) => attachHover();
+                        cmb.SelectedIndexChanged += (s, e) =>
+                        {
+                            if (syncing) return;
+                            try
+                            {
+                                if (cur.SetInt != null) cur.SetInt(vault, cmb.SelectedIndex);
+                                AppendConsoleLog(string.Format("[Özelleştir] {0} -> Seçenek #{1}", cur.OptionId, cmb.SelectedIndex));
+                                if (lblInspectorTitle != null)
+                                    lblInspectorTitle.Text = "Uygulandı: " + cur.Label + " (" + cmb.Text + ")";
+                            }
+                            catch (Exception ex)
+                            {
+                                syncing = true;
+                                MessageBox.Show("Değer yazılamadı: " + ex.Message, "Hata", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                                syncing = false;
+                            }
+                        };
+                        pnlOptionsScroll.Controls.Add(cmb);
+                        y += 66;
+                    }
+                    else if (cur.Kind == CustomizeControlKind.NumericRange)
+                    {
+                        Label lblNum = new Label
+                        {
+                            Text = cur.Label,
+                            Font = new Font("Segoe UI", 9.3f, FontStyle.Regular),
+                            ForeColor = ArgonTheme.TextPrimary,
+                            AutoSize = true,
+                            Location = new Point(22, y + 4),
+                            UseMnemonic = false
+                        };
+                        pnlOptionsScroll.Controls.Add(lblNum);
+
+                        int initVal = cur.MinVal;
+                        try { if (cur.GetInt != null) initVal = cur.GetInt(vault); } catch { }
+                        initVal = Math.Max(cur.MinVal, Math.Min(cur.MaxVal, initVal));
+
+                        NumericUpDown num = new NumericUpDown
+                        {
+                            Minimum = cur.MinVal,
+                            Maximum = cur.MaxVal,
+                            Increment = Math.Max(1, cur.StepVal),
+                            Value = initVal,
+                            Font = new Font("Segoe UI", 9.2f, FontStyle.Regular),
+                            BackColor = ArgonTheme.BgInput,
+                            ForeColor = ArgonTheme.TextPrimary,
+                            Location = new Point(22, y + 28),
+                            Size = new Size(120, 26)
+                        };
+                        pnlOptionsScroll.Controls.Add(num);
+
+                        if (!string.IsNullOrEmpty(cur.Unit))
+                        {
+                            Label lblUnit = new Label
+                            {
+                                Text = cur.Unit,
+                                Font = new Font("Segoe UI", 8.8f, FontStyle.Regular),
+                                ForeColor = ArgonTheme.TextMuted,
+                                AutoSize = true,
+                                Location = new Point(148, y + 31),
+                                UseMnemonic = false
+                            };
+                            pnlOptionsScroll.Controls.Add(lblUnit);
+                        }
+
+                        Button btnApplyNum = new Button
+                        {
+                            Text = "Uygula",
+                            Font = new Font("Segoe UI", 8.4f, FontStyle.Bold),
+                            FlatStyle = FlatStyle.Flat,
+                            BackColor = ArgonTheme.Accent,
+                            ForeColor = Color.White,
+                            Location = new Point(214, y + 27),
+                            Size = new Size(88, 26),
+                            UseMnemonic = false,
+                            Cursor = Cursors.Hand
+                        };
+                        btnApplyNum.FlatAppearance.BorderSize = 0;
+                        btnApplyNum.MouseEnter += (s, e) => attachHover();
+                        btnApplyNum.Click += (s, e) =>
+                        {
+                            if (cur.RequiresAdmin && !isAdmin)
+                            {
+                                MessageBox.Show("Bu değer yönetici izni gerektirir.", "Yönetici Gerekli", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                                return;
+                            }
+                            try
+                            {
+                                int vInt = (int)num.Value;
+                                if (cur.SetInt != null) cur.SetInt(vault, vInt);
+                                AppendConsoleLog(string.Format("[Özelleştir] {0} -> {1}", cur.OptionId, vInt));
+                                if (lblInspectorTitle != null)
+                                    lblInspectorTitle.Text = "Uygulandı: " + cur.Label + " = " + vInt + " " + cur.Unit;
+                            }
+                            catch (Exception ex)
+                            {
+                                MessageBox.Show("Değer uygulanamadı: " + ex.Message, "Hata", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                            }
+                        };
+                        pnlOptionsScroll.Controls.Add(btnApplyNum);
+                        y += 66;
+                    }
+                    else if (cur.Kind == CustomizeControlKind.ActionButton)
+                    {
+                        Button btnTool = new Button
+                        {
+                            Text = cur.Label,
+                            Font = new Font("Segoe UI", 9.0f, FontStyle.Regular),
+                            FlatStyle = FlatStyle.Flat,
+                            BackColor = ArgonTheme.BgSurface,
+                            ForeColor = ArgonTheme.TextPrimary,
+                            Location = new Point(22, y),
+                            Size = new Size(360, 32),
+                            TextAlign = ContentAlignment.MiddleLeft,
+                            Padding = new Padding(10, 0, 10, 0),
+                            UseMnemonic = false,
+                            Cursor = Cursors.Hand
+                        };
+                        btnTool.FlatAppearance.BorderSize = 1;
+                        btnTool.FlatAppearance.BorderColor = ArgonTheme.BorderSubtle;
+                        btnTool.MouseEnter += (s, e) => attachHover();
+                        btnTool.Click += (s, e) =>
+                        {
+                            try
+                            {
+                                if (cur.InvokeToolAction != null) cur.InvokeToolAction(this);
+                            }
+                            catch (Exception ex)
+                            {
+                                MessageBox.Show("İşlem başarısız: " + ex.Message, "Hata", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                            }
+                        };
+                        pnlOptionsScroll.Controls.Add(btnTool);
+                        y += 42;
+                    }
+                }
+            }
+            finally
+            {
+                viewCustomizePage.ResumeLayout(true);
+            }
+        }
+
+        private void ResetActivePageToDefaults()
+        {
+            if (!string.IsNullOrEmpty(currentCustomizePageKey))
+            {
+                CustomizePageDef page = null;
+                foreach (var p in allCustomizePages)
+                {
+                    if (string.Equals(p.PageKey, currentCustomizePageKey, StringComparison.OrdinalIgnoreCase))
+                    {
+                        page = p;
+                        break;
+                    }
+                }
+                if (page == null) return;
+
+                DialogResult dr = MessageBox.Show(
+                    string.Format("'{0}' sayfasındaki tüm özelleştirmeler orijinal Windows varsayılanlarına döndürülsün mü?", page.Title),
+                    "Sayfayı Varsayılana Sıfırla",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question);
+                if (dr != DialogResult.Yes) return;
+
+                foreach (var opt in page.Options)
+                {
+                    try
+                    {
+                        if (opt.ResetAction != null) opt.ResetAction(vault);
+                    }
+                    catch { }
+                }
+                AppendConsoleLog("Sayfa varsayılanlara döndürüldü: " + page.Title);
+                BuildCustomizePageContent(page);
+                return;
+            }
+
+            // Reset current Argon tweak category tab via StateVault
+            string cat = null;
+            if (currentActiveTabIndex == 0) cat = "HARDWARE";
+            else if (currentActiveTabIndex == 1) cat = "NETWORK";
+            else if (currentActiveTabIndex == 2) cat = "LATENCY";
+            else if (currentActiveTabIndex == 3) cat = "FPS";
+            else if (currentActiveTabIndex == 4) cat = "WINUTIL";
+            else if (currentActiveTabIndex == 5) cat = "EXPERIMENTAL";
+
+            if (string.IsNullOrEmpty(cat)) return;
+            DialogResult drTab = MessageBox.Show(
+                string.Format("'{0}' sekmesindeki aktif ayarlar StateVault yedeğine döndürülsün mü?", GetTabTitleByIndex(currentActiveTabIndex, Loc.IsEnglish)),
+                "Sayfayı Varsayılana Sıfırla",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+            if (drTab != DialogResult.Yes) return;
+
+            foreach (var t in allTweaks)
+            {
+                if (t.Category == cat && t.IsEnabled)
+                {
+                    OnTweakCardToggled(t, false, t.SelectedVariationIndex);
+                }
+            }
+            UpdateActiveCountsAndNavBadges();
+        }
+
+        private void OpenCurrentPageInRegedit()
+        {
+            if (!string.IsNullOrEmpty(currentCustomizePageKey))
+            {
+                foreach (var p in allCustomizePages)
+                {
+                    if (string.Equals(p.PageKey, currentCustomizePageKey, StringComparison.OrdinalIgnoreCase))
+                    {
+                        WinaeroCustomizeCatalog.OpenKeyInRegedit(p.TargetRegistryPath);
+                        return;
+                    }
+                }
+            }
+            string cat = null;
+            if (currentActiveTabIndex == 0) cat = "HARDWARE";
+            else if (currentActiveTabIndex == 1) cat = "NETWORK";
+            else if (currentActiveTabIndex == 2) cat = "LATENCY";
+            else if (currentActiveTabIndex == 3) cat = "FPS";
+            else if (currentActiveTabIndex == 4) cat = "WINUTIL";
+            else if (currentActiveTabIndex == 5) cat = "EXPERIMENTAL";
+            if (!string.IsNullOrEmpty(cat))
+            {
+                foreach (var t in allTweaks)
+                {
+                    if (t.Category == cat && !string.IsNullOrEmpty(t.TargetPathOrApi) && t.TargetPathOrApi.IndexOf("HK", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        WinaeroCustomizeCatalog.OpenKeyInRegedit(t.TargetPathOrApi);
+                        return;
+                    }
+                }
+            }
+            WinaeroCustomizeCatalog.OpenKeyInRegedit(@"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer");
+        }
+
+        private string GetTitleForPageKey(string key)
+        {
+            if (string.IsNullOrEmpty(key)) return "";
+            if (key.StartsWith("tab:", StringComparison.OrdinalIgnoreCase))
+            {
+                int idx;
+                if (int.TryParse(key.Substring(4), out idx))
+                    return GetTabTitleByIndex(idx, Loc.IsEnglish);
+            }
+            else if (key.StartsWith("page:", StringComparison.OrdinalIgnoreCase))
+            {
+                string pk = key.Substring(5);
+                foreach (var p in allCustomizePages)
+                {
+                    if (string.Equals(p.PageKey, pk, StringComparison.OrdinalIgnoreCase))
+                        return p.Title;
+                }
+            }
+            return key;
+        }
+
+        private string GetIconForPageKey(string key)
+        {
+            if (string.IsNullOrEmpty(key)) return "info";
+            if (key.StartsWith("tab:", StringComparison.OrdinalIgnoreCase))
+            {
+                int idx;
+                if (int.TryParse(key.Substring(4), out idx))
+                    return GetIconKeyForTab(idx);
+            }
+            else if (key.StartsWith("page:", StringComparison.OrdinalIgnoreCase))
+            {
+                string pk = key.Substring(5);
+                foreach (var p in allCustomizePages)
+                {
+                    if (string.Equals(p.PageKey, pk, StringComparison.OrdinalIgnoreCase))
+                        return p.IconKey;
+                }
+            }
+            return "info";
+        }
+
+        private void ToggleBookmarkForCurrentPage()
+        {
+            if (string.IsNullOrEmpty(currentPageKey) || appSettings == null) return;
+            List<string> items = new List<string>();
+            if (!string.IsNullOrEmpty(appSettings.BookmarkedPagesRaw))
+            {
+                foreach (string s in appSettings.BookmarkedPagesRaw.Split('|'))
+                {
+                    string clean = (s ?? "").Trim();
+                    if (!string.IsNullOrEmpty(clean) && !items.Contains(clean))
+                        items.Add(clean);
+                }
+            }
+
+            if (items.Contains(currentPageKey))
+            {
+                items.Remove(currentPageKey);
+                AppendConsoleLog("Yer imlerinden çıkarıldı: " + GetTitleForPageKey(currentPageKey));
+            }
+            else
+            {
+                items.Add(currentPageKey);
+                AppendConsoleLog("Yer imlerine eklendi: " + GetTitleForPageKey(currentPageKey));
+            }
+
+            appSettings.BookmarkedPagesRaw = string.Join("|", items.ToArray());
+            appSettings.Save(appSettingsPath);
+            RebuildBookmarksMenuAndTree();
+        }
+
+        private void RebuildBookmarksMenuAndTree()
+        {
+            List<string> items = new List<string>();
+            if (appSettings != null && !string.IsNullOrEmpty(appSettings.BookmarkedPagesRaw))
+            {
+                foreach (string s in appSettings.BookmarkedPagesRaw.Split('|'))
+                {
+                    string clean = (s ?? "").Trim();
+                    if (!string.IsNullOrEmpty(clean)) items.Add(clean);
+                }
+            }
+
+            if (bookmarksParentNode != null && tvMainNav != null)
+            {
+                isPopulatingNavTree = true;
+                tvMainNav.BeginUpdate();
+                try
+                {
+                    bookmarksParentNode.Nodes.Clear();
+                    foreach (string bmKey in items)
+                    {
+                        string title = GetTitleForPageKey(bmKey);
+                        string ico = GetIconForPageKey(bmKey);
+                        if (tvIconList != null && !tvIconList.Images.ContainsKey(ico)) ico = "bookmarks";
+                        TreeNode bn = new TreeNode(title)
+                        {
+                            ImageKey = ico,
+                            SelectedImageKey = ico,
+                            Tag = bmKey
+                        };
+                        bookmarksParentNode.Nodes.Add(bn);
+                    }
+                    if (items.Count > 0) bookmarksParentNode.Expand();
+                }
+                finally
+                {
+                    tvMainNav.EndUpdate();
+                    isPopulatingNavTree = false;
+                }
+            }
+
+            if (mnuBookmarksRoot != null)
+            {
+                mnuBookmarksRoot.DropDownItems.Clear();
+                mnuBookmarksRoot.DropDownItems.Add(Loc.T("Bu Sayfayı Yer İmlerine Ekle / Çıkar", "Toggle Bookmark for Current Page"), null, (s, e) => ToggleBookmarkForCurrentPage());
+                if (items.Count > 0)
+                {
+                    mnuBookmarksRoot.DropDownItems.Add(new ToolStripSeparator());
+                    foreach (string bmKey in items)
+                    {
+                        string captured = bmKey;
+                        mnuBookmarksRoot.DropDownItems.Add(GetTitleForPageKey(captured), null, (s, e) => NavigateToPageKey(captured, true));
+                    }
+                }
+            }
+        }
+
+        private void SwitchUiThemeMode(string newMode)
+        {
+            if (appSettings == null) return;
+            string clean = string.Equals(newMode, "DARK", StringComparison.OrdinalIgnoreCase) ? "DARK" : "LIGHT";
+            if (string.Equals(appSettings.UiThemeMode, clean, StringComparison.OrdinalIgnoreCase)) return;
+
+            appSettings.UiThemeMode = clean;
+            appSettings.Save(appSettingsPath);
+
+            DialogResult dr = MessageBox.Show(
+                "Tema tercihi kaydedildi. Tüm native Windows kontrollerinin ve kartların temiz uygulanması için Argon Studio şimdi yeniden başlatılsın mı?",
+                "Tema Değişikliği",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+            if (dr == DialogResult.Yes)
+            {
+                try
+                {
+                    suppressRevertOnExit = true;
+                    PerformCleanShutdownKeepSettings();
+                    Process.Start(Application.ExecutablePath);
+                    Application.Exit();
+                }
+                catch { }
+            }
+        }
+
+        private void ApplyAdaptiveLightDarkNormalization(Control root)
+        {
+            if (root == null || !ArgonTheme.IsLightMode) return;
+            if ((root.Tag as string) == "KEEP_DARK") return;
+
+            try
+            {
+                Color bg = root.BackColor;
+                bool isDarkBg = (bg != Color.Transparent && bg.A > 0 && bg.R <= 48 && bg.G <= 52 && bg.B <= 68);
+                if (isDarkBg)
+                {
+                    if (root is ListView || root is ListBox || root is TextBox)
+                        root.BackColor = ArgonTheme.BgInput;
+                    else if (root is Button)
+                        root.BackColor = ArgonTheme.BgSurfaceHover;
+                    else
+                        root.BackColor = (root is GroupBox || root is TabPage) ? ArgonTheme.BgCanvas : ArgonTheme.BgSurface;
+                }
+
+                // Determine effective surface brightness
+                Color effBg = root.BackColor;
+                if (effBg == Color.Transparent && root.Parent != null) effBg = root.Parent.BackColor;
+                bool surfaceIsLight = (effBg == Color.Transparent || effBg.R > 165 || effBg.G > 165);
+
+                Color fg = root.ForeColor;
+                if (surfaceIsLight && fg.R >= 195 && fg.G >= 195 && fg.B >= 195 && Math.Abs(fg.R - fg.B) <= 35)
+                {
+                    root.ForeColor = ArgonTheme.TextPrimary;
+                }
+                else if (surfaceIsLight && fg.R >= 130 && fg.G >= 140 && fg.B >= 155 && Math.Abs(fg.R - fg.B) <= 45 && !(root is Button))
+                {
+                    root.ForeColor = ArgonTheme.TextSecondary;
+                }
+
+                if (root is ListView)
+                {
+                    ListView lv = (ListView)root;
+                    lv.BackColor = ArgonTheme.BgInput;
+                    lv.ForeColor = ArgonTheme.TextPrimary;
+                    lv.GridLines = true;
+                }
+                else if (root is TextBox)
+                {
+                    TextBox tb = (TextBox)root;
+                    tb.BackColor = ArgonTheme.BgInput;
+                    tb.ForeColor = ArgonTheme.TextPrimary;
+                }
+                else if (root is ComboBox)
+                {
+                    ComboBox cb = (ComboBox)root;
+                    cb.FlatStyle = FlatStyle.Flat;
+                    cb.BackColor = ArgonTheme.BgInput;
+                    cb.ForeColor = ArgonTheme.TextPrimary;
+                }
+            }
+            catch { }
+
+            foreach (Control child in root.Controls)
+            {
+                ApplyAdaptiveLightDarkNormalization(child);
             }
         }
 
@@ -18623,6 +27208,79 @@ namespace ArgonLatencyStudio
             }
         }
 
+        private void ShowInputLabDiagnosticsDialog()
+        {
+            bool wasTab8 = (currentActiveTabIndex == 8);
+            bool openMsiAfter = false;
+            try
+            {
+                if (card3RawUiTimer != null) card3RawUiTimer.Stop();
+                if (card3RawHook != null) card3RawHook.UnregisterAndDetach();
+
+                using (InputLabDiagnosticsDialog dlg = new InputLabDiagnosticsDialog(vault, () => { openMsiAfter = true; }))
+                {
+                    dlg.ShowDialog(this);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("InputLab & USB Topoloji penceresi açılırken hata: " + ex.Message, "Hata", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            finally
+            {
+                if (wasTab8 && !this.IsDisposed && this.IsHandleCreated)
+                {
+                    if (card3RawHook != null) card3RawHook.AttachAndRegister(this.Handle);
+                    if (card3RawUiTimer != null) card3RawUiTimer.Start();
+                }
+            }
+            if (openMsiAfter && !this.IsDisposed)
+                ShowInterruptMsiExplorerDialog();
+        }
+
+        private void ShowInterruptMsiExplorerDialog()
+        {
+            try
+            {
+                using (InterruptMsiExplorerDialog dlg = new InterruptMsiExplorerDialog(vault, isAdmin))
+                {
+                    dlg.ShowDialog(this);
+                }
+                UpdateTelemetryBar();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("PCIe MSI & Kesme Yöneticisi açılırken hata: " + ex.Message, "Hata", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private void ShowVirtualMemoryAdvisorDialog()
+        {
+            try
+            {
+                using (VirtualMemoryAdvisorDialog dlg = new VirtualMemoryAdvisorDialog(vault, isAdmin, () =>
+                {
+                    TweakDefinition memDef = FindTweak("FPS_MEMORY_ENGINE");
+                    if (memDef != null)
+                    {
+                        VerifySingleTweakInLiveOs(memDef);
+                        foreach (var c in allCards)
+                        {
+                            if (c.Tweak == memDef) c.RefreshVisualState();
+                        }
+                    }
+                    UpdateTelemetryBar();
+                }))
+                {
+                    dlg.ShowDialog(this);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Sanal Bellek Danışmanı açılırken hata: " + ex.Message, "Hata", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
         private void RefreshPresentationPipelineAfterAdvisor()
         {
             try
@@ -19068,10 +27726,31 @@ namespace ArgonLatencyStudio
                 }
                 else if (id == "FPS_MEMORY_ENGINE")
                 {
-                    string pe = vault.ReadRegistryDisplay("HKLM", @"SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management", "DisablePagingExecutive", "");
-                    ok = autoStandbyCleanerActive || pe == "1";
-                    val = ok ? "Canlı RAM Koruma Aktif" : "";
-                    if (ok) detectedMod = 0;
+                    string pe = vault.ReadRegistryDisplay("HKLM", @"SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management", "DisablePagingExecutive", "0");
+                    string pf = vault.ReadRegistryDisplay("HKLM", @"SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management", "PagingFiles", "");
+                    bool peRisk = (pe == "1");
+                    bool hasNvmeDynamic = pf.IndexOf("M:", StringComparison.OrdinalIgnoreCase) >= 0 && pf.IndexOf("49152", StringComparison.OrdinalIgnoreCase) >= 0;
+
+                    if (peRisk)
+                    {
+                        ok = false;
+                        val = "⚠ RİSKLİ: DisablePagingExecutive=1 (RAM Kilitli — Takılma/Çökme Riski)";
+                        detectedMod = -1;
+                    }
+                    else
+                    {
+                        ok = true;
+                        if (hasNvmeDynamic)
+                        {
+                            val = "Aktif (Paging Serbest, NVMe Dinamik Pagefile)";
+                            detectedMod = 1;
+                        }
+                        else
+                        {
+                            val = "Aktif (Paging Serbest, DisablePagingExecutive=0)";
+                            detectedMod = 0;
+                        }
+                    }
                 }
                 else if (id == "FPS_DWM_VISUAL")
                 {
@@ -19509,33 +28188,326 @@ namespace ArgonLatencyStudio
             if (!isLoadingProfile) SaveUserProfileState();
         }
 
+        private sealed class AutoStartTaskInfo
+        {
+            public bool Exists;
+            public bool TaskEnabled;
+            public string CommandPath = "";
+            public string Arguments = "";
+            public string WorkingDirectory = "";
+            public bool DisallowOnBattery;
+            public bool StopOnBattery;
+            public string ExecutionTimeLimit = "";
+            public string TriggerUserId = "";
+            public bool PointsToCurrentExe;
+            public bool NeedsConfigUpgrade;
+            public bool IsHealthyAndActive;
+        }
+
+        private static string UnescapeXmlText(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return "";
+            return s.Replace("&lt;", "<")
+                    .Replace("&gt;", ">")
+                    .Replace("&quot;", "\"")
+                    .Replace("&apos;", "'")
+                    .Replace("&amp;", "&");
+        }
+
+        private static string ExtractXmlSectionText(string xml, string sectionTag)
+        {
+            if (string.IsNullOrEmpty(xml) || string.IsNullOrEmpty(sectionTag)) return "";
+            string openStart = "<" + sectionTag;
+            int idx = xml.IndexOf(openStart, StringComparison.OrdinalIgnoreCase);
+            if (idx < 0) return "";
+            int gt = xml.IndexOf('>', idx);
+            if (gt < 0) return "";
+            string closeTag = "</" + sectionTag + ">";
+            int endIdx = xml.IndexOf(closeTag, gt + 1, StringComparison.OrdinalIgnoreCase);
+            if (endIdx < 0) return "";
+            return xml.Substring(gt + 1, endIdx - (gt + 1));
+        }
+
+        private static string ExtractXmlTagText(string xml, string tagName)
+        {
+            string raw = ExtractXmlSectionText(xml, tagName);
+            return UnescapeXmlText(raw).Trim();
+        }
+
+        private static string NormalizePathSafe(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return "";
+            string s = path.Trim().Trim('"').Trim();
+            if (s.Length == 0) return "";
+            try { return Path.GetFullPath(s); }
+            catch { return s; }
+        }
+
+        private static int RunProcessCaptureExit(string file, string args, int timeoutMs, out string stdout, out string stderr)
+        {
+            stdout = "";
+            stderr = "";
+            try
+            {
+                ProcessStartInfo psi = new ProcessStartInfo(file, args)
+                {
+                    CreateNoWindow = true,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    WindowStyle = ProcessWindowStyle.Hidden
+                };
+                using (Process p = Process.Start(psi))
+                {
+                    if (p == null) return -1;
+                    stdout = p.StandardOutput.ReadToEnd() ?? "";
+                    stderr = p.StandardError.ReadToEnd() ?? "";
+                    p.WaitForExit(timeoutMs);
+                    return p.HasExited ? p.ExitCode : -1;
+                }
+            }
+            catch { return -1; }
+        }
+
+        private static void QueryAutoStartTaskXml(out bool taskExists, out bool comTaskEnabled, out string xmlText)
+        {
+            taskExists = false;
+            comTaskEnabled = true;
+            xmlText = "";
+
+            object sched = null;
+            object folder = null;
+            object task = null;
+            object def = null;
+            try
+            {
+                Type tSched = Type.GetTypeFromProgID("Schedule.Service");
+                if (tSched != null)
+                {
+                    sched = Activator.CreateInstance(tSched);
+                    tSched.InvokeMember("Connect", BindingFlags.InvokeMethod, null, sched, null);
+                    folder = tSched.InvokeMember("GetFolder", BindingFlags.InvokeMethod, null, sched, new object[] { "\\" });
+                    task = folder.GetType().InvokeMember("GetTask", BindingFlags.InvokeMethod, null, folder, new object[] { AutoStartTaskName });
+                    if (task != null)
+                    {
+                        taskExists = true;
+                        object enabledObj = task.GetType().InvokeMember("Enabled", BindingFlags.GetProperty, null, task, null);
+                        if (enabledObj is bool) comTaskEnabled = (bool)enabledObj;
+                        def = task.GetType().InvokeMember("Definition", BindingFlags.GetProperty, null, task, null);
+                        if (def != null)
+                        {
+                            object xmlObj = def.GetType().InvokeMember("XmlText", BindingFlags.GetProperty, null, def, null);
+                            if (xmlObj != null) xmlText = xmlObj.ToString();
+                        }
+                    }
+                    return;
+                }
+            }
+            catch (TargetInvocationException tie)
+            {
+                // 0x80070002 (ERROR_FILE_NOT_FOUND) or 0x8004130F means the task is simply not registered.
+                COMException ce = tie.InnerException as COMException;
+                if (ce != null && ((uint)ce.ErrorCode == 0x80070002u || (uint)ce.ErrorCode == 0x80070003u || (uint)ce.ErrorCode == 0x8004130Fu))
+                {
+                    taskExists = false;
+                    return;
+                }
+            }
+            catch { }
+            finally
+            {
+                try { if (def != null && Marshal.IsComObject(def)) Marshal.FinalReleaseComObject(def); } catch { }
+                try { if (task != null && Marshal.IsComObject(task)) Marshal.FinalReleaseComObject(task); } catch { }
+                try { if (folder != null && Marshal.IsComObject(folder)) Marshal.FinalReleaseComObject(folder); } catch { }
+                try { if (sched != null && Marshal.IsComObject(sched)) Marshal.FinalReleaseComObject(sched); } catch { }
+            }
+
+            // Fallback to schtasks XML query if Schedule.Service COM failed for an unexpected reason.
+            string stdout, stderr;
+            int code = RunProcessCaptureExit("schtasks", "/Query /TN \"" + AutoStartTaskName + "\" /XML", 5000, out stdout, out stderr);
+            if (code == 0 && !string.IsNullOrEmpty(stdout) && stdout.IndexOf("<Task", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                taskExists = true;
+                xmlText = stdout;
+            }
+        }
+
+        private AutoStartTaskInfo GetAutoStartTaskInfo()
+        {
+            AutoStartTaskInfo info = new AutoStartTaskInfo();
+            bool exists, comEnabled;
+            string xml;
+            QueryAutoStartTaskXml(out exists, out comEnabled, out xml);
+            info.Exists = exists;
+            if (!exists) return info;
+
+            string settingsXml = ExtractXmlSectionText(xml, "Settings");
+            string logonXml = ExtractXmlSectionText(xml, "LogonTrigger");
+            string execXml = ExtractXmlSectionText(xml, "Exec");
+
+            string settingsEnabled = ExtractXmlTagText(settingsXml, "Enabled");
+            string triggerEnabled = ExtractXmlTagText(logonXml, "Enabled");
+            info.TaskEnabled = comEnabled
+                && !string.Equals(settingsEnabled, "false", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(triggerEnabled, "false", StringComparison.OrdinalIgnoreCase);
+
+            info.CommandPath = NormalizePathSafe(ExtractXmlTagText(execXml, "Command"));
+            info.Arguments = ExtractXmlTagText(execXml, "Arguments");
+            info.WorkingDirectory = NormalizePathSafe(ExtractXmlTagText(execXml, "WorkingDirectory"));
+            info.DisallowOnBattery = string.Equals(ExtractXmlTagText(settingsXml, "DisallowStartIfOnBatteries"), "true", StringComparison.OrdinalIgnoreCase);
+            info.StopOnBattery = string.Equals(ExtractXmlTagText(settingsXml, "StopIfGoingOnBatteries"), "true", StringComparison.OrdinalIgnoreCase);
+            info.ExecutionTimeLimit = ExtractXmlTagText(settingsXml, "ExecutionTimeLimit");
+            info.TriggerUserId = ExtractXmlTagText(logonXml, "UserId");
+
+            string currentExe = NormalizePathSafe(Application.ExecutablePath);
+            info.PointsToCurrentExe = !string.IsNullOrEmpty(info.CommandPath)
+                && File.Exists(info.CommandPath)
+                && string.Equals(info.CommandPath, currentExe, StringComparison.OrdinalIgnoreCase);
+
+            bool hasTrayArg = (info.Arguments ?? "").IndexOf("--tray", StringComparison.OrdinalIgnoreCase) >= 0;
+            info.NeedsConfigUpgrade = !hasTrayArg
+                || string.IsNullOrEmpty(info.WorkingDirectory)
+                || info.DisallowOnBattery
+                || info.StopOnBattery
+                || !string.Equals(info.ExecutionTimeLimit, "PT0S", StringComparison.OrdinalIgnoreCase)
+                || string.IsNullOrEmpty(info.TriggerUserId);
+
+            info.IsHealthyAndActive = info.Exists && info.TaskEnabled && info.PointsToCurrentExe && hasTrayArg;
+            return info;
+        }
+
+        private static string GetCurrentUserIdForTask()
+        {
+            try
+            {
+                WindowsIdentity id = WindowsIdentity.GetCurrent();
+                if (id != null)
+                {
+                    if (id.User != null && !string.IsNullOrEmpty(id.User.Value)) return id.User.Value;
+                    if (!string.IsNullOrEmpty(id.Name)) return id.Name;
+                }
+            }
+            catch { }
+            return Environment.UserDomainName + "\\" + Environment.UserName;
+        }
+
+        private static string BuildAutoStartTaskXml(string exePath, string workingDir, string userId)
+        {
+            string safeExe = System.Security.SecurityElement.Escape(exePath ?? "");
+            string safeDir = System.Security.SecurityElement.Escape(workingDir ?? "");
+            string safeUser = System.Security.SecurityElement.Escape(userId ?? "");
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("<?xml version=\"1.0\" encoding=\"UTF-16\"?>");
+            sb.AppendLine("<Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">");
+            sb.AppendLine("  <RegistrationInfo>");
+            sb.AppendLine("    <Description>Argon Latency Studio otomatik tepsi baslangici</Description>");
+            sb.AppendLine("  </RegistrationInfo>");
+            sb.AppendLine("  <Triggers>");
+            sb.AppendLine("    <LogonTrigger>");
+            sb.AppendLine("      <Enabled>true</Enabled>");
+            if (!string.IsNullOrEmpty(safeUser))
+                sb.AppendLine("      <UserId>" + safeUser + "</UserId>");
+            sb.AppendLine("      <Delay>PT10S</Delay>");
+            sb.AppendLine("    </LogonTrigger>");
+            sb.AppendLine("  </Triggers>");
+            sb.AppendLine("  <Principals>");
+            sb.AppendLine("    <Principal id=\"Author\">");
+            if (!string.IsNullOrEmpty(safeUser))
+                sb.AppendLine("      <UserId>" + safeUser + "</UserId>");
+            sb.AppendLine("      <LogonType>InteractiveToken</LogonType>");
+            sb.AppendLine("      <RunLevel>HighestAvailable</RunLevel>");
+            sb.AppendLine("    </Principal>");
+            sb.AppendLine("  </Principals>");
+            sb.AppendLine("  <Settings>");
+            sb.AppendLine("    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>");
+            sb.AppendLine("    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>");
+            sb.AppendLine("    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>");
+            sb.AppendLine("    <AllowHardTerminate>true</AllowHardTerminate>");
+            sb.AppendLine("    <StartWhenAvailable>true</StartWhenAvailable>");
+            sb.AppendLine("    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>");
+            sb.AppendLine("    <IdleSettings>");
+            sb.AppendLine("      <StopOnIdleEnd>false</StopOnIdleEnd>");
+            sb.AppendLine("      <RestartOnIdle>false</RestartOnIdle>");
+            sb.AppendLine("    </IdleSettings>");
+            sb.AppendLine("    <AllowStartOnDemand>true</AllowStartOnDemand>");
+            sb.AppendLine("    <Enabled>true</Enabled>");
+            sb.AppendLine("    <Hidden>false</Hidden>");
+            sb.AppendLine("    <RunOnlyIfIdle>false</RunOnlyIfIdle>");
+            sb.AppendLine("    <WakeToRun>false</WakeToRun>");
+            sb.AppendLine("    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>");
+            sb.AppendLine("    <Priority>7</Priority>");
+            sb.AppendLine("  </Settings>");
+            sb.AppendLine("  <Actions Context=\"Author\">");
+            sb.AppendLine("    <Exec>");
+            sb.AppendLine("      <Command>" + safeExe + "</Command>");
+            sb.AppendLine("      <Arguments>--tray</Arguments>");
+            if (!string.IsNullOrEmpty(safeDir))
+                sb.AppendLine("      <WorkingDirectory>" + safeDir + "</WorkingDirectory>");
+            sb.AppendLine("    </Exec>");
+            sb.AppendLine("  </Actions>");
+            sb.AppendLine("</Task>");
+            return sb.ToString();
+        }
+
         private bool AutoStartTaskExists()
         {
             try
             {
-                string o = StateVault.RunCmdCaptureOutput("schtasks", "/Query /TN \"" + AutoStartTaskName + "\"");
-                return !string.IsNullOrEmpty(o) && o.IndexOf(AutoStartTaskName, StringComparison.OrdinalIgnoreCase) >= 0;
+                return GetAutoStartTaskInfo().IsHealthyAndActive;
             }
             catch { return false; }
         }
 
+        private string lastAutoStartError = "";
+
         private bool SetAutoStartTask(bool enable)
         {
+            lastAutoStartError = "";
             if (!isAdmin) return false;
+            string tmpXml = null;
             try
             {
                 if (enable)
                 {
-                    string exe = Application.ExecutablePath;
-                    StateVault.RunHiddenCmd("schtasks", "/Create /TN \"" + AutoStartTaskName + "\" /TR \"\\\"" + exe + "\\\" --tray\" /SC ONLOGON /RL HIGHEST /DELAY 0000:15 /F");
+                    string exe = NormalizePathSafe(Application.ExecutablePath);
+                    string exeDir = Path.GetDirectoryName(exe) ?? "";
+                    string userId = GetCurrentUserIdForTask();
+                    string xml = BuildAutoStartTaskXml(exe, exeDir, userId);
+                    tmpXml = Path.Combine(Path.GetTempPath(), "argon_autostart_" + Guid.NewGuid().ToString("N") + ".xml");
+                    File.WriteAllText(tmpXml, xml, Encoding.Unicode);
+
+                    string stdout, stderr;
+                    int exit = RunProcessCaptureExit("schtasks", "/Create /TN \"" + AutoStartTaskName + "\" /XML \"" + tmpXml + "\" /F", 5000, out stdout, out stderr);
+                    if (exit != 0)
+                    {
+                        lastAutoStartError = string.IsNullOrEmpty(stderr) ? stdout : stderr;
+                    }
+                    AutoStartTaskInfo verified = GetAutoStartTaskInfo();
+                    return verified.IsHealthyAndActive;
                 }
                 else
                 {
-                    StateVault.RunHiddenCmd("schtasks", "/Delete /TN \"" + AutoStartTaskName + "\" /F");
+                    string stdout, stderr;
+                    int exit = RunProcessCaptureExit("schtasks", "/Delete /TN \"" + AutoStartTaskName + "\" /F", 5000, out stdout, out stderr);
+                    if (exit != 0)
+                    {
+                        lastAutoStartError = string.IsNullOrEmpty(stderr) ? stdout : stderr;
+                    }
+                    return !GetAutoStartTaskInfo().Exists;
                 }
             }
-            catch { }
-            return AutoStartTaskExists() == enable;
+            catch (Exception ex)
+            {
+                lastAutoStartError = ex.Message;
+                return false;
+            }
+            finally
+            {
+                if (!string.IsNullOrEmpty(tmpXml))
+                {
+                    try { if (File.Exists(tmpXml)) File.Delete(tmpXml); } catch { }
+                }
+            }
         }
 
         private void OnAutoStartToggled()
@@ -19553,7 +28525,8 @@ namespace ArgonLatencyStudio
             if (!ok)
             {
                 suppressAutoStartHandler = true; chkAutoStart.Checked = !want; suppressAutoStartHandler = false;
-                lblInspectorTitle.Text = want ? "⚠️ Başlangıç görevi oluşturulamadı." : "⚠️ Başlangıç görevi silinemedi.";
+                string errSuffix = string.IsNullOrEmpty(lastAutoStartError) ? "" : (" (" + lastAutoStartError.Trim() + ")");
+                lblInspectorTitle.Text = (want ? "⚠️ Başlangıç görevi oluşturulamadı" : "⚠️ Başlangıç görevi silinemedi") + errSuffix;
             }
             else
             {
@@ -19567,14 +28540,38 @@ namespace ArgonLatencyStudio
         {
             ThreadPool.QueueUserWorkItem(_ =>
             {
-                bool exists = AutoStartTaskExists();
+                AutoStartTaskInfo info = GetAutoStartTaskInfo();
+                bool autoRepaired = false;
+                bool staleNotAdmin = false;
+                if (info.Exists && info.TaskEnabled && (!info.PointsToCurrentExe || info.NeedsConfigUpgrade))
+                {
+                    if (isAdmin)
+                    {
+                        autoRepaired = SetAutoStartTask(true);
+                        info = GetAutoStartTaskInfo();
+                    }
+                    else if (!info.PointsToCurrentExe)
+                    {
+                        staleNotAdmin = true;
+                    }
+                }
+
                 try
                 {
+                    if (this.IsDisposed || !this.IsHandleCreated) return;
                     this.BeginInvoke((MethodInvoker)delegate
                     {
+                        if (this.IsDisposed) return;
                         suppressAutoStartHandler = true;
-                        if (chkAutoStart != null) chkAutoStart.Checked = exists;
+                        if (chkAutoStart != null) chkAutoStart.Checked = info.IsHealthyAndActive;
                         suppressAutoStartHandler = false;
+                        if (!startHiddenInTray && lblInspectorTitle != null && !lblInspectorTitle.IsDisposed)
+                        {
+                            if (autoRepaired)
+                                lblInspectorTitle.Text = "🛠️ Eski başlangıç görevi geçerli Argon yoluna onarıldı (Tepsi / Yönetici).";
+                            else if (staleNotAdmin)
+                                lblInspectorTitle.Text = "⚠️ Mevcut başlangıç görevi eski/eksik bir dosyaya işaret ediyor. Onarmak için 'Yönetici Olarak Aç' kullanın.";
+                        }
                     });
                 }
                 catch { }
@@ -19651,7 +28648,33 @@ namespace ArgonLatencyStudio
                     presCountdownTimer.Dispose();
                     presCountdownTimer = null;
                 }
+                if (card3RawUiTimer != null)
+                {
+                    card3RawUiTimer.Stop();
+                    card3RawUiTimer.Dispose();
+                    card3RawUiTimer = null;
+                }
+                if (card3RawHook != null)
+                {
+                    card3RawHook.UnregisterAndDetach();
+                    card3RawHook = null;
+                }
+                if (card3RawTracker != null)
+                {
+                    card3RawTracker.Dispose();
+                    card3RawTracker = null;
+                }
                 StopSyntheticPulseThread();
+                if (linuxScrollEngine != null)
+                {
+                    try
+                    {
+                        linuxScrollEngine.Stop();
+                        linuxScrollEngine.Dispose();
+                        linuxScrollEngine = null;
+                    }
+                    catch { }
+                }
                 if (sensorEngine != null)
                 {
                     try { sensorEngine.Dispose(); } catch { }
@@ -19704,51 +28727,62 @@ namespace ArgonLatencyStudio
             {
                 if (pendingRebootCount > 0)
                 {
-                    lblLiveSystemStatusPill.Text = string.Format(Loc.T("⚠️ {0} / {1} Aktif ({2} Restart Bekliyor)", "⚠️ {0} / {1} Active ({2} Restart Pending)"), totalActive, allTweaks.Count, pendingRebootCount);
-                    lblLiveSystemStatusPill.ForeColor = Color.FromArgb(251, 191, 36);
+                    lblLiveSystemStatusPill.Text = string.Format(Loc.T("{0}/{1} Aktif ({2} Yeniden Başlatma)", "{0}/{1} Active ({2} Reboot)"), totalActive, allTweaks.Count, pendingRebootCount);
+                    lblLiveSystemStatusPill.ForeColor = ArgonTheme.Alert;
                 }
                 else if (pendingNetReloadCount > 0)
                 {
-                    lblLiveSystemStatusPill.Text = string.Format(Loc.T("⚡ {0} / {1} Aktif ({2} Ağ Yenileme)", "⚡ {0} / {1} Active ({2} Net Reload)"), totalActive, allTweaks.Count, pendingNetReloadCount);
-                    lblLiveSystemStatusPill.ForeColor = Color.FromArgb(56, 189, 248);
+                    lblLiveSystemStatusPill.Text = string.Format(Loc.T("{0}/{1} Aktif ({2} Ağ Yenileme)", "{0}/{1} Active ({2} Net Reload)"), totalActive, allTweaks.Count, pendingNetReloadCount);
+                    lblLiveSystemStatusPill.ForeColor = ArgonTheme.Accent;
                 }
                 else
                 {
-                    lblLiveSystemStatusPill.Text = string.Format(Loc.T("● Sistem: {0} / {1} Ayar Aktif", "● System: {0} / {1} Tweaks Active"), totalActive, allTweaks.Count);
-                    lblLiveSystemStatusPill.ForeColor = totalActive > 0 ? Color.FromArgb(52, 211, 153) : Color.FromArgb(148, 163, 184);
+                    lblLiveSystemStatusPill.Text = string.Format(Loc.T("Sistem: {0}/{1} Ayar Aktif", "System: {0}/{1} Tweaks Active"), totalActive, allTweaks.Count);
+                    lblLiveSystemStatusPill.ForeColor = totalActive > 0 ? ArgonTheme.Accent : ArgonTheme.TextMuted;
                 }
             }
 
             if (lblTopActiveCount != null)
             {
                 lblTopActiveCount.Text = string.Format(Loc.T("Aktif: {0} / {1}", "Active: {0} / {1}"), totalActive, allTweaks.Count);
-                lblTopActiveCount.ForeColor = totalActive > 0 ? Color.FromArgb(52, 211, 153) : Color.FromArgb(168, 85, 247);
+                lblTopActiveCount.ForeColor = totalActive > 0 ? ArgonTheme.Accent : ArgonTheme.TextMuted;
             }
 
-            if (navButtons.Count >= 6)
+            foreach (Button nb in navButtons)
             {
-                navButtons[0].Text = string.Format(Loc.T("Donanım ({0})", "Hardware ({0})"), hwActive);
-                navButtons[1].Text = string.Format(Loc.T("Ağ ({0}/{1})", "Network ({0}/{1})"), netActive, netTotal);
-                navButtons[2].Text = string.Format("Timer ({0}/{1})", latActive, latTotal);
-                navButtons[3].Text = string.Format(Loc.T("Grafik ({0}/{1})", "Graphics ({0}/{1})"), fpsActive, fpsTotal);
-                navButtons[4].Text = string.Format(Loc.T("Sistem ({0}/{1})", "System ({0}/{1})"), wuActive, wuTotal);
-                navButtons[5].Text = string.Format("Kernel ({0}/{1})", expActive, expTotal);
-                if (navButtons.Count >= 11)
-                {
-                    navButtons[6].Text = Loc.T("İşlemler", "Processes");
-                    navButtons[7].Text = Loc.T("Otomasyon", "Automation");
-                    navButtons[8].Text = Loc.T("Tanı Test", "Diagnostics");
-                    navButtons[9].Text = Loc.T("Günlük", "Event Log");
-                    navButtons[10].Text = Loc.T("Ayarlar", "Settings");
-                }
-
-                LayoutNavBarButtons();
+                int tag = (nb.Tag is int) ? (int)nb.Tag : -1;
+                if (tag == 11) nb.Text = "  " + Loc.T("Sistem Monitörü", "System Monitor");
+                else if (tag == 0) nb.Text = "  " + string.Format(Loc.T("Donanım ({0})", "Hardware ({0})"), hwActive);
+                else if (tag == 1) nb.Text = "  " + string.Format(Loc.T("Ağ ({0}/{1})", "Network ({0}/{1})"), netActive, netTotal);
+                else if (tag == 2) nb.Text = "  " + string.Format(Loc.T("Zamanlama ({0}/{1})", "Timer ({0}/{1})"), latActive, latTotal);
+                else if (tag == 3) nb.Text = "  " + string.Format(Loc.T("Grafik ({0}/{1})", "Graphics ({0}/{1})"), fpsActive, fpsTotal);
+                else if (tag == 4) nb.Text = "  " + string.Format(Loc.T("Windows ({0}/{1})", "Windows ({0}/{1})"), wuActive, wuTotal);
+                else if (tag == 5) nb.Text = "  " + string.Format(Loc.T("Çekirdek ({0}/{1})", "Kernel ({0}/{1})"), expActive, expTotal);
+                else if (tag == 6) nb.Text = "  " + Loc.T("İşlemler", "Processes");
+                else if (tag == 7) nb.Text = "  " + Loc.T("Otomasyon", "Automation");
+                else if (tag == 8) nb.Text = "  " + Loc.T("Tanı ve Ölçüm", "Diagnostics");
+                else if (tag == 9) nb.Text = "  " + Loc.T("Günlük", "Event Log");
+                else if (tag == 10) nb.Text = "  " + Loc.T("Ayarlar", "Settings");
             }
         }
 
         private void ApplySearchFilter(string query)
         {
             string q = (query ?? "").Trim().ToLowerInvariant();
+            if (flowGlobalSearchCards != null)
+            {
+                List<Control> nonCards = new List<Control>();
+                foreach (Control ctrl in flowGlobalSearchCards.Controls)
+                {
+                    if (!(ctrl is MultiVariationTweakCard)) nonCards.Add(ctrl);
+                }
+                foreach (Control nc in nonCards)
+                {
+                    flowGlobalSearchCards.Controls.Remove(nc);
+                    nc.Dispose();
+                }
+            }
+
             if (string.IsNullOrEmpty(q))
             {
                 // Return all cards to their original category containers
@@ -19763,11 +28797,13 @@ namespace ArgonLatencyStudio
                     card.Visible = true;
                 }
                 RefreshHardwareMatrixCards();
-                SwitchActiveTab(currentActiveTabIndex);
+                NavigateToPageKey(string.IsNullOrEmpty(currentPageKey) ? "tab:11" : currentPageKey, false);
                 return;
             }
 
-            // Global Search across ALL tabs and categories (HARDWARE, NETWORK, LATENCY, FPS, WINUTIL, EXPERIMENTAL)
+            // Global Search across ALL tabs, Winaero customize pages, and tweak categories
+            if (viewSystemMonitor != null) viewSystemMonitor.Visible = false;
+            if (viewCustomizePage != null) viewCustomizePage.Visible = false;
             viewDashboard.Visible = false;
             viewNetwork.Visible = false;
             viewLatency.Visible = false;
@@ -19782,11 +28818,103 @@ namespace ArgonLatencyStudio
             if (viewGlobalSearch != null) viewGlobalSearch.Visible = true;
 
             int matchCount = 0;
+            int customMatchCount = 0;
             int targetW = flowGlobalSearchCards != null ? Math.Max(520, flowGlobalSearchCards.ClientSize.Width - 24) : 810;
 
             if (flowGlobalSearchCards != null) flowGlobalSearchCards.SuspendLayout();
             try
             {
+                foreach (var p in allCustomizePages)
+                {
+                    bool pageMatch = (p.Title ?? "").ToLowerInvariant().Contains(q) ||
+                                     (p.Description ?? "").ToLowerInvariant().Contains(q) ||
+                                     (p.CategoryGroup ?? "").ToLowerInvariant().Contains(q) ||
+                                     (p.TargetRegistryPath ?? "").ToLowerInvariant().Contains(q);
+                    string matchedOpt = "";
+                    foreach (var opt in p.Options)
+                    {
+                        if ((opt.Label ?? "").ToLowerInvariant().Contains(q) ||
+                            (opt.RegistryPathHint ?? "").ToLowerInvariant().Contains(q))
+                        {
+                            pageMatch = true;
+                            matchedOpt = opt.Label;
+                            break;
+                        }
+                    }
+
+                    if (pageMatch && flowGlobalSearchCards != null)
+                    {
+                        customMatchCount++;
+                        CustomizePageDef capturedPage = p;
+                        Panel pnlPageHit = new Panel
+                        {
+                            Size = new Size(targetW, 56),
+                            BackColor = ArgonTheme.BgSurface,
+                            Margin = new Padding(0, 0, 0, 6),
+                            Cursor = Cursors.Hand
+                        };
+                        pnlPageHit.Paint += (ps, pe) =>
+                        {
+                            using (Pen bPen = new Pen(ArgonTheme.BorderSubtle, 1))
+                                pe.Graphics.DrawRectangle(bPen, 0, 0, pnlPageHit.Width - 1, pnlPageHit.Height - 1);
+                        };
+                        PictureBox pbHit = new PictureBox
+                        {
+                            Location = new Point(12, 12),
+                            Size = new Size(32, 32),
+                            SizeMode = PictureBoxSizeMode.CenterImage,
+                            Image = WindowsShellIcons.GetIcon(p.IconKey, 32)
+                        };
+                        Label lblHitTitle = new Label
+                        {
+                            Text = p.Title + "  [" + p.CategoryGroup + "]",
+                            Font = new Font("Segoe UI", 9.6f, FontStyle.Bold),
+                            ForeColor = ArgonTheme.Accent,
+                            Location = new Point(54, 8),
+                            Size = new Size(targetW - 190, 20),
+                            AutoEllipsis = true,
+                            UseMnemonic = false
+                        };
+                        Label lblHitSub = new Label
+                        {
+                            Text = string.IsNullOrEmpty(matchedOpt) ? p.Description : ("Eşleşen ayar: " + matchedOpt),
+                            Font = new Font("Segoe UI", 8.2f, FontStyle.Regular),
+                            ForeColor = ArgonTheme.TextSecondary,
+                            Location = new Point(54, 30),
+                            Size = new Size(targetW - 190, 18),
+                            AutoEllipsis = true,
+                            UseMnemonic = false
+                        };
+                        Button btnOpenPageHit = new Button
+                        {
+                            Text = "Sayfayı Aç",
+                            Font = new Font("Segoe UI", 8.4f, FontStyle.Bold),
+                            FlatStyle = FlatStyle.Flat,
+                            BackColor = ArgonTheme.Accent,
+                            ForeColor = Color.White,
+                            Location = new Point(targetW - 120, 14),
+                            Size = new Size(106, 28),
+                            UseMnemonic = false,
+                            Cursor = Cursors.Hand
+                        };
+                        btnOpenPageHit.FlatAppearance.BorderSize = 0;
+                        EventHandler openHit = (hs, he) =>
+                        {
+                            if (txtGlobalSearch != null) txtGlobalSearch.Text = "";
+                            NavigateToPageKey("page:" + capturedPage.PageKey, true);
+                        };
+                        pnlPageHit.Click += openHit;
+                        lblHitTitle.Click += openHit;
+                        lblHitSub.Click += openHit;
+                        btnOpenPageHit.Click += openHit;
+                        pnlPageHit.Controls.Add(pbHit);
+                        pnlPageHit.Controls.Add(lblHitTitle);
+                        pnlPageHit.Controls.Add(lblHitSub);
+                        pnlPageHit.Controls.Add(btnOpenPageHit);
+                        flowGlobalSearchCards.Controls.Add(pnlPageHit);
+                    }
+                }
+
                 foreach (var card in allCards)
                 {
                     var t = card.Tweak;
@@ -19835,8 +28963,8 @@ namespace ArgonLatencyStudio
 
             if (lblGlobalSearchHeader != null)
             {
-                lblGlobalSearchHeader.Text = string.Format("TÜM SEKMELERDE GENEL ARAMA SONUÇLARI ('{0}' için {1} / {2} ayar bulundu):",
-                    query.Trim(), matchCount, allCards.Count);
+                lblGlobalSearchHeader.Text = string.Format("GENEL ARAMA SONUÇLARI ('{0}' için {1} özelleştirme sayfası, {2} performans ayarı bulundu):",
+                    query.Trim(), customMatchCount, matchCount);
             }
         }
 
@@ -19912,29 +29040,32 @@ namespace ArgonLatencyStudio
             syntheticPulseThread = null;
         }
 
-        private void ExecuteSmartRamAndStandbyPurge(bool protectForegroundGame)
+        private void ExecuteSmartRamAndStandbyPurge(bool protectForegroundGame, bool trimWorkingSets = false)
         {
             ThreadPool.QueueUserWorkItem(_ =>
             {
                 try
                 {
-                    IntPtr fgHwnd = NativeMethods.GetForegroundWindow();
-                    uint fgPid = 0;
-                    if (fgHwnd != IntPtr.Zero)
-                        NativeMethods.GetWindowThreadProcessId(fgHwnd, out fgPid);
-
                     int trimmed = 0;
-                    foreach (Process p in Process.GetProcesses())
+                    if (trimWorkingSets)
                     {
-                        try
+                        IntPtr fgHwnd = NativeMethods.GetForegroundWindow();
+                        uint fgPid = 0;
+                        if (fgHwnd != IntPtr.Zero)
+                            NativeMethods.GetWindowThreadProcessId(fgHwnd, out fgPid);
+
+                        foreach (Process p in Process.GetProcesses())
                         {
-                            if (p.Id <= 4 || p.HasExited) continue;
-                            if (protectForegroundGame && (p.Id == fgPid || p.Id == Process.GetCurrentProcess().Id))
-                                continue;
-                            if (NativeMethods.SetProcessWorkingSetSize(p.Handle, -1, -1))
-                                trimmed++;
+                            try
+                            {
+                                if (p.Id <= 4 || p.HasExited) continue;
+                                if (protectForegroundGame && (p.Id == fgPid || p.Id == Process.GetCurrentProcess().Id))
+                                    continue;
+                                if (NativeMethods.SetProcessWorkingSetSize(p.Handle, -1, -1))
+                                    trimmed++;
+                            }
+                            catch { }
                         }
-                        catch { }
                     }
 
                     bool standbyPurged = false;
@@ -19953,9 +29084,17 @@ namespace ArgonLatencyStudio
                     {
                         UpdateTelemetryBar();
                         if (standbyPurged)
-                            lblInspectorTitle.Text = string.Format("🧹 Akıllı Bellek Temizliği Tamamlandı: {0} arka plan sürecinin çalışma kümesi ve Standby önbelleği boşaltıldı.", trimmed);
+                        {
+                            lblInspectorTitle.Text = trimWorkingSets
+                                ? string.Format("🧹 Bellek Temizliği: {0} arka plan sürecinin çalışma kümesi ve Standby önbelleği boşaltıldı.", trimmed)
+                                : "🧹 Güvenli Standby Temizliği Tamamlandı: Süreç budaması yapılmadan (takılma riski olmadan) Standby önbelleği boşaltıldı.";
+                        }
                         else
-                            lblInspectorTitle.Text = string.Format("🧹 Bellek Temizliği: {0} arka plan sürecinin çalışma kümesi küçültüldü. Standby önbelleği temizlenemedi (Yönetici yetkisi gerekli).", trimmed);
+                        {
+                            lblInspectorTitle.Text = trimWorkingSets
+                                ? string.Format("🧹 Bellek Temizliği: {0} sürecin çalışma kümesi küçültüldü. Standby önbelleği için Yönetici yetkisi gerekir.", trimmed)
+                                : "🧹 Standby önbelleği boşaltılamadı (Yönetici yetkisi / SeProfileSingleProcessPrivilege gerekli).";
+                        }
                     });
                 }
                 catch { }
@@ -20288,6 +29427,14 @@ namespace ArgonLatencyStudio
         private void RefreshSnapshotAuditView()
         {
             if (lvAuditLog == null) return;
+            bool isLight = ArgonTheme.IsLightMode;
+            Color colRegModified = isLight ? Color.FromArgb(24, 28, 34) : Color.FromArgb(238, 242, 246);
+            Color colPowerAndActive = isLight ? Color.FromArgb(15, 118, 110) : Color.FromArgb(134, 239, 172);
+            Color colSpiWarm = isLight ? Color.FromArgb(146, 64, 14) : Color.FromArgb(253, 224, 71);
+            Color colProcess = isLight ? Color.FromArgb(91, 33, 182) : Color.FromArgb(216, 180, 254);
+            Color colOsDetected = isLight ? Color.FromArgb(30, 64, 175) : Color.FromArgb(226, 232, 240);
+            Color colDefaultIdle = isLight ? Color.FromArgb(82, 92, 108) : Color.FromArgb(172, 182, 198);
+
             lvAuditLog.BeginUpdate();
             lvAuditLog.Items.Clear();
 
@@ -20297,7 +29444,7 @@ namespace ArgonLatencyStudio
                 item.SubItems.Add(reg.HiveName + "\\" + reg.SubKey + "\\" + reg.ValueName);
                 item.SubItems.Add(reg.ExistedBefore ? reg.SerializedValue : "<Yoktu - Silinecek>");
                 item.SubItems.Add(reg.CurrentAppliedSummary);
-                item.ForeColor = Color.FromArgb(56, 189, 248);
+                item.ForeColor = colRegModified;
                 lvAuditLog.Items.Add(item);
             }
 
@@ -20307,7 +29454,7 @@ namespace ArgonLatencyStudio
                 item.SubItems.Add("powrprof.dll (Active Power Scheme)");
                 item.SubItems.Add(vault.OriginalPowerScheme.ToString());
                 item.SubItems.Add("Argon Session Plan (" + vault.PowerSettingRequests.Count + " alt ayar)");
-                item.ForeColor = Color.FromArgb(52, 211, 153);
+                item.ForeColor = colPowerAndActive;
                 lvAuditLog.Items.Add(item);
             }
 
@@ -20317,7 +29464,7 @@ namespace ArgonLatencyStudio
                 item.SubItems.Add("user32.dll!SystemParametersInfo(SPI_SETMOUSE)");
                 item.SubItems.Add(string.Format("Speed={0}, Sens={1}", vault.OriginalMouseAccel[2], vault.OriginalMouseSensitivity));
                 item.SubItems.Add("1:1 Raw (İvmesiz)");
-                item.ForeColor = Color.FromArgb(251, 191, 36);
+                item.ForeColor = colSpiWarm;
                 lvAuditLog.Items.Add(item);
             }
 
@@ -20327,7 +29474,7 @@ namespace ArgonLatencyStudio
                 item.SubItems.Add("user32.dll!SPI_SETKEYBOARDDELAY/SPEED");
                 item.SubItems.Add(string.Format("Delay={0}, Speed={1}", vault.OriginalKeyboardDelay, vault.OriginalKeyboardSpeed));
                 item.SubItems.Add("Delay=0, Speed=31 (Maksimum)");
-                item.ForeColor = Color.FromArgb(251, 191, 36);
+                item.ForeColor = colSpiWarm;
                 lvAuditLog.Items.Add(item);
             }
 
@@ -20337,7 +29484,7 @@ namespace ArgonLatencyStudio
                 item.SubItems.Add("user32.dll!SystemParametersInfo(SPI_SETFILTERKEYS)");
                 item.SubItems.Add(string.Format("Flags={0}, Delay={1}ms, Repeat={2}ms", vault.OriginalFilterKeys.dwFlags, vault.OriginalFilterKeys.iDelayMSec, vault.OriginalFilterKeys.iRepeatMSec));
                 item.SubItems.Add("0ms Wait/Bounce + Rapid Repeat");
-                item.ForeColor = Color.FromArgb(251, 191, 36);
+                item.ForeColor = colSpiWarm;
                 lvAuditLog.Items.Add(item);
             }
 
@@ -20347,7 +29494,7 @@ namespace ArgonLatencyStudio
                 item.SubItems.Add("PID: " + pb.Pid);
                 item.SubItems.Add(string.Format("{0} | Mask=0x{1:X}", pb.OriginalPriority, pb.OriginalAffinity));
                 item.SubItems.Add("Optimize Edildi");
-                item.ForeColor = Color.FromArgb(168, 85, 247);
+                item.ForeColor = colProcess;
                 lvAuditLog.Items.Add(item);
             }
 
@@ -20367,8 +29514,8 @@ namespace ArgonLatencyStudio
 
                 item.SubItems.Add(liveStatus);
                 item.ForeColor = t.IsEnabled
-                    ? Color.FromArgb(52, 211, 153)
-                    : (t.IsDetectedActiveInOs ? Color.FromArgb(56, 189, 248) : Color.FromArgb(148, 163, 184));
+                    ? colPowerAndActive
+                    : (t.IsDetectedActiveInOs ? colOsDetected : colDefaultIdle);
                 lvAuditLog.Items.Add(item);
             }
 
@@ -20599,60 +29746,90 @@ namespace ArgonLatencyStudio
             presCountdownTimer.Start();
         }
 
-        private void OnMouseTestAreaMove(object sender, MouseEventArgs e)
+        private void OnCard3RawMouse(IntPtr hRawInput)
         {
-            long now = Stopwatch.GetTimestamp();
-            if (lastMouseTick != 0)
+            if (currentActiveTabIndex != 8 || card3RawTracker == null || pnlMouseTestArea == null || !pnlMouseTestArea.Visible)
+                return;
+            if (!this.ContainsFocus)
+                return;
+            Point localPt = pnlMouseTestArea.PointToClient(Cursor.Position);
+            if (!pnlMouseTestArea.ClientRectangle.Contains(localPt))
+                return;
+            card3RawTracker.RecordRawMouseMessage(hRawInput);
+        }
+
+        private void ResetCard3RawTracker()
+        {
+            if (card3RawTracker != null) card3RawTracker.Reset();
+            if (lblMouseHzLive != null)
             {
-                double deltaMs = ((now - lastMouseTick) * 1000.0) / Stopwatch.Frequency;
-                if (deltaMs >= 0.08 && deltaMs <= 40.0)
+                lblMouseHzLive.ForeColor = Color.FromArgb(52, 211, 153);
+                lblMouseHzLive.Text = "Fareyi bu siyah alan içinde dairesel hareket ettirin (WM_INPUT Hazır)...";
+            }
+            if (lblMouseDeltaLive != null)
+            {
+                lblMouseDeltaLive.Text = "WM_INPUT Host Teslimat Aralığı: -- ms | Batch(<0.12ms): -- | Kopma(>2.5x): -- | P95: --\r\nNot: OS Raw Input teslimat zamanlamasıdır (sensör taraması veya click-to-photon gecikmesi değildir).";
+            }
+            if (lblMouseDeviceHint != null)
+            {
+                lblMouseDeviceHint.Text = "Aygıt: Sıfırlandı | Siyah alanda hareket ettirin | USB ağaç & grafik için -> InputLab";
+            }
+        }
+
+        private void RefreshCard3RawInputUi()
+        {
+            if (currentActiveTabIndex != 8 || card3RawTracker == null || lblMouseHzLive == null || !pnlMouseTestArea.Visible)
+                return;
+
+            InputDeliveryMetrics m = card3RawTracker.ComputeMetrics(256);
+            if (m.SampleCount == 0) return;
+
+            string qualityTag = (m.JitterStdDevMs < 0.25 && m.GapCount == 0) ? "🟢 Kararlı Host Teslimatı"
+                              : (m.JitterStdDevMs < 0.65 && m.GapCount <= 3) ? "🟡 Hafif OS Batching / Dalgalanma"
+                              : "🔴 Belirgin Jitter veya Paket Atlaması";
+
+            string hzText = string.Format(
+                "Medyan: {0:0} Hz ({1:0.000} ms)  |  Ort: {2:0} Hz  |  Tutarlılık: %{3:0.0}  [{4}]",
+                m.EquivalentMedianHz, m.MedianDeltaMs, m.EquivalentAvgHz, m.ConsistencyScore, qualityTag);
+
+            if (lblMouseHzLive.Text != hzText)
+            {
+                lblMouseHzLive.ForeColor = (m.GapCount == 0 && m.JitterStdDevMs < 0.35)
+                    ? Color.FromArgb(52, 211, 153)
+                    : (m.GapCount <= 3 && m.JitterStdDevMs < 0.85 ? Color.FromArgb(251, 191, 36) : Color.FromArgb(248, 113, 113));
+                lblMouseHzLive.Text = hzText;
+            }
+
+            string deltaText = string.Format(
+                "Örnek: {0} | σ Jitter: ±{1:0.000} ms | P95: {2:0.00} ms | Batch(<0.12ms): %{3:0.0} | Kopma(>2.5x): {4}\r\nNot: WM_INPUT OS host teslimat aralığıdır (sensör taraması / click-to-photon gecikmesi değildir).",
+                m.SampleCount, m.JitterStdDevMs, m.P95DeltaMs, m.BatchPercent, m.GapCount);
+
+            if (lblMouseDeltaLive.Text != deltaText)
+                lblMouseDeltaLive.Text = deltaText;
+
+            if (lblMouseDeviceHint != null)
+            {
+                string devShort = string.IsNullOrEmpty(m.ActiveDeviceName) ? ("Handle 0x" + m.ActiveDeviceHandle.ToInt64().ToString("X")) : m.ActiveDeviceName;
+                if (devShort.Length > 76) devShort = "..." + devShort.Substring(devShort.Length - 73);
+                string devLine = string.Format("Aygıt: {0}  (Çift tık = Sıfırla)", devShort);
+                if (lblMouseDeviceHint.Text != devLine)
+                    lblMouseDeviceHint.Text = devLine;
+            }
+
+            // Automatic conflict protection if 2000Hz+ host delivery detected while Queue is set to tight value (32)
+            if (m.SampleCount >= 40 && m.EquivalentMedianHz >= 1750)
+            {
+                TweakDefinition hid = FindTweak("LAT_HID_QUEUE");
+                if (hid != null && hid.IsEnabled && (hid.SelectedVariationIndex == 1 || (hid.CustomParam != null && hid.CustomParam.CurrentCustomValue > 0 && hid.CustomParam.CurrentCustomValue < 50)))
                 {
-                    double hz = 1000.0 / deltaMs;
-                    mouseHzHistory.Add(hz);
-                    if (mouseHzHistory.Count > 40) mouseHzHistory.RemoveAt(0);
-
-                    mouseDeltaHistory.Add(deltaMs);
-                    if (mouseDeltaHistory.Count > 40) mouseDeltaHistory.RemoveAt(0);
-
-                    double sum = 0, peak = 0;
-                    foreach (double h in mouseHzHistory) { sum += h; if (h > peak) peak = h; }
-                    double avg = sum / mouseHzHistory.Count;
-
-                    // InputLab Jitter & Stability Metrics (moneks1106-code/InputLab)
-                    double sumDelta = 0;
-                    foreach (double d in mouseDeltaHistory) sumDelta += d;
-                    double avgDelta = sumDelta / mouseDeltaHistory.Count;
-
-                    double varSum = 0;
-                    foreach (double d in mouseDeltaHistory)
-                    {
-                        double diff = d - avgDelta;
-                        varSum += diff * diff;
-                    }
-                    double jitter = Math.Sqrt(varSum / mouseDeltaHistory.Count);
-                    double stability = Math.Max(0.0, Math.Min(100.0, 100.0 - (jitter / Math.Max(0.1, avgDelta) * 50.0)));
-                    string rating = (jitter < 0.25) ? "🟢 Espor Kararlı" : (jitter < 0.65 ? "🟡 Kabul Edilebilir" : "🔴 Jitter Dalgalanması");
-
-                    lblMouseHzLive.Text = string.Format("Anlık: {0:0} Hz   |   Ortalama: {1:0} Hz   |   Tepe: {2:0} Hz", hz, avg, peak);
-                    lblMouseDeltaLive.Text = string.Format("Raporlama Aralığı: {0:0.00} ms (Hedef: {1:0.00} ms) | Jitter: ±{2:0.00} ms | Tutarlılık: %{3:0.0} | {4}", deltaMs, avgDelta, jitter, stability, rating);
-
-                    // Automatic conflict protection if 2000Hz+ mouse detected while Queue is set to low value (32)
-                    if (avg >= 1750)
-                    {
-                        TweakDefinition hid = FindTweak("LAT_HID_QUEUE");
-                        if (hid != null && hid.IsEnabled && (hid.SelectedVariationIndex == 1 || (hid.CustomParam != null && hid.CustomParam.CurrentCustomValue > 0 && hid.CustomParam.CurrentCustomValue < 50)))
-                        {
-                            hid.SelectedVariationIndex = 2; // Switch to 64 (4K/8K Safe Queue)
-                            hid.Variations[2].ApplyAction();
-                            foreach (var c in allCards) if (c.Tweak == hid) c.RefreshVisualState();
-                            lblInspectorTitle.Text = Loc.T(
-                                "🔗 2000Hz+ Yüksek Polling Fare Algılandı: HID Kuyruğu Taşma Koruması İçin Mod 3 (Kuyruk=64) Yapıldı!",
-                                "🔗 2000Hz+ High Polling Mouse Detected: Upgraded to Mode 3 (Queue=64) to prevent overflow!");
-                        }
-                    }
+                    hid.SelectedVariationIndex = 2; // Switch to 64 (4K/8K Safe Queue)
+                    hid.Variations[2].ApplyAction();
+                    foreach (var c in allCards) if (c.Tweak == hid) c.RefreshVisualState();
+                    lblInspectorTitle.Text = Loc.T(
+                        "🔗 2000Hz+ Yüksek Polling Fare Algılandı: HID Kuyruğu Taşma Koruması İçin Mod 3 (Kuyruk=64) Yapıldı!",
+                        "🔗 2000Hz+ High Polling Mouse Detected: Upgraded to Mode 3 (Queue=64) to prevent overflow!");
                 }
             }
-            lastMouseTick = now;
         }
 
         private void OnTelemetryTick(object sender, EventArgs e)
@@ -20689,15 +29866,7 @@ namespace ArgonLatencyStudio
                 AutoSyncLiveOsTruthInBackground();
             }
 
-            TweakDefinition memEngine = FindTweak("FPS_MEMORY_ENGINE");
-            if (tickCounter % 60 == 0 && autoStandbyCleanerActive && memEngine != null && memEngine.IsEnabled)
-            {
-                NativeMethods.MEMORYSTATUSEX mem = new NativeMethods.MEMORYSTATUSEX();
-                if (NativeMethods.GlobalMemoryStatusEx(mem) && mem.dwMemoryLoad >= 75)
-                {
-                    ExecuteSmartRamAndStandbyPurge(true);
-                }
-            }
+            // Note: Auto RAM cleaner / WorkingSet stripping during gaming is permanently disabled to prevent disk write storms and 1-2s stutter freezes.
 
             // Otomasyon & QoL Periyodik Kontrol Motoru (Güç, Kripto/Rutin Alarmlar, Oyun Notları, RAM Eşiği)
             ProcessQoLAutomationTick();
@@ -20985,7 +30154,7 @@ namespace ArgonLatencyStudio
                         if (txtHwCpuTelemetry != null)
                         {
                             txtHwCpuTelemetry.Text = cpuLine;
-                            txtHwCpuTelemetry.ForeColor = sensorEngine.CpuPackageTemp >= 82 ? Color.FromArgb(248, 113, 113) : Color.FromArgb(251, 146, 60);
+                            txtHwCpuTelemetry.ForeColor = sensorEngine.CpuPackageTemp >= 82 ? ArgonTheme.Alert : ArgonTheme.TextSecondary;
                         }
                     }
                     else if (txtHwCpuTelemetry != null)
@@ -21051,6 +30220,8 @@ namespace ArgonLatencyStudio
                 }
             }
             catch { }
+
+            UpdateSystemMonitorLiveTelemetry();
         }
 
         private void RunAsyncPingCheck()

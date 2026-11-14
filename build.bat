@@ -1,5 +1,5 @@
 @echo off
-setlocal
+setlocal EnableDelayedExpansion
 echo ========================================================
 echo   Argon Low Latency Studio v4.0 (2026 Edition) Compiler
 echo ========================================================
@@ -20,9 +20,14 @@ if exist "%OUT_EXE%" (
     )
 )
 
+set ICON_RES=
+for %%F in (assets\icons\*.png) do (
+    set ICON_RES=!ICON_RES! /resource:"%%F",argon.icons.%%~nxF
+)
+
 echo.
 echo Compiling src\ArgonLatencyStudio.cs to %OUT_EXE%...
-%CSC% /target:winexe /optimize+ /platform:x64 /win32icon:"app.ico" /r:"lib\LibreHardwareMonitorLib.dll" /out:"%OUT_EXE%" "src\ArgonLatencyStudio.cs"
+%CSC% /target:winexe /optimize+ /platform:x64 /win32icon:"app.ico" /win32manifest:"app.manifest" /r:"lib\LibreHardwareMonitorLib.dll" %ICON_RES% /out:"%OUT_EXE%" "src\ArgonLatencyStudio.cs"
 
 if %ERRORLEVEL% NEQ 0 (
     echo.
