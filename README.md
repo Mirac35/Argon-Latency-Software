@@ -43,7 +43,17 @@ Arşivi açtıktan sonra `Argon_UltraLowLatency_v4.0.exe` dosyasını çalışt�
 
 - **Geri Alınabilirlik:** Uygulanan tüm kayıt defteri ve güç ayarları StateVault günlüğünde saklanır; *Fabrika Sıfırla* ile eski haline döndürülebilir.
 - **Sınırlar:** Windows Defender, güvenlik duvarı, SmartScreen veya donanımsal termal/voltaj korumalarına dokunulmaz.
+- **Sıfır Telemetri ve Taşınabilir Yapı:** Kurulum sihirbazı, gizli arka plan servisi veya dışarıya veri gönderen telemetri içermez. Yalnızca siz açtığınızda başlangıçta çalışır; klasörü sildiğinizde sistemde kalıntı bırakmaz.
+- **Açık Kaynak ve Doğrulanabilir Derleme:** Tüm uygulama mantığı doğrudan [src/ArgonLatencyStudio.cs](src/ArgonLatencyStudio.cs) içindedir. İçiniz rahat etmesi için indirdiğiniz sürümün SHA-256 özetini kontrol edebilir veya `build.bat` ile kendi bilgisayarınızda sıfırdan derleyebilirsiniz.
+- **SmartScreen Uyarısı Hakkında:** Bağımsız açık kaynaklı bir araç olduğu için ücretli EV kod imzası taşımaz; ilk çalıştırmada Windows SmartScreen uyarısı görürseniz aşağıdaki SHA-256 değerlerini doğrulayarak güvenle çalıştırabilirsiniz.
 - **Performans Notu:** Seçili bir profille sahibinin test makinesinde sıcaklıklar korunarak %3–5 FPS artışı gözlemlenmiştir; kazanç donanıma ve oyuna göre değişebilir.
+
+### v4.0 SHA-256 Doğrulama
+
+```text
+Argon_Latency_Studio_v4.0_x64.zip : 7BDA00308762B065677AD91CACED1CCEFA6D546E8C9018998B99280136373EF8
+Argon_UltraLowLatency_v4.0.exe    : C6C85AD2D40C6CD3C1835FB79A4F56606B42DC36FF873CB7F856A4F8FCE30DD1
+```
 
 ---
 
