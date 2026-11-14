@@ -17,3 +17,8 @@ obj/
 user_saved_profile.txt
 original_baseline_backup.txt
 *.zip
+
+# Local development & AI workflow notes
+GEMINI.md
+EXTERNAL_GITHUB_RESEARCH.md
+ARGON_NEXT_MILESTONE_PROMPT.md
